@@ -1,30 +1,5 @@
 #!/usr/bin/env python3
-"""Build and verify the DVCQG province/agency/commune catalog.
-
-Workflow
---------
-1. Read the province-level records discovered from the national
-   service-results response (data/config/departments.json).
-2. For each province, use its departmentId as rootDepartmentId in the
-   province-scoped service-results request.
-3. Verify that the returned overview/evaluation belongs to the requested
-   province.
-4. Save the exact API response as RAW JSON.
-5. Extract province, AGENCY and COMMUNE records into catalog JSON files.
-
-This script does NOT invent UUIDs. A province rootDepartmentId is considered
-verified only after the province-scoped API request returns data whose
-province code/name matches the requested province.
-
-Examples
---------
-python tools/crawl_catalog.py --year 2026 --limit 1 --headed
-python tools/crawl_catalog.py --year 2026 --all --headed
-python tools/crawl_catalog.py --year 2026 --province-code H44
-
-The API commonly returns HTTP 201 for successful POST requests. 201 is treated
-as success.
-"""
+"""Build and verify the DVCQG province/agency/commune catalog."""
 
 from __future__ import annotations
 
@@ -60,9 +35,7 @@ def normal_name(value: Any) -> str:
 
 def load_provinces() -> list[dict[str, Any]]:
     if not PROVINCE_DISCOVERY.exists():
-        raise FileNotFoundError(
-            f"Missing {PROVINCE_DISCOVERY}. Run discover_dvc_structure.py first."
-        )
+        raise FileNotFoundError(f"Missing {PROVINCE_DISCOVERY}. Run discover_dvc_structure.py first.")
 
     payload = json.loads(PROVINCE_DISCOVERY.read_text(encoding="utf-8"))
     rows = payload.get("unclassified", [])
@@ -73,10 +46,6 @@ def load_provinces() -> list[dict[str, Any]]:
         name = normal_name(row.get("departmentName"))
         department_id = normal_name(row.get("departmentId"))
         child_group = row.get("childGroup")
-
-        # The national response currently exposes province-level records with
-        # childGroup == null and province codes such as H20. Do not rely solely
-        # on naming; require a department code and UUID-like non-empty ID.
         if not code or not name or not department_id or child_group is not None:
             continue
         if not code.startswith("H"):
@@ -87,49 +56,101 @@ def load_provinces() -> list[dict[str, Any]]:
             "departmentCode": code,
         })
 
-    # Stable, deterministic order.
     provinces.sort(key=lambda x: x["departmentCode"])
-
-    # De-duplicate by department code; retain the first record.
     dedup: dict[str, dict[str, Any]] = {}
     for row in provinces:
         dedup.setdefault(row["departmentCode"], row)
     return list(dedup.values())
 
 
-def request_json(context, payload: dict[str, Any], timeout_ms: int, retries: int, delay: float) -> tuple[int, str]:
+def request_json_via_browser(page, payload: dict[str, Any], timeout_ms: int) -> tuple[int, str, str]:
+    """POST from the actual DVCQG page context.
+
+    This is preferred over Playwright's separate APIRequestContext because the
+    live page has the exact browser origin, cookies and request environment used
+    by the website itself.
+    """
+    result = page.evaluate(
+        """
+        async ({url, payload}) => {
+          const res = await fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Accept': 'application/json, text/plain, */*',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+          const text = await res.text();
+          return {
+            status: res.status,
+            contentType: res.headers.get('content-type') || '',
+            text
+          };
+        }
+        """,
+        {"url": ENDPOINT, "payload": payload},
+    )
+    return int(result["status"]), str(result.get("text", "")), str(result.get("contentType", ""))
+
+
+def request_json_via_context(context, payload: dict[str, Any], timeout_ms: int) -> tuple[int, str, str]:
+    """Fallback request using the browser-context API client."""
+    response: APIResponse = context.request.post(
+        ENDPOINT,
+        data=json.dumps(payload, ensure_ascii=False),
+        headers={
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Origin": "https://dichvucong.gov.vn",
+            "Referer": SOURCE_URL,
+        },
+        timeout=timeout_ms,
+    )
+    return response.status, response.text(), response.headers.get("content-type", "")
+
+
+def request_json(page, context, payload: dict[str, Any], timeout_ms: int, retries: int, delay: float) -> tuple[int, str, str]:
     last_error: Exception | None = None
 
     for attempt in range(retries + 1):
         try:
-            response: APIResponse = context.request.post(
-                ENDPOINT,
-                data=json.dumps(payload, ensure_ascii=False),
-                headers={
-                    "Accept": "application/json, text/plain, */*",
-                    "Content-Type": "application/json",
-                    "Origin": "https://dichvucong.gov.vn",
-                    "Referer": SOURCE_URL,
-                },
-                timeout=timeout_ms,
-            )
-            status = response.status
-            text = response.text()
+            status, text, content_type = request_json_via_browser(page, payload, timeout_ms)
 
             if status in (200, 201):
-                return status, text
+                if text.lstrip().startswith(("{", "[")):
+                    return status, text, content_type
+
+                # Some responses can be unusual/empty in page.fetch. Fall back
+                # to the context client before declaring failure.
+                try:
+                    print("    Browser fetch returned non-JSON body; trying context.request fallback...")
+                    s2, t2, ct2 = request_json_via_context(context, payload, timeout_ms)
+                    if s2 in (200, 201) and t2.lstrip().startswith(("{", "[")):
+                        return s2, t2, ct2
+                    status, text, content_type = s2, t2, ct2
+                except Exception as fallback_exc:
+                    last_error = fallback_exc
+
+                preview = text[:300].replace("\r", " ").replace("\n", " ")
+                if attempt >= retries:
+                    raise RuntimeError(
+                        f"HTTP {status} returned non-JSON response (content-type={content_type!r}, "
+                        f"body-preview={preview!r})"
+                    )
 
             retryable = status == 429 or 500 <= status <= 599
-            if not retryable:
-                return status, text
+            if not retryable and status not in (200, 201):
+                return status, text, content_type
 
             if attempt < retries:
                 wait = delay * (2 ** attempt)
                 print(f"    HTTP {status}; retrying in {wait:.1f}s...")
                 time.sleep(wait)
                 continue
-            return status, text
-        except Exception as exc:  # network/timeout
+            return status, text, content_type
+        except Exception as exc:
             last_error = exc
             if attempt < retries:
                 wait = delay * (2 ** attempt)
@@ -142,6 +163,8 @@ def request_json(context, payload: dict[str, Any], timeout_ms: int, retries: int
 
 
 def parse_response(text: str) -> dict[str, Any]:
+    if not text or not text.strip():
+        raise ValueError("API response body is empty")
     payload = json.loads(text)
     if not isinstance(payload, dict):
         raise ValueError("API response is not a JSON object")
@@ -162,28 +185,22 @@ def verify_and_extract(
 
     expected_code = province["departmentCode"]
     expected_name = province["departmentName"]
-
     overview_code = normal_name(overview.get("departmentCode"))
     overview_name = normal_name(overview.get("departmentName"))
 
-    warnings: list[str] = []
     if overview_code and overview_code != expected_code:
-        raise ValueError(
-            f"Province verification failed: requested {expected_code} but overview is {overview_code}"
-        )
+        raise ValueError(f"Province verification failed: requested {expected_code} but overview is {overview_code}")
     if overview_name and overview_name != expected_name:
-        raise ValueError(
-            f"Province verification failed: requested '{expected_name}' but overview is '{overview_name}'"
-        )
+        raise ValueError(f"Province verification failed: requested '{expected_name}' but overview is '{overview_name}'")
 
     province_records: list[dict[str, Any]] = []
     agencies: list[dict[str, Any]] = []
     communes: list[dict[str, Any]] = []
+    warnings: list[str] = []
 
     for item in evaluation:
         if not isinstance(item, dict):
             continue
-
         record = {
             **item,
             "provinceCode": expected_code,
@@ -198,11 +215,11 @@ def verify_and_extract(
         elif child_group == "COMMUNE":
             communes.append(record)
         elif department_code == expected_code or not child_group:
-            # Province-level record in the evaluation table.
             province_records.append(record)
         else:
             warnings.append(
-                f"Unclassified evaluation record: {item.get('departmentCode')} / {item.get('departmentName')} / childGroup={child_group}"
+                f"Unclassified evaluation record: {item.get('departmentCode')} / "
+                f"{item.get('departmentName')} / childGroup={child_group}"
             )
 
     if not province_records:
@@ -234,14 +251,14 @@ def write_json(path: Path, payload: Any) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--year", type=int, default=datetime.now().year)
-    parser.add_argument("--all", action="store_true", help="Crawl all discovered provinces")
-    parser.add_argument("--limit", type=int, default=1, help="Number of provinces to crawl when --all is not used")
-    parser.add_argument("--province-code", help="Crawl one province by code, e.g. H44")
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--limit", type=int, default=1)
+    parser.add_argument("--province-code", help="Crawl one province by code, e.g. H20")
     parser.add_argument("--headed", action="store_true")
     parser.add_argument("--timeout", type=int, default=60_000)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--delay", type=float, default=1.5)
-    parser.add_argument("--force", action="store_true", help="Ignore an existing raw province response")
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
     all_provinces = load_provinces()
@@ -274,8 +291,6 @@ def main() -> int:
         context = browser.new_context(locale="vi-VN", viewport={"width": 1440, "height": 1000})
         page = context.new_page()
 
-        # Load the real site once so browser cookies/session state, if any, are
-        # available to context.request.
         try:
             page.goto(SOURCE_URL, wait_until="domcontentloaded", timeout=60_000)
             page.wait_for_timeout(3000)
@@ -302,14 +317,15 @@ def main() -> int:
                     "year": args.year,
                     "rootDepartmentId": root_id,
                 }
-                status, text = request_json(
+                status, text, content_type = request_json(
+                    page,
                     context,
                     payload,
                     timeout_ms=args.timeout,
                     retries=args.retries,
                     delay=args.delay,
                 )
-                print(f"    HTTP {status}")
+                print(f"    HTTP {status} | content-type={content_type or '(none)'}")
                 if status not in (200, 201):
                     manifest.append({
                         **province,
@@ -327,12 +343,15 @@ def main() -> int:
                     province, response_payload
                 )
             except Exception as exc:
+                preview = text[:300].replace("\r", " ").replace("\n", " ")
                 print(f"    FAILED verification: {exc}", file=sys.stderr)
+                print(f"    BODY PREVIEW: {preview!r}", file=sys.stderr)
                 manifest.append({
                     **province,
                     "rootDepartmentId": root_id,
                     "status": "verification_error",
                     "error": str(exc),
+                    "bodyPreview": preview,
                     "responseSha256": sha256_text(text),
                 })
                 continue
@@ -354,7 +373,6 @@ def main() -> int:
                 f"    VERIFIED | evaluation={manifest[-1]['evaluationCount']} | "
                 f"agency={len(province_agencies)} | commune={len(province_communes)}"
             )
-
             time.sleep(max(0.0, args.delay))
 
         browser.close()
