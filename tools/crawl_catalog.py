@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""Crawl the DVCQG evaluation dataset province by province.
-
-Important design choice:
-- The national page is opened in a real Chromium browser.
-- For each province we prefer making the same request from the live browser
-  context as the site. This is less likely to be rejected than a standalone
-  HTTP client.
-- If the DVCQG UI exposes the province selector, the crawler can also select
-  the province in the real UI and capture the service-results response. This
-  is the preferred path for a full crawl because it follows the site's own
-  interaction flow.
-- Every successful response is stored verbatim as RAW JSON.
-
-The current endpoint is:
-POST https://dichvucong.gov.vn/api/v1/reporting/evaluation/service-results
-
-A successful response may use HTTP 201 or HTTP 200.
-"""
+"""Crawl the DVCQG evaluation dataset province by province."""
 
 from __future__ import annotations
 
@@ -54,10 +37,8 @@ def normal_name(value: Any) -> str:
 def province_short_name(name: str) -> str:
     value = normal_name(name)
     value = re.sub(r"^UBND\s+", "", value, flags=re.I)
-    value = re.sub(r"\btỉnh\b\s*", "", value, count=0, flags=re.I)
     value = re.sub(r"^Thành phố\s+", "", value, flags=re.I)
-    value = value.replace("Thành phố Hồ Chí Minh", "Hồ Chí Minh")
-    value = re.sub(r"\s+tỉnh$", "", value, flags=re.I)
+    value = re.sub(r"\btỉnh\b\s*", "", value, flags=re.I)
     return value.strip()
 
 
@@ -105,6 +86,24 @@ def parse_response(text: str) -> dict[str, Any]:
     if not isinstance(payload.get("data"), dict):
         raise ValueError("API response missing object field data")
     return payload
+
+
+def response_matches_province(text: str, province: dict[str, Any]) -> bool:
+    """Return True only when the service-results response is for the target province."""
+    try:
+        payload = parse_response(text)
+    except Exception:
+        return False
+    overview = payload.get("data", {}).get("overview") or {}
+    code = normal_name(overview.get("departmentCode"))
+    name = normal_name(overview.get("departmentName"))
+    expected_code = province["departmentCode"]
+    expected_name = province["departmentName"]
+    # Code is the strongest signal. For older/variant responses where overview
+    # omits code, require an exact name match instead. Never accept Cả nước.
+    if code:
+        return code == expected_code
+    return bool(name and name == expected_name and name != "Cả nước")
 
 
 def verify_and_extract(
@@ -181,7 +180,6 @@ def write_json(path: Path, payload: Any) -> None:
 
 
 def visible_text_candidates(page) -> list[dict[str, Any]]:
-    """Return visible text-bearing elements that may be selection options."""
     return page.evaluate(
         """
         () => {
@@ -201,12 +199,9 @@ def visible_text_candidates(page) -> list[dict[str, Any]]:
 
 
 def click_province_in_ui(page, province: dict[str, Any]) -> bool:
-    """Try to select a province through the real DVCQG page UI."""
     short_name = province["provinceShortName"]
     full_name = province["departmentName"]
 
-    # First open the province selector. The current UI exposes a button whose
-    # accessible text contains "Tỉnh, Thành phố".
     selectors = [
         page.get_by_role("button", name=re.compile(r"Tỉnh,? Thành phố", re.I)).first,
         page.get_by_text(re.compile(r"^Tỉnh,? Thành phố$", re.I)).first,
@@ -223,8 +218,6 @@ def click_province_in_ui(page, province: dict[str, Any]) -> bool:
             pass
 
     if not opened:
-        # Sometimes the button label changes to the currently selected province.
-        # Click the first visible element that still advertises the province filter.
         try:
             locator = page.locator('button,[role="button"]').filter(has_text=re.compile(r"Tỉnh|Thành phố|Địa phương", re.I)).first
             if locator.count() and locator.is_visible():
@@ -239,7 +232,6 @@ def click_province_in_ui(page, province: dict[str, Any]) -> bool:
 
     page.wait_for_timeout(300)
 
-    # Try exact text first, then a normalized contains match.
     names = [full_name, short_name]
     names.extend([
         re.sub(r"^UBND\s+", "", full_name, flags=re.I),
@@ -263,7 +255,6 @@ def click_province_in_ui(page, province: dict[str, Any]) -> bool:
             except Exception:
                 pass
 
-    # Last resort: inspect visible elements and click the smallest matching one.
     visible = visible_text_candidates(page)
     candidates = []
     for item in visible:
@@ -285,8 +276,13 @@ def click_province_in_ui(page, province: dict[str, Any]) -> bool:
 
 
 def capture_service_results_after_ui_selection(page, province: dict[str, Any], timeout_ms: int) -> tuple[int, str, str] | None:
-    """Select province in the live UI and capture its actual service-results response."""
+    """Select province and accept only the matching service-results response.
+
+    The page can emit a national response (overview=\"Cả nước\") while the
+    selector is opening or changing. Never mistake that response for the target.
+    """
     captured: dict[str, Any] = {}
+    ignored_national = {"count": 0}
 
     def on_response(response: Response) -> None:
         if ENDPOINT not in response.url:
@@ -295,21 +291,33 @@ def capture_service_results_after_ui_selection(page, province: dict[str, Any], t
             text = response.text()
         except Exception:
             return
-        ctype = response.headers.get("content-type", "")
-        if text.lstrip().startswith(("{", "[")):
+        if not text.lstrip().startswith(("{", "[")):
+            return
+        if response_matches_province(text, province):
             captured["status"] = response.status
             captured["text"] = text
-            captured["content_type"] = ctype
+            captured["content_type"] = response.headers.get("content-type", "")
+            return
+        try:
+            payload = parse_response(text)
+            overview = payload.get("data", {}).get("overview") or {}
+            if normal_name(overview.get("departmentName")) == "Cả nước":
+                ignored_national["count"] += 1
+        except Exception:
+            pass
 
     page.on("response", on_response)
     try:
         if not click_province_in_ui(page, province):
+            print("    UI province selection could not be completed")
             return None
         deadline = time.time() + timeout_ms / 1000
         while time.time() < deadline:
             if captured.get("text"):
                 return int(captured["status"]), str(captured["text"]), str(captured.get("content_type", ""))
             page.wait_for_timeout(250)
+        if ignored_national["count"]:
+            print(f"    UI emitted {ignored_national['count']} national response(s); target response was not observed")
         return None
     finally:
         try:
@@ -422,25 +430,15 @@ def main() -> int:
             else:
                 result = None
 
-                # For full-crawl mode, use the site's own UI interaction first.
-                # This is especially useful when direct fetch is WAF-sensitive.
                 if args.ui_first or args.all:
                     try:
                         result = capture_service_results_after_ui_selection(page, province, timeout_ms=args.timeout)
                         if result:
-                            print("    captured service-results response from live DVCQG UI")
+                            print("    captured matching service-results response from live DVCQG UI")
                     except Exception as exc:
                         print(f"    UI selection attempt failed: {exc}", file=sys.stderr)
 
-                # If the UI flow could not produce the response, try the same
-                # payload in the current browser context. This worked for H20
-                # during validation and remains useful as a fallback.
                 if result is None:
-                    payload = {
-                        "timeType": "year",
-                        "year": args.year,
-                        "rootDepartmentId": root_id,
-                    }
                     try:
                         status, text, content_type = crawl_with_browser_request(page, province, args.year, args.timeout)
                         result = (status, text, content_type)
@@ -460,7 +458,7 @@ def main() -> int:
                 status, text, content_type = result
                 print(f"    HTTP {status} | content-type={content_type or '(none)'}")
                 if status not in (200, 201):
-                    print(f"    FAILED HTTP status; continuing to next province", file=sys.stderr)
+                    print("    FAILED HTTP status; continuing to next province", file=sys.stderr)
                     manifest.append({
                         **province,
                         "rootDepartmentId": root_id,
@@ -524,7 +522,6 @@ def main() -> int:
                 f"    VERIFIED | evaluation={manifest[-1]['evaluationCount']} | "
                 f"agency={len(province_agencies)} | commune={len(province_communes)}"
             )
-
             time.sleep(max(0.0, args.delay))
 
         browser.close()
