@@ -1,19 +1,37 @@
 #!/usr/bin/env python3
-"""Build and verify the DVCQG province/agency/commune catalog."""
+"""Crawl the DVCQG evaluation dataset province by province.
+
+Important design choice:
+- The national page is opened in a real Chromium browser.
+- For each province we prefer making the same request from the live browser
+  context as the site. This is less likely to be rejected than a standalone
+  HTTP client.
+- If the DVCQG UI exposes the province selector, the crawler can also select
+  the province in the real UI and capture the service-results response. This
+  is the preferred path for a full crawl because it follows the site's own
+  interaction flow.
+- Every successful response is stored verbatim as RAW JSON.
+
+The current endpoint is:
+POST https://dichvucong.gov.vn/api/v1/reporting/evaluation/service-results
+
+A successful response may use HTTP 201 or HTTP 200.
+"""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import re
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import APIResponse, TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import Response, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_URL = "https://dichvucong.gov.vn/danh-gia-chat-luong-phuc-vu"
@@ -31,6 +49,16 @@ def sha256_text(text: str) -> str:
 
 def normal_name(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
+
+
+def province_short_name(name: str) -> str:
+    value = normal_name(name)
+    value = re.sub(r"^UBND\s+", "", value, flags=re.I)
+    value = re.sub(r"\btỉnh\b\s*", "", value, count=0, flags=re.I)
+    value = re.sub(r"^Thành phố\s+", "", value, flags=re.I)
+    value = value.replace("Thành phố Hồ Chí Minh", "Hồ Chí Minh")
+    value = re.sub(r"\s+tỉnh$", "", value, flags=re.I)
+    return value.strip()
 
 
 def load_provinces() -> list[dict[str, Any]]:
@@ -54,6 +82,7 @@ def load_provinces() -> list[dict[str, Any]]:
             "departmentId": department_id,
             "departmentName": name,
             "departmentCode": code,
+            "provinceShortName": province_short_name(name),
         })
 
     provinces.sort(key=lambda x: x["departmentCode"])
@@ -63,103 +92,8 @@ def load_provinces() -> list[dict[str, Any]]:
     return list(dedup.values())
 
 
-def request_json_via_browser(page, payload: dict[str, Any], timeout_ms: int) -> tuple[int, str, str]:
-    """POST from the actual DVCQG page context.
-
-    This is preferred over Playwright's separate APIRequestContext because the
-    live page has the exact browser origin, cookies and request environment used
-    by the website itself.
-    """
-    result = page.evaluate(
-        """
-        async ({url, payload}) => {
-          const res = await fetch(url, {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-              'Accept': 'application/json, text/plain, */*',
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-          });
-          const text = await res.text();
-          return {
-            status: res.status,
-            contentType: res.headers.get('content-type') || '',
-            text
-          };
-        }
-        """,
-        {"url": ENDPOINT, "payload": payload},
-    )
-    return int(result["status"]), str(result.get("text", "")), str(result.get("contentType", ""))
-
-
-def request_json_via_context(context, payload: dict[str, Any], timeout_ms: int) -> tuple[int, str, str]:
-    """Fallback request using the browser-context API client."""
-    response: APIResponse = context.request.post(
-        ENDPOINT,
-        data=json.dumps(payload, ensure_ascii=False),
-        headers={
-            "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-            "Origin": "https://dichvucong.gov.vn",
-            "Referer": SOURCE_URL,
-        },
-        timeout=timeout_ms,
-    )
-    return response.status, response.text(), response.headers.get("content-type", "")
-
-
-def request_json(page, context, payload: dict[str, Any], timeout_ms: int, retries: int, delay: float) -> tuple[int, str, str]:
-    last_error: Exception | None = None
-
-    for attempt in range(retries + 1):
-        try:
-            status, text, content_type = request_json_via_browser(page, payload, timeout_ms)
-
-            if status in (200, 201):
-                if text.lstrip().startswith(("{", "[")):
-                    return status, text, content_type
-
-                # Some responses can be unusual/empty in page.fetch. Fall back
-                # to the context client before declaring failure.
-                try:
-                    print("    Browser fetch returned non-JSON body; trying context.request fallback...")
-                    s2, t2, ct2 = request_json_via_context(context, payload, timeout_ms)
-                    if s2 in (200, 201) and t2.lstrip().startswith(("{", "[")):
-                        return s2, t2, ct2
-                    status, text, content_type = s2, t2, ct2
-                except Exception as fallback_exc:
-                    last_error = fallback_exc
-
-                preview = text[:300].replace("\r", " ").replace("\n", " ")
-                if attempt >= retries:
-                    raise RuntimeError(
-                        f"HTTP {status} returned non-JSON response (content-type={content_type!r}, "
-                        f"body-preview={preview!r})"
-                    )
-
-            retryable = status == 429 or 500 <= status <= 599
-            if not retryable and status not in (200, 201):
-                return status, text, content_type
-
-            if attempt < retries:
-                wait = delay * (2 ** attempt)
-                print(f"    HTTP {status}; retrying in {wait:.1f}s...")
-                time.sleep(wait)
-                continue
-            return status, text, content_type
-        except Exception as exc:
-            last_error = exc
-            if attempt < retries:
-                wait = delay * (2 ** attempt)
-                print(f"    request error: {exc}; retrying in {wait:.1f}s...")
-                time.sleep(wait)
-                continue
-            raise RuntimeError(f"Request failed after retries: {exc}") from exc
-
-    raise RuntimeError(str(last_error) if last_error else "Unknown request failure")
+def safe_preview(text: str, limit: int = 300) -> str:
+    return text[:limit].replace("\r", " ").replace("\n", " ")
 
 
 def parse_response(text: str) -> dict[str, Any]:
@@ -224,8 +158,6 @@ def verify_and_extract(
 
     if not province_records:
         warnings.append("No province-level record was found inside data.evaluation.")
-    elif len(province_records) > 1:
-        warnings.append(f"Found {len(province_records)} province-level evaluation records.")
 
     return (
         {
@@ -248,6 +180,179 @@ def write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def visible_text_candidates(page) -> list[dict[str, Any]]:
+    """Return visible text-bearing elements that may be selection options."""
+    return page.evaluate(
+        """
+        () => {
+          const out = [];
+          const els = Array.from(document.querySelectorAll('button,[role="button"],[role="option"],li,span,div'));
+          for (const el of els) {
+            const r = el.getBoundingClientRect();
+            const s = getComputedStyle(el);
+            if (!r.width || !r.height || s.display === 'none' || s.visibility === 'hidden') continue;
+            const text = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
+            if (text && text.length <= 120) out.push({tag: el.tagName, text});
+          }
+          return out.slice(0, 2000);
+        }
+        """
+    )
+
+
+def click_province_in_ui(page, province: dict[str, Any]) -> bool:
+    """Try to select a province through the real DVCQG page UI."""
+    short_name = province["provinceShortName"]
+    full_name = province["departmentName"]
+
+    # First open the province selector. The current UI exposes a button whose
+    # accessible text contains "Tỉnh, Thành phố".
+    selectors = [
+        page.get_by_role("button", name=re.compile(r"Tỉnh,? Thành phố", re.I)).first,
+        page.get_by_text(re.compile(r"^Tỉnh,? Thành phố$", re.I)).first,
+    ]
+    opened = False
+    for locator in selectors:
+        try:
+            if locator.count() and locator.is_visible():
+                locator.click(timeout=2500)
+                page.wait_for_timeout(500)
+                opened = True
+                break
+        except Exception:
+            pass
+
+    if not opened:
+        # Sometimes the button label changes to the currently selected province.
+        # Click the first visible element that still advertises the province filter.
+        try:
+            locator = page.locator('button,[role="button"]').filter(has_text=re.compile(r"Tỉnh|Thành phố|Địa phương", re.I)).first
+            if locator.count() and locator.is_visible():
+                locator.click(timeout=2500)
+                page.wait_for_timeout(500)
+                opened = True
+        except Exception:
+            pass
+
+    if not opened:
+        return False
+
+    page.wait_for_timeout(300)
+
+    # Try exact text first, then a normalized contains match.
+    names = [full_name, short_name]
+    names.extend([
+        re.sub(r"^UBND\s+", "", full_name, flags=re.I),
+        re.sub(r"^UBND\s+(tỉnh|Thành phố)\s+", "", full_name, flags=re.I),
+    ])
+
+    for name in names:
+        candidate = normal_name(name)
+        if not candidate:
+            continue
+        locators = [
+            page.get_by_role("option", name=re.compile(f"^{re.escape(candidate)}$", re.I)).first,
+            page.get_by_text(re.compile(f"^{re.escape(candidate)}$", re.I)).last,
+        ]
+        for locator in locators:
+            try:
+                if locator.count() and locator.is_visible():
+                    locator.click(timeout=2500)
+                    page.wait_for_timeout(250)
+                    return True
+            except Exception:
+                pass
+
+    # Last resort: inspect visible elements and click the smallest matching one.
+    visible = visible_text_candidates(page)
+    candidates = []
+    for item in visible:
+        text = normal_name(item.get("text"))
+        if text.lower() in {short_name.lower(), full_name.lower()}:
+            candidates.append(text)
+        elif short_name and short_name.lower() in text.lower() and len(text) <= len(short_name) + 20:
+            candidates.append(text)
+    for text in sorted(set(candidates), key=len):
+        try:
+            loc = page.get_by_text(text, exact=True).last
+            if loc.count() and loc.is_visible():
+                loc.click(timeout=2500)
+                page.wait_for_timeout(250)
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def capture_service_results_after_ui_selection(page, province: dict[str, Any], timeout_ms: int) -> tuple[int, str, str] | None:
+    """Select province in the live UI and capture its actual service-results response."""
+    captured: dict[str, Any] = {}
+
+    def on_response(response: Response) -> None:
+        if ENDPOINT not in response.url:
+            return
+        try:
+            text = response.text()
+        except Exception:
+            return
+        ctype = response.headers.get("content-type", "")
+        if text.lstrip().startswith(("{", "[")):
+            captured["status"] = response.status
+            captured["text"] = text
+            captured["content_type"] = ctype
+
+    page.on("response", on_response)
+    try:
+        if not click_province_in_ui(page, province):
+            return None
+        deadline = time.time() + timeout_ms / 1000
+        while time.time() < deadline:
+            if captured.get("text"):
+                return int(captured["status"]), str(captured["text"]), str(captured.get("content_type", ""))
+            page.wait_for_timeout(250)
+        return None
+    finally:
+        try:
+            page.remove_listener("response", on_response)
+        except Exception:
+            pass
+
+
+def request_json_via_browser(page, payload: dict[str, Any], timeout_ms: int) -> tuple[int, str, str]:
+    result = page.evaluate(
+        """
+        async ({url, payload}) => {
+          const res = await fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Accept': 'application/json, text/plain, */*',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+          const text = await res.text();
+          return {
+            status: res.status,
+            contentType: res.headers.get('content-type') || '',
+            text
+          };
+        }
+        """,
+        {"url": ENDPOINT, "payload": payload},
+    )
+    return int(result["status"]), str(result.get("text", "")), str(result.get("contentType", ""))
+
+
+def crawl_with_browser_request(page, province: dict[str, Any], year: int, timeout_ms: int) -> tuple[int, str, str]:
+    payload = {
+        "timeType": "year",
+        "year": year,
+        "rootDepartmentId": province["departmentId"],
+    }
+    return request_json_via_browser(page, payload, timeout_ms)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--year", type=int, default=datetime.now().year)
@@ -255,10 +360,11 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=1)
     parser.add_argument("--province-code", help="Crawl one province by code, e.g. H20")
     parser.add_argument("--headed", action="store_true")
-    parser.add_argument("--timeout", type=int, default=60_000)
-    parser.add_argument("--retries", type=int, default=3)
-    parser.add_argument("--delay", type=float, default=1.5)
+    parser.add_argument("--timeout", type=int, default=45_000)
+    parser.add_argument("--delay", type=float, default=2.5)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--ui-first", action="store_true", default=False,
+                        help="Prefer real UI selection before direct browser fetch")
     args = parser.parse_args()
 
     all_provinces = load_provinces()
@@ -293,9 +399,9 @@ def main() -> int:
 
         try:
             page.goto(SOURCE_URL, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(5000)
         except PlaywrightTimeoutError:
-            print("Page navigation timed out; continuing with captured browser session.", file=sys.stderr)
+            print("Page navigation timed out; continuing.", file=sys.stderr)
         except Exception as exc:
             print(f"Page navigation warning: {exc}", file=sys.stderr)
 
@@ -310,31 +416,76 @@ def main() -> int:
 
             if raw_path.exists() and not args.force:
                 text = raw_path.read_text(encoding="utf-8")
+                status = 200
+                content_type = "application/json"
                 print("    raw exists; using existing response (use --force to recrawl)")
             else:
-                payload = {
-                    "timeType": "year",
-                    "year": args.year,
-                    "rootDepartmentId": root_id,
-                }
-                status, text, content_type = request_json(
-                    page,
-                    context,
-                    payload,
-                    timeout_ms=args.timeout,
-                    retries=args.retries,
-                    delay=args.delay,
-                )
+                result = None
+
+                # For full-crawl mode, use the site's own UI interaction first.
+                # This is especially useful when direct fetch is WAF-sensitive.
+                if args.ui_first or args.all:
+                    try:
+                        result = capture_service_results_after_ui_selection(page, province, timeout_ms=args.timeout)
+                        if result:
+                            print("    captured service-results response from live DVCQG UI")
+                    except Exception as exc:
+                        print(f"    UI selection attempt failed: {exc}", file=sys.stderr)
+
+                # If the UI flow could not produce the response, try the same
+                # payload in the current browser context. This worked for H20
+                # during validation and remains useful as a fallback.
+                if result is None:
+                    payload = {
+                        "timeType": "year",
+                        "year": args.year,
+                        "rootDepartmentId": root_id,
+                    }
+                    try:
+                        status, text, content_type = crawl_with_browser_request(page, province, args.year, args.timeout)
+                        result = (status, text, content_type)
+                    except Exception as exc:
+                        print(f"    browser fetch failed: {exc}", file=sys.stderr)
+
+                if result is None:
+                    manifest.append({
+                        **province,
+                        "rootDepartmentId": root_id,
+                        "status": "request_failed",
+                    })
+                    print("    FAILED request; continuing to next province", file=sys.stderr)
+                    time.sleep(args.delay)
+                    continue
+
+                status, text, content_type = result
                 print(f"    HTTP {status} | content-type={content_type or '(none)'}")
                 if status not in (200, 201):
+                    print(f"    FAILED HTTP status; continuing to next province", file=sys.stderr)
                     manifest.append({
                         **province,
                         "rootDepartmentId": root_id,
                         "status": "http_error",
                         "httpStatus": status,
                         "responseSha256": sha256_text(text),
+                        "bodyPreview": safe_preview(text),
                     })
+                    time.sleep(args.delay)
                     continue
+
+                if not text.lstrip().startswith(("{", "[")):
+                    print(f"    FAILED non-JSON body: {safe_preview(text)!r}", file=sys.stderr)
+                    manifest.append({
+                        **province,
+                        "rootDepartmentId": root_id,
+                        "status": "non_json",
+                        "httpStatus": status,
+                        "contentType": content_type,
+                        "responseSha256": sha256_text(text),
+                        "bodyPreview": safe_preview(text),
+                    })
+                    time.sleep(args.delay)
+                    continue
+
                 raw_path.write_text(text, encoding="utf-8")
 
             try:
@@ -343,17 +494,17 @@ def main() -> int:
                     province, response_payload
                 )
             except Exception as exc:
-                preview = text[:300].replace("\r", " ").replace("\n", " ")
                 print(f"    FAILED verification: {exc}", file=sys.stderr)
-                print(f"    BODY PREVIEW: {preview!r}", file=sys.stderr)
+                print(f"    BODY PREVIEW: {safe_preview(text)!r}", file=sys.stderr)
                 manifest.append({
                     **province,
                     "rootDepartmentId": root_id,
                     "status": "verification_error",
                     "error": str(exc),
-                    "bodyPreview": preview,
+                    "bodyPreview": safe_preview(text),
                     "responseSha256": sha256_text(text),
                 })
+                time.sleep(args.delay)
                 continue
 
             verified_provinces.append(province_record)
@@ -373,6 +524,7 @@ def main() -> int:
                 f"    VERIFIED | evaluation={manifest[-1]['evaluationCount']} | "
                 f"agency={len(province_agencies)} | commune={len(province_communes)}"
             )
+
             time.sleep(max(0.0, args.delay))
 
         browser.close()
