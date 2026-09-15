@@ -39,6 +39,10 @@ jobs:
           pip install -r tools/requirements.txt
           playwright install --with-deps chromium
 
+      - name: Test basic DVCQG connectivity
+        run: |
+          python tools/test_dvcqg_connectivity.py
+
       - name: Bootstrap DVCQG province catalog with one API request
         run: |
           python tools/bootstrap_catalog_api.py --year 2026
