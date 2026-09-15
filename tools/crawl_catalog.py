@@ -1,11 +1,32 @@
 #!/usr/bin/env python3
-"""Crawl the DVCQG evaluation dataset province by province."""
+"""Reliable DVCQG province crawler.
+
+Design goals
+------------
+* One fresh Chromium browser context per province to reduce session/WAF carry-over.
+* Prefer the live DVCQG UI and capture the matching service-results response.
+* Fall back to a browser-context POST when the UI cannot be driven.
+* Never accept the national "Cả nước" response as a province response.
+* Save each successful province response verbatim as RAW JSON immediately.
+* Persist checkpoint state after every province so Ctrl+C/resume is safe.
+* A failed province never terminates the whole 34-province run.
+* Rebuild catalog JSON from all successful RAW files, so resume does not lose old data.
+
+Examples
+--------
+python tools/crawl_catalog.py --year 2026 --province-code H20 --headed
+python tools/crawl_catalog.py --year 2026 --all
+python tools/crawl_catalog.py --year 2026 --all --resume
+python tools/crawl_catalog.py --year 2026 --all --force
+python tools/crawl_catalog.py --year 2026 --all --retry-failed
+"""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import random
 import re
 import sys
 import time
@@ -37,16 +58,34 @@ def normal_name(value: Any) -> str:
 def province_short_name(name: str) -> str:
     value = normal_name(name)
     value = re.sub(r"^UBND\s+", "", value, flags=re.I)
-    value = re.sub(r"^Thành phố\s+", "", value, flags=re.I)
-    value = re.sub(r"\btỉnh\b\s*", "", value, flags=re.I)
+    value = re.sub(r"^tỉnh\s+", "", value, flags=re.I)
+    value = re.sub(r"^thành phố\s+", "", value, flags=re.I)
     return value.strip()
+
+
+def safe_preview(text: str, limit: int = 300) -> str:
+    return text[:limit].replace("\r", " ").replace("\n", " ")
+
+
+def write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_json(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
 
 
 def load_provinces() -> list[dict[str, Any]]:
     if not PROVINCE_DISCOVERY.exists():
         raise FileNotFoundError(f"Missing {PROVINCE_DISCOVERY}. Run discover_dvc_structure.py first.")
 
-    payload = json.loads(PROVINCE_DISCOVERY.read_text(encoding="utf-8"))
+    payload = load_json(PROVINCE_DISCOVERY, {})
     rows = payload.get("unclassified", [])
     provinces: list[dict[str, Any]] = []
 
@@ -54,8 +93,9 @@ def load_provinces() -> list[dict[str, Any]]:
         code = normal_name(row.get("departmentCode"))
         name = normal_name(row.get("departmentName"))
         department_id = normal_name(row.get("departmentId"))
-        child_group = row.get("childGroup")
-        if not code or not name or not department_id or child_group is not None:
+        if not code or not name or not department_id:
+            continue
+        if row.get("childGroup") is not None:
             continue
         if not code.startswith("H"):
             continue
@@ -73,10 +113,6 @@ def load_provinces() -> list[dict[str, Any]]:
     return list(dedup.values())
 
 
-def safe_preview(text: str, limit: int = 300) -> str:
-    return text[:limit].replace("\r", " ").replace("\n", " ")
-
-
 def parse_response(text: str) -> dict[str, Any]:
     if not text or not text.strip():
         raise ValueError("API response body is empty")
@@ -89,27 +125,37 @@ def parse_response(text: str) -> dict[str, Any]:
 
 
 def response_matches_province(text: str, province: dict[str, Any]) -> bool:
-    """Return True only when the service-results response is for the target province."""
+    """Return True only if the JSON response can be tied to the requested province."""
     try:
         payload = parse_response(text)
     except Exception:
         return False
-    overview = payload.get("data", {}).get("overview") or {}
-    code = normal_name(overview.get("departmentCode"))
-    name = normal_name(overview.get("departmentName"))
+
+    data = payload.get("data", {})
+    overview = data.get("overview") or {}
     expected_code = province["departmentCode"]
     expected_name = province["departmentName"]
-    # Code is the strongest signal. For older/variant responses where overview
-    # omits code, require an exact name match instead. Never accept Cả nước.
-    if code:
-        return code == expected_code
-    return bool(name and name == expected_name and name != "Cả nước")
+
+    overview_code = normal_name(overview.get("departmentCode"))
+    overview_name = normal_name(overview.get("departmentName"))
+    if overview_code and overview_code == expected_code:
+        return True
+    if overview_name and overview_name == expected_name:
+        return True
+
+    evaluation = data.get("evaluation") or []
+    if isinstance(evaluation, list):
+        for item in evaluation:
+            if not isinstance(item, dict):
+                continue
+            if normal_name(item.get("departmentCode")) == expected_code:
+                return True
+            if normal_name(item.get("departmentName")) == expected_name:
+                return True
+    return False
 
 
-def verify_and_extract(
-    province: dict[str, Any],
-    response_payload: dict[str, Any],
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+def verify_and_extract(province: dict[str, Any], response_payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     data = response_payload["data"]
     overview = data.get("overview") or {}
     evaluation = data.get("evaluation") or []
@@ -147,12 +193,13 @@ def verify_and_extract(
             agencies.append(record)
         elif child_group == "COMMUNE":
             communes.append(record)
-        elif department_code == expected_code or not child_group:
+        elif department_code == expected_code:
             province_records.append(record)
+        elif child_group is None and not department_code:
+            warnings.append(f"Unclassified record without code: {item.get('departmentName')}")
         else:
             warnings.append(
-                f"Unclassified evaluation record: {item.get('departmentCode')} / "
-                f"{item.get('departmentName')} / childGroup={child_group}"
+                f"Unclassified evaluation record: {item.get('departmentCode')} / {item.get('departmentName')} / childGroup={child_group}"
             )
 
     if not province_records:
@@ -174,28 +221,97 @@ def verify_and_extract(
     )
 
 
-def write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+def load_checkpoint(path: Path) -> dict[str, Any]:
+    payload = load_json(path, {})
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.setdefault("schemaVersion", 1)
+    payload.setdefault("updatedAt", None)
+    payload.setdefault("items", {})
+    return payload
 
 
-def visible_text_candidates(page) -> list[dict[str, Any]]:
-    return page.evaluate(
-        """
-        () => {
-          const out = [];
-          const els = Array.from(document.querySelectorAll('button,[role="button"],[role="option"],li,span,div'));
-          for (const el of els) {
-            const r = el.getBoundingClientRect();
-            const s = getComputedStyle(el);
-            if (!r.width || !r.height || s.display === 'none' || s.visibility === 'hidden') continue;
-            const text = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
-            if (text && text.length <= 120) out.push({tag: el.tagName, text});
-          }
-          return out.slice(0, 2000);
-        }
-        """
-    )
+def save_checkpoint(path: Path, checkpoint: dict[str, Any]) -> None:
+    checkpoint["updatedAt"] = utc_now()
+    write_json(path, checkpoint)
+
+
+def classify_status_from_checkpoint(item: dict[str, Any] | None) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    status = item.get("status")
+    return status if isinstance(status, str) else None
+
+
+def rebuild_catalog(year: int, provinces: list[dict[str, Any]], raw_dir: Path, catalog_dir: Path, checkpoint: dict[str, Any]) -> dict[str, int]:
+    verified_provinces: list[dict[str, Any]] = []
+    agencies: list[dict[str, Any]] = []
+    communes: list[dict[str, Any]] = []
+
+    for province in provinces:
+        code = province["departmentCode"]
+        raw_path = raw_dir / f"{code}.json"
+        if not raw_path.exists():
+            continue
+        text = raw_path.read_text(encoding="utf-8")
+        try:
+            payload = parse_response(text)
+            province_record, province_agencies, province_communes, warnings = verify_and_extract(province, payload)
+        except Exception:
+            continue
+        verified_provinces.append(province_record)
+        agencies.extend(province_agencies)
+        communes.extend(province_communes)
+        if code in checkpoint["items"]:
+            checkpoint["items"][code]["catalogWarnings"] = warnings
+
+    generated_at = utc_now()
+    write_json(catalog_dir / "provinces.json", {
+        "schemaVersion": 3,
+        "generatedAt": generated_at,
+        "year": year,
+        "source": SOURCE_URL,
+        "count": len(verified_provinces),
+        "provinces": verified_provinces,
+    })
+    write_json(catalog_dir / "agencies.json", {
+        "schemaVersion": 3,
+        "generatedAt": generated_at,
+        "year": year,
+        "count": len(agencies),
+        "agencies": agencies,
+    })
+    write_json(catalog_dir / "communes.json", {
+        "schemaVersion": 3,
+        "generatedAt": generated_at,
+        "year": year,
+        "count": len(communes),
+        "communes": communes,
+    })
+
+    checkpoint["catalogSummary"] = {
+        "verifiedProvinces": len(verified_provinces),
+        "agencies": len(agencies),
+        "communes": len(communes),
+    }
+    return checkpoint["catalogSummary"]
+
+
+def write_manifest(year: int, endpoint: str, checkpoint: dict[str, Any], catalog_summary: dict[str, int], catalog_dir: Path) -> None:
+    items = checkpoint.get("items", {})
+    verified = sum(1 for item in items.values() if item.get("status") == "verified")
+    failed = sum(1 for item in items.values() if item.get("status") not in ("verified", None))
+    write_json(catalog_dir / "crawl-manifest.json", {
+        "schemaVersion": 2,
+        "generatedAt": utc_now(),
+        "year": year,
+        "endpoint": endpoint,
+        "requested": len(items),
+        "verified": verified,
+        "failed": failed,
+        "items": items,
+        "catalogSummary": catalog_summary,
+    })
 
 
 def click_province_in_ui(page, province: dict[str, Any]) -> bool:
@@ -211,7 +327,7 @@ def click_province_in_ui(page, province: dict[str, Any]) -> bool:
         try:
             if locator.count() and locator.is_visible():
                 locator.click(timeout=2500)
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(700)
                 opened = True
                 break
         except Exception:
@@ -222,7 +338,7 @@ def click_province_in_ui(page, province: dict[str, Any]) -> bool:
             locator = page.locator('button,[role="button"]').filter(has_text=re.compile(r"Tỉnh|Thành phố|Địa phương", re.I)).first
             if locator.count() and locator.is_visible():
                 locator.click(timeout=2500)
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(700)
                 opened = True
         except Exception:
             pass
@@ -230,59 +346,32 @@ def click_province_in_ui(page, province: dict[str, Any]) -> bool:
     if not opened:
         return False
 
-    page.wait_for_timeout(300)
-
-    names = [full_name, short_name]
-    names.extend([
+    candidates = [
+        full_name,
+        short_name,
         re.sub(r"^UBND\s+", "", full_name, flags=re.I),
         re.sub(r"^UBND\s+(tỉnh|Thành phố)\s+", "", full_name, flags=re.I),
-    ])
-
-    for name in names:
-        candidate = normal_name(name)
+    ]
+    for candidate in candidates:
+        candidate = normal_name(candidate)
         if not candidate:
             continue
-        locators = [
+        for locator in [
             page.get_by_role("option", name=re.compile(f"^{re.escape(candidate)}$", re.I)).first,
             page.get_by_text(re.compile(f"^{re.escape(candidate)}$", re.I)).last,
-        ]
-        for locator in locators:
+        ]:
             try:
                 if locator.count() and locator.is_visible():
                     locator.click(timeout=2500)
-                    page.wait_for_timeout(250)
+                    page.wait_for_timeout(500)
                     return True
             except Exception:
                 pass
-
-    visible = visible_text_candidates(page)
-    candidates = []
-    for item in visible:
-        text = normal_name(item.get("text"))
-        if text.lower() in {short_name.lower(), full_name.lower()}:
-            candidates.append(text)
-        elif short_name and short_name.lower() in text.lower() and len(text) <= len(short_name) + 20:
-            candidates.append(text)
-    for text in sorted(set(candidates), key=len):
-        try:
-            loc = page.get_by_text(text, exact=True).last
-            if loc.count() and loc.is_visible():
-                loc.click(timeout=2500)
-                page.wait_for_timeout(250)
-                return True
-        except Exception:
-            pass
     return False
 
 
-def capture_service_results_after_ui_selection(page, province: dict[str, Any], timeout_ms: int) -> tuple[int, str, str] | None:
-    """Select province and accept only the matching service-results response.
-
-    The page can emit a national response (overview=\"Cả nước\") while the
-    selector is opening or changing. Never mistake that response for the target.
-    """
+def capture_matching_ui_response(page, province: dict[str, Any], timeout_ms: int) -> tuple[int, str, str] | None:
     captured: dict[str, Any] = {}
-    ignored_national = {"count": 0}
 
     def on_response(response: Response) -> None:
         if ENDPOINT not in response.url:
@@ -293,31 +382,21 @@ def capture_service_results_after_ui_selection(page, province: dict[str, Any], t
             return
         if not text.lstrip().startswith(("{", "[")):
             return
-        if response_matches_province(text, province):
-            captured["status"] = response.status
-            captured["text"] = text
-            captured["content_type"] = response.headers.get("content-type", "")
+        if not response_matches_province(text, province):
             return
-        try:
-            payload = parse_response(text)
-            overview = payload.get("data", {}).get("overview") or {}
-            if normal_name(overview.get("departmentName")) == "Cả nước":
-                ignored_national["count"] += 1
-        except Exception:
-            pass
+        captured["status"] = response.status
+        captured["text"] = text
+        captured["content_type"] = response.headers.get("content-type", "")
 
     page.on("response", on_response)
     try:
         if not click_province_in_ui(page, province):
-            print("    UI province selection could not be completed")
             return None
         deadline = time.time() + timeout_ms / 1000
         while time.time() < deadline:
             if captured.get("text"):
                 return int(captured["status"]), str(captured["text"]), str(captured.get("content_type", ""))
             page.wait_for_timeout(250)
-        if ignored_national["count"]:
-            print(f"    UI emitted {ignored_national['count']} national response(s); target response was not observed")
         return None
     finally:
         try:
@@ -326,7 +405,8 @@ def capture_service_results_after_ui_selection(page, province: dict[str, Any], t
             pass
 
 
-def request_json_via_browser(page, payload: dict[str, Any], timeout_ms: int) -> tuple[int, str, str]:
+def browser_fetch(page, province: dict[str, Any], year: int, timeout_ms: int) -> tuple[int, str, str]:
+    payload = {"timeType": "year", "year": year, "rootDepartmentId": province["departmentId"]}
     result = page.evaluate(
         """
         async ({url, payload}) => {
@@ -340,11 +420,7 @@ def request_json_via_browser(page, payload: dict[str, Any], timeout_ms: int) -> 
             body: JSON.stringify(payload)
           });
           const text = await res.text();
-          return {
-            status: res.status,
-            contentType: res.headers.get('content-type') || '',
-            text
-          };
+          return {status: res.status, contentType: res.headers.get('content-type') || '', text};
         }
         """,
         {"url": ENDPOINT, "payload": payload},
@@ -352,219 +428,239 @@ def request_json_via_browser(page, payload: dict[str, Any], timeout_ms: int) -> 
     return int(result["status"]), str(result.get("text", "")), str(result.get("contentType", ""))
 
 
-def crawl_with_browser_request(page, province: dict[str, Any], year: int, timeout_ms: int) -> tuple[int, str, str]:
-    payload = {
-        "timeType": "year",
-        "year": year,
-        "rootDepartmentId": province["departmentId"],
-    }
-    return request_json_via_browser(page, payload, timeout_ms)
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--year", type=int, default=datetime.now().year)
-    parser.add_argument("--all", action="store_true")
-    parser.add_argument("--limit", type=int, default=1)
-    parser.add_argument("--province-code", help="Crawl one province by code, e.g. H20")
-    parser.add_argument("--headed", action="store_true")
-    parser.add_argument("--timeout", type=int, default=45_000)
-    parser.add_argument("--delay", type=float, default=2.5)
-    parser.add_argument("--force", action="store_true")
-    parser.add_argument("--ui-first", action="store_true", default=False,
-                        help="Prefer real UI selection before direct browser fetch")
-    args = parser.parse_args()
-
-    all_provinces = load_provinces()
-    if not all_provinces:
-        raise RuntimeError("No province records found in data/config/departments.json")
-
-    if args.province_code:
-        targets = [p for p in all_provinces if p["departmentCode"] == args.province_code]
-        if not targets:
-            raise RuntimeError(f"Province code not found: {args.province_code}")
-    elif args.all:
-        targets = all_provinces
-    else:
-        targets = all_provinces[: max(1, args.limit)]
-
-    raw_dir = ROOT / "data" / "raw" / str(args.year) / "provinces"
-    catalog_dir = ROOT / "data" / "catalog" / str(args.year)
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    catalog_dir.mkdir(parents=True, exist_ok=True)
-
-    verified_provinces: list[dict[str, Any]] = []
-    agencies: list[dict[str, Any]] = []
-    communes: list[dict[str, Any]] = []
-    manifest: list[dict[str, Any]] = []
-
-    print(f"Discovered {len(all_provinces)} province records. Crawling {len(targets)} province(s).")
-
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=not args.headed)
+def crawl_one_province(pw, province: dict[str, Any], year: int, headed: bool, timeout_ms: int, ui_first: bool) -> tuple[bool, dict[str, Any]]:
+    browser = None
+    try:
+        browser = pw.chromium.launch(headless=not headed)
         context = browser.new_context(locale="vi-VN", viewport={"width": 1440, "height": 1000})
         page = context.new_page()
 
         try:
             page.goto(SOURCE_URL, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(4500)
         except PlaywrightTimeoutError:
-            print("Page navigation timed out; continuing.", file=sys.stderr)
-        except Exception as exc:
-            print(f"Page navigation warning: {exc}", file=sys.stderr)
+            pass
 
-        for index, province in enumerate(targets, start=1):
-            code = province["departmentCode"]
-            name = province["departmentName"]
-            root_id = province["departmentId"]
-            raw_path = raw_dir / f"{code}.json"
+        result: tuple[int, str, str] | None = None
+        method = None
 
-            print(f"[{index}/{len(targets)}] {code} - {name}")
-            print(f"    rootDepartmentId={root_id}")
-
-            if raw_path.exists() and not args.force:
-                text = raw_path.read_text(encoding="utf-8")
-                status = 200
-                content_type = "application/json"
-                print("    raw exists; using existing response (use --force to recrawl)")
-            else:
+        if ui_first:
+            try:
+                result = capture_matching_ui_response(page, province, timeout_ms)
+                if result:
+                    method = "ui-response"
+            except Exception:
                 result = None
 
-                if args.ui_first or args.all:
-                    try:
-                        result = capture_service_results_after_ui_selection(page, province, timeout_ms=args.timeout)
-                        if result:
-                            print("    captured matching service-results response from live DVCQG UI")
-                    except Exception as exc:
-                        print(f"    UI selection attempt failed: {exc}", file=sys.stderr)
-
-                if result is None:
-                    try:
-                        status, text, content_type = crawl_with_browser_request(page, province, args.year, args.timeout)
-                        result = (status, text, content_type)
-                    except Exception as exc:
-                        print(f"    browser fetch failed: {exc}", file=sys.stderr)
-
-                if result is None:
-                    manifest.append({
-                        **province,
-                        "rootDepartmentId": root_id,
-                        "status": "request_failed",
-                    })
-                    print("    FAILED request; continuing to next province", file=sys.stderr)
-                    time.sleep(args.delay)
-                    continue
-
-                status, text, content_type = result
-                print(f"    HTTP {status} | content-type={content_type or '(none)'}")
-                if status not in (200, 201):
-                    print("    FAILED HTTP status; continuing to next province", file=sys.stderr)
-                    manifest.append({
-                        **province,
-                        "rootDepartmentId": root_id,
-                        "status": "http_error",
-                        "httpStatus": status,
-                        "responseSha256": sha256_text(text),
-                        "bodyPreview": safe_preview(text),
-                    })
-                    time.sleep(args.delay)
-                    continue
-
-                if not text.lstrip().startswith(("{", "[")):
-                    print(f"    FAILED non-JSON body: {safe_preview(text)!r}", file=sys.stderr)
-                    manifest.append({
-                        **province,
-                        "rootDepartmentId": root_id,
-                        "status": "non_json",
-                        "httpStatus": status,
-                        "contentType": content_type,
-                        "responseSha256": sha256_text(text),
-                        "bodyPreview": safe_preview(text),
-                    })
-                    time.sleep(args.delay)
-                    continue
-
-                raw_path.write_text(text, encoding="utf-8")
-
+        if result is None:
             try:
-                response_payload = parse_response(text)
-                province_record, province_agencies, province_communes, warnings = verify_and_extract(
-                    province, response_payload
-                )
-            except Exception as exc:
-                print(f"    FAILED verification: {exc}", file=sys.stderr)
-                print(f"    BODY PREVIEW: {safe_preview(text)!r}", file=sys.stderr)
-                manifest.append({
-                    **province,
-                    "rootDepartmentId": root_id,
-                    "status": "verification_error",
-                    "error": str(exc),
-                    "bodyPreview": safe_preview(text),
-                    "responseSha256": sha256_text(text),
-                })
-                time.sleep(args.delay)
-                continue
+                status, text, content_type = browser_fetch(page, province, year, timeout_ms)
+                if status in (200, 201) and text.lstrip().startswith(("{", "[")) and response_matches_province(text, province):
+                    result = (status, text, content_type)
+                    method = "browser-fetch"
+            except Exception:
+                result = None
 
-            verified_provinces.append(province_record)
-            agencies.extend(province_agencies)
-            communes.extend(province_communes)
-            manifest.append({
-                **province,
-                "rootDepartmentId": root_id,
-                "status": "verified",
-                "agencyCount": len(province_agencies),
-                "communeCount": len(province_communes),
-                "evaluationCount": len(response_payload["data"].get("evaluation") or []),
-                "responseSha256": sha256_text(text),
-                "warnings": warnings,
-            })
-            print(
-                f"    VERIFIED | evaluation={manifest[-1]['evaluationCount']} | "
-                f"agency={len(province_agencies)} | commune={len(province_communes)}"
-            )
-            time.sleep(max(0.0, args.delay))
+        if result is None:
+            return False, {
+                "status": "failed_request",
+                "method": method,
+                "error": "No matching province response obtained",
+            }
 
-        browser.close()
+        status, text, content_type = result
+        if status not in (200, 201):
+            return False, {
+                "status": "failed_http",
+                "httpStatus": status,
+                "contentType": content_type,
+                "bodyPreview": safe_preview(text),
+                "method": method,
+            }
+        if not response_matches_province(text, province):
+            return False, {
+                "status": "failed_verification",
+                "httpStatus": status,
+                "contentType": content_type,
+                "bodyPreview": safe_preview(text),
+                "method": method,
+                "error": "Response did not match requested province",
+            }
 
-    generated_at = utc_now()
-    write_json(catalog_dir / "provinces.json", {
-        "schemaVersion": 2,
-        "generatedAt": generated_at,
-        "year": args.year,
-        "source": SOURCE_URL,
-        "count": len(verified_provinces),
-        "provinces": verified_provinces,
-    })
-    write_json(catalog_dir / "agencies.json", {
-        "schemaVersion": 2,
-        "generatedAt": generated_at,
-        "year": args.year,
-        "count": len(agencies),
-        "agencies": agencies,
-    })
-    write_json(catalog_dir / "communes.json", {
-        "schemaVersion": 2,
-        "generatedAt": generated_at,
-        "year": args.year,
-        "count": len(communes),
-        "communes": communes,
-    })
-    write_json(catalog_dir / "crawl-manifest.json", {
-        "schemaVersion": 1,
-        "generatedAt": generated_at,
-        "year": args.year,
-        "endpoint": ENDPOINT,
-        "requested": len(targets),
-        "verified": sum(1 for x in manifest if x.get("status") == "verified"),
-        "failed": sum(1 for x in manifest if x.get("status") != "verified"),
-        "items": manifest,
-    })
+        payload = parse_response(text)
+        province_record, agencies, communes, warnings = verify_and_extract(province, payload)
+        return True, {
+            "status": "verified",
+            "method": method,
+            "httpStatus": status,
+            "contentType": content_type,
+            "responseSha256": sha256_text(text),
+            "evaluationCount": len(payload["data"].get("evaluation") or []),
+            "agencyCount": len(agencies),
+            "communeCount": len(communes),
+            "warnings": warnings,
+            "provinceRecord": province_record,
+            "rawText": text,
+        }
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
 
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--year", type=int, default=datetime.now().year)
+    parser.add_argument("--all", action="store_true", help="Crawl all discovered provinces")
+    parser.add_argument("--limit", type=int, default=1, help="Number of provinces when --all is not used")
+    parser.add_argument("--province-code", help="Crawl a single province, e.g. H20")
+    parser.add_argument("--headed", action="store_true", help="Show Chromium windows")
+    parser.add_argument("--ui-first", action="store_true", help="Try the live province selector before browser fetch")
+    parser.add_argument("--force", action="store_true", help="Recrawl even if RAW already exists")
+    parser.add_argument("--resume", action="store_true", help="Skip provinces already verified in checkpoint")
+    parser.add_argument("--retry-failed", action="store_true", help="Crawl only provinces previously marked failed")
+    parser.add_argument("--timeout", type=int, default=45_000)
+    parser.add_argument("--delay-min", type=float, default=3.0)
+    parser.add_argument("--delay-max", type=float, default=6.0)
+    parser.add_argument("--retries-per-province", type=int, default=2)
+    args = parser.parse_args()
+
+    if args.delay_max < args.delay_min:
+        raise SystemExit("--delay-max must be >= --delay-min")
+
+    provinces = load_provinces()
+    if not provinces:
+        raise RuntimeError("No province records found")
+
+    if args.province_code:
+        targets = [p for p in provinces if p["departmentCode"] == args.province_code]
+        if not targets:
+            raise RuntimeError(f"Province code not found: {args.province_code}")
+    elif args.all:
+        targets = provinces
+    else:
+        targets = provinces[: max(1, args.limit)]
+
+    raw_dir = ROOT / "data" / "raw" / str(args.year) / "provinces"
+    catalog_dir = ROOT / "data" / "catalog" / str(args.year)
+    state_dir = ROOT / "data" / "state"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    catalog_dir.mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_path = state_dir / f"crawl-{args.year}.json"
+    checkpoint = load_checkpoint(checkpoint_path)
+    checkpoint["year"] = args.year
+    checkpoint["endpoint"] = ENDPOINT
+
+    if args.resume:
+        targets = [p for p in targets if classify_status_from_checkpoint(checkpoint["items"].get(p["departmentCode"])) != "verified"]
+    elif args.retry_failed:
+        targets = [p for p in targets if classify_status_from_checkpoint(checkpoint["items"].get(p["departmentCode"])) not in ("failed_request", "failed_http", "failed_verification", "error")]
+
+    print(f"Discovered {len(provinces)} province records. Crawling {len(targets)} province(s).")
+    if args.resume:
+        print("Mode: RESUME")
+    elif args.retry_failed:
+        print("Mode: RETRY-FAILED")
+    else:
+        print("Mode: NORMAL")
+
+    try:
+        with sync_playwright() as pw:
+            for index, province in enumerate(targets, start=1):
+                code = province["departmentCode"]
+                name = province["departmentName"]
+                print(f"[{index}/{len(targets)}] {code} - {name}")
+                print(f"    rootDepartmentId={province['departmentId']}")
+
+                previous = checkpoint["items"].get(code, {})
+                raw_path = raw_dir / f"{code}.json"
+
+                if args.resume and previous.get("status") == "verified" and raw_path.exists() and not args.force:
+                    print("    already verified; skipping")
+                    continue
+
+                if not args.force and previous.get("status") == "verified" and raw_path.exists():
+                    print("    verified RAW exists; skipping (use --force to recrawl)")
+                    continue
+
+                success = False
+                last_result: dict[str, Any] = {}
+                for attempt in range(1, args.retries_per_province + 2):
+                    print(f"    attempt {attempt}/{args.retries_per_province + 1}")
+                    try:
+                        success, result = crawl_one_province(
+                            pw,
+                            province,
+                            args.year,
+                            headed=args.headed,
+                            timeout_ms=args.timeout,
+                            ui_first=args.ui_first,
+                        )
+                        last_result = result
+                        if success:
+                            break
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as exc:
+                        last_result = {"status": "error", "error": str(exc)}
+                    if not success and attempt <= args.retries_per_province:
+                        wait = min(30.0, args.delay_max * attempt)
+                        print(f"    retrying province after {wait:.1f}s...")
+                        time.sleep(wait)
+
+                if success:
+                    text = last_result.pop("rawText")
+                    raw_path.write_text(text, encoding="utf-8")
+                    last_result["departmentId"] = province["departmentId"]
+                    last_result["departmentName"] = name
+                    last_result["departmentCode"] = code
+                    last_result["rootDepartmentId"] = province["departmentId"]
+                    checkpoint["items"][code] = last_result
+                    print(
+                        f"    VERIFIED | evaluation={last_result['evaluationCount']} | "
+                        f"agency={last_result['agencyCount']} | commune={last_result['communeCount']} | method={last_result.get('method')}"
+                    )
+                else:
+                    checkpoint["items"][code] = {
+                        "departmentId": province["departmentId"],
+                        "departmentName": name,
+                        "departmentCode": code,
+                        "rootDepartmentId": province["departmentId"],
+                        **last_result,
+                    }
+                    print(f"    FAILED | {last_result.get('error', last_result.get('status', 'unknown'))}", file=sys.stderr)
+
+                catalog_summary = rebuild_catalog(args.year, provinces, raw_dir, catalog_dir, checkpoint)
+                save_checkpoint(checkpoint_path, checkpoint)
+                write_manifest(args.year, ENDPOINT, checkpoint, catalog_summary, catalog_dir)
+
+                wait = random.uniform(args.delay_min, args.delay_max)
+                print(f"    waiting {wait:.1f}s before next province...")
+                time.sleep(wait)
+    except KeyboardInterrupt:
+        catalog_summary = rebuild_catalog(args.year, provinces, raw_dir, catalog_dir, checkpoint)
+        save_checkpoint(checkpoint_path, checkpoint)
+        write_manifest(args.year, ENDPOINT, checkpoint, catalog_summary, catalog_dir)
+        print("\nStopped by user. Checkpoint saved; resume is safe.")
+        return 130
+
+    catalog_summary = rebuild_catalog(args.year, provinces, raw_dir, catalog_dir, checkpoint)
+    save_checkpoint(checkpoint_path, checkpoint)
+    write_manifest(args.year, ENDPOINT, checkpoint, catalog_summary, catalog_dir)
+
+    verified = sum(1 for item in checkpoint["items"].values() if item.get("status") == "verified")
+    failed = len(provinces) - verified
     print("\nSUMMARY")
     print(f"  requested provinces : {len(targets)}")
-    print(f"  verified provinces  : {len(verified_provinces)}")
-    print(f"  agencies            : {len(agencies)}")
-    print(f"  communes            : {len(communes)}")
+    print(f"  verified provinces  : {verified}")
+    print(f"  failed/not verified  : {failed}")
+    print(f"  agencies            : {catalog_summary['agencies']}")
+    print(f"  communes            : {catalog_summary['communes']}")
+    print(f"  checkpoint          : {checkpoint_path}")
     print(f"  raw directory       : {raw_dir}")
     print(f"  catalog directory   : {catalog_dir}")
     return 0
