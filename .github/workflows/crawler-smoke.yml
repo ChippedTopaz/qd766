@@ -22,7 +22,7 @@ concurrency:
 jobs:
   smoke-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -38,6 +38,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r tools/requirements.txt
           playwright install --with-deps chromium
+
+      - name: Bootstrap DVCQG province catalog
+        run: |
+          python tools/discover_dvc_structure.py
+
+      - name: Verify discovery output
+        run: |
+          test -f data/config/departments.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('data/config/departments.json')
+          data = json.loads(p.read_text(encoding='utf-8'))
+          rows = data.get('unclassified', [])
+          print(f'discovered province candidates: {len(rows)}')
+          if len(rows) < 34:
+              raise SystemExit(f'Expected at least 34 province records, found {len(rows)}')
+          PY
 
       - name: Run single-province smoke test
         run: |
