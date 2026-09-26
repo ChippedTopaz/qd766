@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Bảng theo dõi Bộ chỉ số phục vụ người dân, doanh nghiệp theo Quyết định 766." />
+    <title>Bộ chỉ số 766 · Phú Thọ</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="#top" aria-label="Bộ chỉ số 766 - Trang tổng quan">
+          <span class="brand-mark" aria-hidden="true">76<span>6</span></span>
+          <span>
+            <strong>Bộ chỉ số 766</strong>
+            <small>Chất lượng phục vụ người dân, doanh nghiệp</small>
+          </span>
+        </a>
+        <div class="source-badge">
+          <span class="source-dot"></span>
+          Dữ liệu mẫu từ Cổng DVCQG
+        </div>
+      </header>
+
+      <main id="top">
+        <section class="hero">
+          <div class="hero-copy">
+            <p class="eyebrow">UBND TỈNH PHÚ THỌ</p>
+            <h1>Bức tranh chất lượng phục vụ trong một màn hình</h1>
+            <p class="hero-description">
+              Theo dõi điểm do Cổng Dịch vụ công Quốc gia công bố, xem sâu từng
+              chỉ tiêu và nhận diện nơi cần ưu tiên cải thiện.
+            </p>
+          </div>
+          <div class="filters" aria-label="Bộ lọc báo cáo">
+            <label>
+              <span>Kỳ báo cáo</span>
+              <select id="period-select"></select>
+            </label>
+            <label class="procedure-filter">
+              <span>Thủ tục hành chính</span>
+              <select id="scope-select">
+                <option value="all">Toàn bộ thủ tục hành chính</option>
+                <option value="formality">2.000815 · Chứng thực bản sao</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="summary-grid" aria-label="Tổng quan điểm">
+          <article class="score-panel">
+            <div>
+              <p class="section-kicker">TỔNG ĐIỂM</p>
+              <div class="score-line">
+                <strong id="total-score">—</strong>
+                <span id="total-max">/ 100</span>
+              </div>
+              <p id="period-summary" class="muted">Đang tải dữ liệu…</p>
+            </div>
+            <div class="score-ring" id="score-ring" aria-label="Tỷ lệ tổng điểm">
+              <div><strong id="score-percent">—</strong><span>%</span></div>
+            </div>
+          </article>
+          <article class="principle-panel">
+            <p class="section-kicker">NGUYÊN TẮC HIỂN THỊ</p>
+            <h2>Điểm API là giá trị chính thức</h2>
+            <p>
+              Website không tự ghi đè điểm. Parameters được giữ nguyên để phân
+              tích; công thức chưa xác định sẽ được ghi rõ.
+            </p>
+            <div class="principle-tags">
+              <span>Không suy diễn</span><span>Giữ dữ liệu gốc</span><span>Minh bạch nguồn</span>
+            </div>
+          </article>
+        </section>
+
+        <section class="score-section">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">06 NHÓM CHỈ TIÊU</p>
+              <h2>Điểm theo thành phần</h2>
+            </div>
+            <p>Chọn một thẻ để xem chỉ tiêu, parameters và danh sách đơn vị.</p>
+          </div>
+          <div id="group-cards" class="group-grid" aria-live="polite"></div>
+        </section>
+
+        <section class="detail-section" id="detail-section">
+          <div class="detail-heading">
+            <div>
+              <p class="section-kicker">PHÂN TÍCH CHI TIẾT</p>
+              <h2 id="detail-title">—</h2>
+            </div>
+            <div id="detail-score" class="detail-score"></div>
+          </div>
+
+          <div id="formula-note" class="formula-note" hidden></div>
+
+          <div class="tab-list" role="tablist" aria-label="Nội dung phân tích">
+            <button class="tab active" data-tab="indicators" role="tab" aria-selected="true">Chỉ tiêu & parameters</button>
+            <button class="tab" data-tab="units" role="tab" aria-selected="false">Đơn vị trực thuộc</button>
+          </div>
+
+          <div id="indicators-panel" class="tab-panel active" role="tabpanel">
+            <div id="indicator-content"></div>
+          </div>
+
+          <div id="units-panel" class="tab-panel" role="tabpanel">
+            <div class="table-toolbar">
+              <div>
+                <h3>Danh sách đơn vị</h3>
+                <p id="unit-count" class="muted"></p>
+              </div>
+              <label class="search-box">
+                <span class="sr-only">Tìm đơn vị</span>
+                <input id="unit-search" type="search" placeholder="Tìm sở, xã, phường…" />
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Đơn vị</th><th>Cấp</th><th>Điểm</th><th>Tỷ lệ</th><th>Mức đạt</th></tr>
+                </thead>
+                <tbody id="unit-rows"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <p>Nguyên mẫu M2 · Dữ liệu fixture Phú Thọ · Không phải hệ thống công bố chính thức</p>
+        <p id="raw-reference"></p>
+      </footer>
+    </div>
+
+    <div id="error-state" class="error-state" hidden>
+      <strong>Không thể tải dữ liệu mẫu.</strong>
+      <span>Hãy mở website qua máy chủ cục bộ thay vì mở trực tiếp file HTML.</span>
+    </div>
+    <script src="./app.js" defer></script>
+  </body>
+</html>
