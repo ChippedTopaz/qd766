@@ -1,0 +1,779 @@
+{
+  "schemaVersion": 1,
+  "status": "validated-offline",
+  "province": {
+    "id": "019d2be3-6a88-732b-8b17-b68020c8553a",
+    "name": "UBND tỉnh Phú Thọ"
+  },
+  "formality": {
+    "code": "2.000815",
+    "id": "019d2bfd-8e22-77ef-819f-e49460350904",
+    "name": "Chứng thực bản sao từ bản chính giấy tờ, văn bản do cơ quan, tổ chức có thẩm quyền của Việt Nam; cơ quan, tổ chức có thẩm quyền của nước ngoài; cơ quan, tổ chức có thẩm quyền của Việt Nam liên kết với cơ quan, tổ chức có thẩm quyền của nước ngoài cấp hoặc chứng nhận"
+  },
+  "captures": [
+    {
+      "file": "formalities/code-2.000815-page-1.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/formalities",
+      "payload": {
+        "q": "2.000815",
+        "currentPage": 1,
+        "pageSize": 10
+      },
+      "httpStatus": 201,
+      "contentType": "application/json",
+      "capturedAt": "2026-09-26T11:16:22.677482+00:00",
+      "sha256": "949d0adb53613444798afe3fab55fc013e7ea29b60ea506a01b0033bcfa74d16",
+      "bytes": 142243,
+      "period": null,
+      "scope": null,
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "transparency/year-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/transparency",
+      "payload": {
+        "timeType": "year",
+        "year": 2026,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:20:53.102320+00:00",
+      "sha256": "830134553eb42023db10b17bbc1a796644af0c67d70c29d72bccd566e2e5d773",
+      "bytes": 176646,
+      "period": "year",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "transparency/year-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/transparency",
+      "payload": {
+        "timeType": "year",
+        "year": 2026,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:20:55.707492+00:00",
+      "sha256": "9b095fb6f6e5ce83086b03db11db40fa3b7d12d41b07b5ac49e11dcb5d6ad0bf",
+      "bytes": 177298,
+      "period": "year",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "transparency/quarter-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/transparency",
+      "payload": {
+        "timeType": "quarter",
+        "year": 2026,
+        "quarter": 3,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:20:58.357511+00:00",
+      "sha256": "1f52b5125d292fcee0bebd005460e3db092c8541dde4cc4e23d2b247d2c339d3",
+      "bytes": 176602,
+      "period": "quarter",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "transparency/quarter-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/transparency",
+      "payload": {
+        "timeType": "quarter",
+        "year": 2026,
+        "quarter": 3,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:00.964697+00:00",
+      "sha256": "be5f2c9b59e413331074a75767b32a0eff421d9a8055d4941c99f1877f4c7ebc",
+      "bytes": 177254,
+      "period": "quarter",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "transparency/month-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/transparency",
+      "payload": {
+        "timeType": "month",
+        "year": 2026,
+        "month": 9,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:04.097299+00:00",
+      "sha256": "f27ebe7ffb8a6fe8229aed4ff1436fabe06204ae71171022d22788210cb0a012",
+      "bytes": 177222,
+      "period": "month",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "transparency/month-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/transparency",
+      "payload": {
+        "timeType": "month",
+        "year": 2026,
+        "month": 9,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:06.970870+00:00",
+      "sha256": "3cfc2b9c96de5fa2c01b6003c365a3a56140f49342bc03037041a53ef1c70ab9",
+      "bytes": 177054,
+      "period": "month",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "handling-satisfaction/year-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/handling-satisfaction",
+      "payload": {
+        "fromDate": "2026-01-01",
+        "toDate": "2026-12-31",
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:10.155149+00:00",
+      "sha256": "713d8a8a59f109a37c6dcefb51f273410e75226f978f917a2416b47cfb7c71ad",
+      "bytes": 199029,
+      "period": "year",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "handling-satisfaction/quarter-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/handling-satisfaction",
+      "payload": {
+        "fromDate": "2026-07-01",
+        "toDate": "2026-09-30",
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:13.718765+00:00",
+      "sha256": "b0bdc7850f24f1e093c281a2380c32f8a9583f9dbae1c649cebfca04f676e820",
+      "bytes": 199170,
+      "period": "quarter",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "handling-satisfaction/month-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/handling-satisfaction",
+      "payload": {
+        "fromDate": "2026-09-01",
+        "toDate": "2026-09-30",
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:17.190538+00:00",
+      "sha256": "aa2645bb06e5cd14341f43d695c67fd0ff89a4eb733bd3e387bdc6a84f2f9aeb",
+      "bytes": 199234,
+      "period": "month",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dossier-digitized/year-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dossier-digitized",
+      "payload": {
+        "timeType": "year",
+        "year": 2026,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:19.650220+00:00",
+      "sha256": "061c13d9f1061880f599d6be8aa0982b707049cc2d33b42fa5cac5c49a990f59",
+      "bytes": 296048,
+      "period": "year",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dossier-digitized/year-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dossier-digitized",
+      "payload": {
+        "timeType": "year",
+        "year": 2026,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200,
+        "formalityID": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:22.676449+00:00",
+      "sha256": "f2cd507eb7e421bf8c169abe6bbf5e662b448d8d9dd963463a73756e7ba274c3",
+      "bytes": 259543,
+      "period": "year",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dossier-digitized/quarter-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dossier-digitized",
+      "payload": {
+        "timeType": "quarter",
+        "year": 2026,
+        "quarter": 3,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:25.156311+00:00",
+      "sha256": "c84c492d8e742e0bf11b0204410fe87a7127be8803d55d605e847569905ddad3",
+      "bytes": 295676,
+      "period": "quarter",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dossier-digitized/quarter-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dossier-digitized",
+      "payload": {
+        "timeType": "quarter",
+        "year": 2026,
+        "quarter": 3,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200,
+        "formalityID": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:27.444192+00:00",
+      "sha256": "c68d7530e748d8603da0e17bd2f220e34bbbfc9adb349afddb866084b7c8a413",
+      "bytes": 258815,
+      "period": "quarter",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dossier-digitized/month-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dossier-digitized",
+      "payload": {
+        "timeType": "month",
+        "year": 2026,
+        "month": 9,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:30.098769+00:00",
+      "sha256": "f97906e66a7b95c8f1c7d8fa35af2044cb61ba63b3aaecdaa3c32761ac444672",
+      "bytes": 294426,
+      "period": "month",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dossier-digitized/month-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dossier-digitized",
+      "payload": {
+        "timeType": "month",
+        "year": 2026,
+        "month": 9,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200,
+        "formalityID": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:33.091828+00:00",
+      "sha256": "4cb01722e7a2cb9bb1607e978b0dc278aec20f667ed51f16a6f8c9e2d70244f7",
+      "bytes": 256672,
+      "period": "month",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dvc-progress-tree/year-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dvc-progress-tree",
+      "payload": {
+        "timeType": "year",
+        "year": 2026,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:36.859702+00:00",
+      "sha256": "7550229899474f38191243c44f7e38b5588526a6b41f2fe346582363bf202264",
+      "bytes": 47748,
+      "period": "year",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dvc-progress-tree/year-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dvc-progress-tree",
+      "payload": {
+        "timeType": "year",
+        "year": 2026,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:39.619648+00:00",
+      "sha256": "97a84a142f606bb06ddc7ceb6cb6829ce264aa7e101e00755b50bd33d97fa3e5",
+      "bytes": 47137,
+      "period": "year",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dvc-progress-tree/quarter-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dvc-progress-tree",
+      "payload": {
+        "timeType": "quarter",
+        "year": 2026,
+        "quarter": 3,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:42.527745+00:00",
+      "sha256": "28291f0f77e17fc5576c5adc63d99a38a247c2f62487f20945e62f064e17dee0",
+      "bytes": 47666,
+      "period": "quarter",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dvc-progress-tree/quarter-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dvc-progress-tree",
+      "payload": {
+        "timeType": "quarter",
+        "year": 2026,
+        "quarter": 3,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:44.883311+00:00",
+      "sha256": "12083be648c116778dd2a8a925d1e171e4c5f3c3e9531d18b840b8764b27ecc5",
+      "bytes": 47032,
+      "period": "quarter",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dvc-progress-tree/month-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dvc-progress-tree",
+      "payload": {
+        "timeType": "month",
+        "year": 2026,
+        "month": 9,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:48.276804+00:00",
+      "sha256": "abf73b2cf57af7cf391656fb51a9a8c8f004b4cf9891bf72a8ed26f25c476ad4",
+      "bytes": 47397,
+      "period": "month",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "dvc-progress-tree/month-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/dvc-progress-tree",
+      "payload": {
+        "timeType": "month",
+        "year": 2026,
+        "month": 9,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:51.448764+00:00",
+      "sha256": "7ee7b56f4ee81e1f23b753639461413788eb407623175774d3ab2f296154a6e3",
+      "bytes": 46765,
+      "period": "month",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "provide-online-tree/year-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/provide-online-tree",
+      "payload": {
+        "timeType": "year",
+        "year": 2026,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:55.060956+00:00",
+      "sha256": "bfd90891e6ce8640cbc25b4b0bc7fcd1f354f4a7cc02f9eccf9b74f9666e6430",
+      "bytes": 35616,
+      "period": "year",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "provide-online-tree/year-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/provide-online-tree",
+      "payload": {
+        "timeType": "year",
+        "year": 2026,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:21:57.573913+00:00",
+      "sha256": "2bc3c88cbac8ce43e858b397ebb421154fe7d126984c97877dac63c4b0781f31",
+      "bytes": 35270,
+      "period": "year",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "provide-online-tree/quarter-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/provide-online-tree",
+      "payload": {
+        "timeType": "quarter",
+        "year": 2026,
+        "quarter": 3,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:00.580682+00:00",
+      "sha256": "8bf5e9ca32f6b75d4a6b681209753e298ef1128bd4cbe9d9dfbbc92641f1164b",
+      "bytes": 35590,
+      "period": "quarter",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "provide-online-tree/quarter-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/provide-online-tree",
+      "payload": {
+        "timeType": "quarter",
+        "year": 2026,
+        "quarter": 3,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:03.433610+00:00",
+      "sha256": "dbe87c75328863034785521b31d3bf9a0b74b371802376e0de7231c7bcac775f",
+      "bytes": 35266,
+      "period": "quarter",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "provide-online-tree/month-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/provide-online-tree",
+      "payload": {
+        "timeType": "month",
+        "year": 2026,
+        "month": 9,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:05.982103+00:00",
+      "sha256": "13635abd0d69859b00f07c130b5930d5cbcce0452f1b2f67bfca3ae6ba24048f",
+      "bytes": 35591,
+      "period": "month",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "provide-online-tree/month-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/provide-online-tree",
+      "payload": {
+        "timeType": "month",
+        "year": 2026,
+        "month": 9,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 200,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:09.035186+00:00",
+      "sha256": "088cd799b3c8d3faf09e6c5f19c12af820d4e74ecf41de8eec53a40958e9cc2e",
+      "bytes": 35258,
+      "period": "month",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "formality-online-payment-tree/year-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/formality-online-payment-tree",
+      "payload": {
+        "timeType": "year",
+        "year": 2026,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:12.096693+00:00",
+      "sha256": "8397820a55a8e8a75ff73f51fb3b7082f9e91418f7120e438c80b1bc558a098c",
+      "bytes": 70025,
+      "period": "year",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "formality-online-payment-tree/year-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/formality-online-payment-tree",
+      "payload": {
+        "timeType": "year",
+        "year": 2026,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:15.327568+00:00",
+      "sha256": "5a12de74d1bf2684643d9bff81d2efd504c960a72962e7a45c3cfb36a2aa2646",
+      "bytes": 69860,
+      "period": "year",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "formality-online-payment-tree/quarter-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/formality-online-payment-tree",
+      "payload": {
+        "timeType": "quarter",
+        "year": 2026,
+        "quarter": 3,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:18.944618+00:00",
+      "sha256": "1b583dd7bbdd56a73be2a6da387093524e72c7fb90ef7d4af8ea69ae5726f386",
+      "bytes": 69973,
+      "period": "quarter",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "formality-online-payment-tree/quarter-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/formality-online-payment-tree",
+      "payload": {
+        "timeType": "quarter",
+        "year": 2026,
+        "quarter": 3,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:21.992762+00:00",
+      "sha256": "3599dc7bd9714fa3b59069c0804824bebc627ba9da28e98e28d36f4dedd2879e",
+      "bytes": 69757,
+      "period": "quarter",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "formality-online-payment-tree/month-all.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/formality-online-payment-tree",
+      "payload": {
+        "timeType": "month",
+        "year": 2026,
+        "month": 9,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:25.466479+00:00",
+      "sha256": "541527ebd9d448cf7f0836caa1860c1556b17dd51195a34cd9b385594d8f2f40",
+      "bytes": 69665,
+      "period": "month",
+      "scope": "all",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "formality-online-payment-tree/month-formality.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/evaluation/formality-online-payment-tree",
+      "payload": {
+        "timeType": "month",
+        "year": 2026,
+        "month": 9,
+        "rootDepartmentId": "019d2be3-6a88-732b-8b17-b68020c8553a",
+        "currentPage": 1,
+        "pageSize": 100,
+        "formalityId": "019d2bfd-8e22-77ef-819f-e49460350904"
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:28.722868+00:00",
+      "sha256": "42f33f74779500b5f0163ac23202d1821bd4717b860d2232c35d00e173a3d711",
+      "bytes": 69570,
+      "period": "month",
+      "scope": "formality",
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "formalities/page-1.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/formalities",
+      "payload": {
+        "currentPage": 1,
+        "pageSize": 10
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:31.739350+00:00",
+      "sha256": "f8267d8c51ef414ecff2e9ffd0f4d3093d0098e7efb0c38493b828eb423fa998",
+      "bytes": 16110,
+      "period": null,
+      "scope": null,
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "formalities/page-2.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/formalities",
+      "payload": {
+        "currentPage": 2,
+        "pageSize": 10
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:34.088024+00:00",
+      "sha256": "9abdc0406451e2300e6854a6f4b0f09fe9ed715a02fd5b1fd3d07246e3fcd37e",
+      "bytes": 145279,
+      "period": null,
+      "scope": null,
+      "verification": "json-envelope-and-scope-verified"
+    },
+    {
+      "file": "formalities/page-last.json",
+      "method": "POST",
+      "url": "https://dichvucong.gov.vn/api/v1/reporting/formalities",
+      "payload": {
+        "currentPage": 575,
+        "pageSize": 10
+      },
+      "httpStatus": 201,
+      "contentType": "application/json; charset=utf-8",
+      "capturedAt": "2026-09-26T11:22:36.947638+00:00",
+      "sha256": "1e3be453494bbe67b52772b7f4cca2a3aea0d51b4ea00aeceea20fb22b38cbea",
+      "bytes": 522,
+      "period": null,
+      "scope": null,
+      "verification": "json-envelope-and-scope-verified"
+    }
+  ]
+}

@@ -76,13 +76,25 @@ Metrics mẫu đã xác định: `PUBLISH_ON_TIME`, `PUBLIC_UPDATE_ON_TIME`, `PU
 
 ### 4.2 Mức độ hài lòng
 
+`POST https://dichvucong.gov.vn/api/v1/reporting/evaluation/handling-satisfaction`
+
+Endpoint dùng `fromDate` và `toDate` thay cho `timeType`. Ví dụ quý 3/2026:
+
+```json
+{
+  "fromDate": "2026-07-01",
+  "toDate": "2026-09-30",
+  "rootDepartmentId": "...",
+  "currentPage": 1,
+  "pageSize": 200
+}
+```
+
 Đã xác nhận cấu trúc response:
 
 `data.overview.metrics[]` + `data.evaluation[].metrics[]`.
 
 Nhóm này **không có drill-down theo TTHC**.
-
-Endpoint cụ thể cần chốt lại trong manifest khi triển khai crawler (TBD).
 
 Metrics mẫu đã quan sát: `PETITION_CLASSIFICATION_TTHC`, `DOSSIER_RECEIVING_SATISFACTION`, `PETITION_PROCESSING_ON_TIME`, `PETITION_HANDLING_SATISFACTION`, `PETITION_CLASSIFICATION_STAFF`.
 
@@ -204,7 +216,9 @@ Danh mục quan trọng vì `formalityId` nối TTHC với các API drill-down.
 
 ## 6. Pagination
 
-Hiện tại đã kiểm tra trên giao diện: các API dữ liệu QĐ766 đang được sử dụng theo kiểu **một response chứa toàn bộ dữ liệu hiển thị**, không cần crawler lặp page 1→N trong các mẫu đã kiểm tra.
+Hiện tại đã kiểm tra bằng fixture: các API dữ liệu QĐ766 đang được sử dụng theo kiểu **một response chứa toàn bộ dữ liệu hiển thị**, không cần crawler lặp page 1→N trong các mẫu đã kiểm tra.
+
+Riêng `/reporting/formalities`, lần thu M0 có 5.741 item với `pageSize=10` và 575 trang. Đã lưu trang 1, trang 2 và trang cuối để khóa quy tắc `currentPage < totalPages`; không crawl toàn bộ danh mục.
 
 Tuy vậy, `currentPage`/`pageSize` vẫn xuất hiện trong payload và phải được lưu nguyên request. Crawler không tự tạo vòng lặp trang nếu response không chứng minh có trang tiếp theo.
 
