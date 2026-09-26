@@ -292,3 +292,9 @@ Nguyên tắc an toàn:
 - checkpoint sau từng dataset;
 - lưu RAW ngay sau khi xác minh response;
 - chỉ push GitHub sau khi snapshot được đánh dấu hoàn chỉnh.
+
+## 11. Triển khai M1
+
+Mô hình chuẩn hóa, quy tắc snapshot hoàn chỉnh, cách giữ parameter chưa
+có công thức và chính sách điểm API được mô tả tại
+`docs/M1_NORMALIZATION.md`.

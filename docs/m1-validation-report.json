@@ -1,0 +1,191 @@
+{
+  "result": "PASS",
+  "scope": "Offline M1 normalization, completeness and API-score aggregation against captured M0 fixtures only",
+  "scoreAuthority": "DVCQG response score/totalScore",
+  "unknownFormulaPolicy": "retain and display parameters; do not recalculate",
+  "snapshots": [
+    {
+      "period": {
+        "type": "month",
+        "year": 2026,
+        "month": 9
+      },
+      "scope": "all",
+      "state": "complete",
+      "loadedGroups": [
+        "transparency",
+        "dvc-progress-tree",
+        "provide-online-tree",
+        "dossier-digitized",
+        "handling-satisfaction",
+        "formality-online-payment-tree"
+      ],
+      "unsupportedGroups": [],
+      "provinceAggregatedScore": 56.43,
+      "provinceAggregatedMaximum": 100,
+      "rootEntities": 6,
+      "childEntities": 978,
+      "rawReferences": [
+        "transparency/month-all.json",
+        "dvc-progress-tree/month-all.json",
+        "provide-online-tree/month-all.json",
+        "dossier-digitized/month-all.json",
+        "handling-satisfaction/month-all.json",
+        "formality-online-payment-tree/month-all.json"
+      ]
+    },
+    {
+      "period": {
+        "type": "month",
+        "year": 2026,
+        "month": 9
+      },
+      "scope": "formality",
+      "state": "complete",
+      "loadedGroups": [
+        "transparency",
+        "dvc-progress-tree",
+        "provide-online-tree",
+        "dossier-digitized",
+        "formality-online-payment-tree"
+      ],
+      "unsupportedGroups": [
+        "handling-satisfaction"
+      ],
+      "provinceAggregatedScore": 50.08,
+      "provinceAggregatedMaximum": 80,
+      "rootEntities": 5,
+      "childEntities": 815,
+      "rawReferences": [
+        "transparency/month-formality.json",
+        "dvc-progress-tree/month-formality.json",
+        "provide-online-tree/month-formality.json",
+        "dossier-digitized/month-formality.json",
+        "formality-online-payment-tree/month-formality.json"
+      ]
+    },
+    {
+      "period": {
+        "type": "quarter",
+        "year": 2026,
+        "quarter": 3
+      },
+      "scope": "all",
+      "state": "complete",
+      "loadedGroups": [
+        "transparency",
+        "dvc-progress-tree",
+        "provide-online-tree",
+        "dossier-digitized",
+        "handling-satisfaction",
+        "formality-online-payment-tree"
+      ],
+      "unsupportedGroups": [],
+      "provinceAggregatedScore": 61.39,
+      "provinceAggregatedMaximum": 100,
+      "rootEntities": 6,
+      "childEntities": 978,
+      "rawReferences": [
+        "transparency/quarter-all.json",
+        "dvc-progress-tree/quarter-all.json",
+        "provide-online-tree/quarter-all.json",
+        "dossier-digitized/quarter-all.json",
+        "handling-satisfaction/quarter-all.json",
+        "formality-online-payment-tree/quarter-all.json"
+      ]
+    },
+    {
+      "period": {
+        "type": "quarter",
+        "year": 2026,
+        "quarter": 3
+      },
+      "scope": "formality",
+      "state": "complete",
+      "loadedGroups": [
+        "transparency",
+        "dvc-progress-tree",
+        "provide-online-tree",
+        "dossier-digitized",
+        "formality-online-payment-tree"
+      ],
+      "unsupportedGroups": [
+        "handling-satisfaction"
+      ],
+      "provinceAggregatedScore": 52.91,
+      "provinceAggregatedMaximum": 80,
+      "rootEntities": 5,
+      "childEntities": 815,
+      "rawReferences": [
+        "transparency/quarter-formality.json",
+        "dvc-progress-tree/quarter-formality.json",
+        "provide-online-tree/quarter-formality.json",
+        "dossier-digitized/quarter-formality.json",
+        "formality-online-payment-tree/quarter-formality.json"
+      ]
+    },
+    {
+      "period": {
+        "type": "year",
+        "year": 2026
+      },
+      "scope": "all",
+      "state": "complete",
+      "loadedGroups": [
+        "transparency",
+        "dvc-progress-tree",
+        "provide-online-tree",
+        "dossier-digitized",
+        "handling-satisfaction",
+        "formality-online-payment-tree"
+      ],
+      "unsupportedGroups": [],
+      "provinceAggregatedScore": 61.89,
+      "provinceAggregatedMaximum": 100,
+      "rootEntities": 6,
+      "childEntities": 978,
+      "rawReferences": [
+        "transparency/year-all.json",
+        "dvc-progress-tree/year-all.json",
+        "provide-online-tree/year-all.json",
+        "dossier-digitized/year-all.json",
+        "handling-satisfaction/year-all.json",
+        "formality-online-payment-tree/year-all.json"
+      ]
+    },
+    {
+      "period": {
+        "type": "year",
+        "year": 2026
+      },
+      "scope": "formality",
+      "state": "complete",
+      "loadedGroups": [
+        "transparency",
+        "dvc-progress-tree",
+        "provide-online-tree",
+        "dossier-digitized",
+        "formality-online-payment-tree"
+      ],
+      "unsupportedGroups": [
+        "handling-satisfaction"
+      ],
+      "provinceAggregatedScore": 54.47,
+      "provinceAggregatedMaximum": 80,
+      "rootEntities": 5,
+      "childEntities": 815,
+      "rawReferences": [
+        "transparency/year-formality.json",
+        "dvc-progress-tree/year-formality.json",
+        "provide-online-tree/year-formality.json",
+        "dossier-digitized/year-formality.json",
+        "formality-online-payment-tree/year-formality.json"
+      ]
+    }
+  ],
+  "remainingGaps": [
+    "Dịch vụ công trực tuyến chưa có công thức điểm đầy đủ",
+    "METRICS maxScore còn trống tại STT 7, 8, 9, 10, 18",
+    "Chưa kiểm chứng crawler production và các tỉnh ngoài Phú Thọ"
+  ]
+}
