@@ -11,7 +11,8 @@
     "TEMP_NATIONAL_REPORT_DENOMINATOR"
   ],
   "remainingGaps": [
-    "Detailed executable scoring formulas not supplied",
+    "Dịch vụ công trực tuyến chưa đủ biến thiên để tách công thức điểm nền; xem scoring-formula-analysis.m0.json",
+    "SYNCED_WITH_DVCQG_PERSONAL_STORAGE chưa có quan sát tỷ lệ dương",
     "METRICS maxScore blank at STT 7,8,9,10,18",
     "Live responses do not echo formality ID; filtering evidence combines deployed client source, selected UI, catalog identity and changed all/formality results",
     "Unseen provinces, periods, empty catalogs and error responses are outside this M0 sample"

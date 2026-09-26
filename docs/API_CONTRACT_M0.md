@@ -40,7 +40,8 @@ Kỳ quý thêm `"quarter":3`; kỳ tháng thêm `"month":9`. `pageSize` thay th
 bảng trên. Khi lọc TTHC, payload thêm đúng khóa phân biệt hoa/thường trong cột
 TTHC. Không chuẩn hóa `formalityID` thành `formalityId` ở tầng adapter.
 
-Mức độ hài lòng dùng khoảng ngày thay vì `timeType`:
+Mức độ hài lòng dùng khoảng ngày thay vì `timeType` ở tầng
+transport:
 
 ```json
 {"fromDate":"2026-07-01","toDate":"2026-09-30","rootDepartmentId":"019d2be3-6a88-732b-8b17-b68020c8553a","currentPage":1,"pageSize":200}
@@ -48,6 +49,11 @@ Mức độ hài lòng dùng khoảng ngày thay vì `timeType`:
 
 Ba fixture tương ứng dùng `2026-09-01..2026-09-30`,
 `2026-07-01..2026-09-30` và `2026-01-01..2026-12-31`.
+
+Mô hình sản phẩm vẫn chỉ có ba lựa chọn `month`, `quarter`, `year`.
+Người dùng không nhập `fromDate`/`toDate`; adapter tự suy ra ngày đầu
+và ngày cuối của kỳ. `src/qd766/periods.py` là phần triển khai tham
+chiếu và đã được đối chiếu với toàn bộ 33 request trong manifest.
 
 ## Contract TTHC mẫu và phân trang
 
@@ -101,9 +107,12 @@ Các STT 7, 8, 9, 10 và 18 chưa có `maxScore`; không suy diễn thành 0. C�
 điểm tối đa cho tiêu chí không áp dụng, nhưng chỉ có thể triển khai khi điểm tối
 đa của từng tiêu chí đã được cung cấp.
 
-Cột “Công thức tính” là mô tả hiển thị. M0 không chuyển nội dung này thành mã
-tính điểm. Tiến độ giải quyết và Dịch vụ công trực tuyến sẽ tính từ parameter;
-công thức chi tiết chưa được cung cấp.
+Cột “Công thức tính” là mô tả hiển thị. Điểm API trả về là
+giá trị chính; không tính lại rồi ghi đè. Phân tích ngược từ cột này và
+fixture được lưu trong `docs/SCORING_ANALYSIS_M0.md` và
+`docs/scoring-formula-analysis.m0.json`. Tiến độ giải quyết đã khóa được
+công thức trên M0; Dịch vụ công trực tuyến mới khóa được một thành
+phần và chưa được phép triển khai thành công thức tổng quát.
 
 ## Kiểm tra và giới hạn
 
@@ -117,7 +126,9 @@ PASS chỉ xác nhận raw bytes chưa đổi, đủ 37 fixture, endpoint/payloa
 schema và phạm vi tỉnh hợp lệ, phân trang danh mục nhất quán, metric trong
 METRICS khớp response, và tổng điểm tỉnh đã khai báo bằng 100.
 
-PASS không xác nhận công thức chấm điểm, mọi tỉnh/mọi năm, trường hợp dữ liệu
-rỗng/lỗi, hay crawler production. API response không echo ID TTHC; bằng chứng
+PASS của `validate_m0.py` không xác nhận công thức chấm điểm, mọi
+tỉnh/mọi năm, trường hợp dữ liệu rỗng/lỗi, hay crawler production. PASS
+của `analyze_scoring_formulas.py` chỉ xác nhận phép tính tái tạo được các
+điểm M0 trong sai số đã công bố. API response không echo ID TTHC; bằng chứng
 lọc TTHC gồm mã client đang triển khai, lựa chọn hiển thị trên giao diện, item
 danh mục và sự khác biệt giữa fixture `all`/`formality`.

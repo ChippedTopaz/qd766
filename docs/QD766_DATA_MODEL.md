@@ -17,11 +17,16 @@ Nguyên tắc: **RAW JSON là nguồn sự thật; không bỏ trường; không
 
 ## 3. Chiều thời gian
 
-DVCQG cho phép thống kê theo:
+DVCQG cho phép người dùng chọn ba loại kỳ:
 
 - `timeType = year` + `year`
 - `timeType = quarter` + `year` + `quarter`
 - `timeType = month` + `year` + `month`
+
+Ba giá trị này là mô hình nghiệp vụ chung. Riêng endpoint Mức độ hài
+lòng không nhận `timeType`; adapter chuyển kỳ đã chọn thành khoảng
+`fromDate`/`toDate` bao trọn tháng, quý hoặc năm. Giao diện không cho người
+dùng thay đổi trực tiếp hai ngày này.
 
 Một request dữ liệu phải được định danh bởi tối thiểu:
 
