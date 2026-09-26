@@ -16,7 +16,7 @@ from qd766 import PeriodSelection, build_fixture_snapshot
 def validate(root: Path) -> dict:
     fixtures = root / "tests/fixtures"
     snapshots = []
-    for period_type, value in (("month", 9), ("quarter", 3), ("year", None)):
+    for period_type, value in (("month", 8), ("quarter", 3), ("year", None)):
         for scope in ("all", "formality"):
             snapshot = build_fixture_snapshot(
                 fixtures, PeriodSelection(period_type, 2026, value), scope

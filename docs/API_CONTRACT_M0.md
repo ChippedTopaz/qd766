@@ -8,7 +8,7 @@ Bộ fixture M0 được thu ngày 2026-09-26 từ trang công khai
 - `rootDepartmentId`: `019d2be3-6a88-732b-8b17-b68020c8553a`
 - năm: 2026
 - quý mẫu: quý 3
-- tháng mẫu: tháng 9
+- tháng mẫu: tháng 8 (kỳ tháng gần nhất đã kết thúc tại thời điểm thu)
 - TTHC mẫu: `2.000815`
 - `formalityId`: `019d2bfd-8e22-77ef-819f-e49460350904`
 
@@ -36,7 +36,7 @@ Năm nhóm trừ Mức độ hài lòng dùng:
 {"timeType":"year","year":2026,"rootDepartmentId":"019d2be3-6a88-732b-8b17-b68020c8553a","currentPage":1,"pageSize":200}
 ```
 
-Kỳ quý thêm `"quarter":3`; kỳ tháng thêm `"month":9`. `pageSize` thay theo
+Kỳ quý thêm `"quarter":3`; kỳ tháng thêm `"month":8`. `pageSize` thay theo
 bảng trên. Khi lọc TTHC, payload thêm đúng khóa phân biệt hoa/thường trong cột
 TTHC. Không chuẩn hóa `formalityID` thành `formalityId` ở tầng adapter.
 
@@ -47,13 +47,18 @@ transport:
 {"fromDate":"2026-07-01","toDate":"2026-09-30","rootDepartmentId":"019d2be3-6a88-732b-8b17-b68020c8553a","currentPage":1,"pageSize":200}
 ```
 
-Ba fixture tương ứng dùng `2026-09-01..2026-09-30`,
+Ba fixture tương ứng dùng `2026-08-01..2026-08-31`,
 `2026-07-01..2026-09-30` và `2026-01-01..2026-12-31`.
 
 Mô hình sản phẩm vẫn chỉ có ba lựa chọn `month`, `quarter`, `year`.
 Người dùng không nhập `fromDate`/`toDate`; adapter tự suy ra ngày đầu
 và ngày cuối của kỳ. `src/qd766/periods.py` là phần triển khai tham
 chiếu và đã được đối chiếu với toàn bộ 33 request trong manifest.
+
+Tại biên thu thập live, tháng chỉ được gọi sau ngày cuối cùng của tháng đó.
+Quý hiện tại và năm hiện tại được giao diện cho phép; quý/năm tương lai bị
+từ chối trước khi phát request. Ví dụ ngày 27/09/2026 cho phép tháng 8/2026,
+quý 3/2026 và năm 2026, nhưng không cho phép tháng 9 hoặc quý 4/2026.
 
 ## Contract TTHC mẫu và phân trang
 
@@ -111,8 +116,8 @@ Cột “Công thức tính” là mô tả hiển thị. Điểm API trả về
 giá trị chính; không tính lại rồi ghi đè. Phân tích ngược từ cột này và
 fixture được lưu trong `docs/SCORING_ANALYSIS_M0.md` và
 `docs/scoring-formula-analysis.m0.json`. Tiến độ giải quyết đã khóa được
-công thức trên M0; Dịch vụ công trực tuyến mới khóa được một thành
-phần và chưa được phép triển khai thành công thức tổng quát.
+công thức trên M0; Dịch vụ công trực tuyến chưa xác định được công thức hoặc
+thành phần đủ ổn định để triển khai.
 
 ## Kiểm tra và giới hạn
 

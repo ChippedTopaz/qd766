@@ -140,7 +140,7 @@ def _assemble_snapshot(
                 "never replace an API score silently"
             ),
         },
-        provinceAggregatedScore=sum(scores) if can_total else None,
+        provinceAggregatedScore=round(sum(scores), 2) if can_total else None,
         provinceAggregatedMaximum=sum(maxima) if can_total else None,
         datasets=datasets,
     )

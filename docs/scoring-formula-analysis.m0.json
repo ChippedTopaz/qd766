@@ -23,11 +23,11 @@
       "formula": "score = maxScore * ratio / 100",
       "rounding": "API exposes score to two decimals",
       "evidence": {
-        "observations": 2290,
+        "observations": 2124,
         "maxAbsoluteError": 0.005,
-        "meanAbsoluteError": 0.001074235808,
+        "meanAbsoluteError": 0.00115819209,
         "tolerance": 0.015,
-        "withinTolerance": 2290,
+        "withinTolerance": 2124,
         "result": "PASS"
       }
     },
@@ -38,8 +38,8 @@
       "formula": "score = 0 when denominator = 0; otherwise min(6, 6 * numerator / denominator / 0.90)",
       "evidence": {
         "observations": 492,
-        "maxAbsoluteError": 0.004869888476,
-        "meanAbsoluteError": 0.000828928914,
+        "maxAbsoluteError": 0.005,
+        "meanAbsoluteError": 0.00089825226,
         "tolerance": 0.015,
         "withinTolerance": 492,
         "result": "PASS"
@@ -53,7 +53,7 @@
       "evidence": {
         "observations": 492,
         "maxAbsoluteError": 0.004210526316,
-        "meanAbsoluteError": 2.2022023e-05,
+        "meanAbsoluteError": 2.2166406e-05,
         "tolerance": 0.015,
         "withinTolerance": 492,
         "result": "PASS"
@@ -66,8 +66,8 @@
       "formula": "score = 6 when denominator = 0; otherwise 6 * numerator / denominator",
       "evidence": {
         "observations": 492,
-        "maxAbsoluteError": 0.00226993865,
-        "meanAbsoluteError": 1.3159733e-05,
+        "maxAbsoluteError": 0.002064777328,
+        "meanAbsoluteError": 1.2742738e-05,
         "tolerance": 0.015,
         "withinTolerance": 492,
         "result": "PASS"
@@ -78,13 +78,13 @@
       "metricCode": "CITIZEN_DATA_CONNECTED_DOSSIER",
       "status": "verified-on-m0",
       "formula": "score = min(maxScore, maxScore * ratio / 100)",
-      "nullScoresExcluded": 48,
+      "nullScoresExcluded": 49,
       "evidence": {
-        "observations": 936,
+        "observations": 935,
         "maxAbsoluteError": 0.005,
-        "meanAbsoluteError": 0.002341025641,
+        "meanAbsoluteError": 0.002374331551,
         "tolerance": 0.015,
-        "withinTolerance": 936,
+        "withinTolerance": 935,
         "result": "PASS"
       }
     },
@@ -97,7 +97,7 @@
       "evidence": {
         "observations": 492,
         "maxAbsoluteError": 0.005,
-        "meanAbsoluteError": 0.002431300813,
+        "meanAbsoluteError": 0.002320325203,
         "tolerance": 0.015,
         "withinTolerance": 492,
         "result": "PASS"
@@ -123,13 +123,13 @@
       "metricCode": "ORIGINAL_RESULT_AVAILABLE",
       "status": "verified-on-m0",
       "formula": "score = min(maxScore, maxScore * ratio / 100)",
-      "nullScoresExcluded": 48,
+      "nullScoresExcluded": 49,
       "evidence": {
-        "observations": 936,
+        "observations": 935,
         "maxAbsoluteError": 0.0052,
-        "meanAbsoluteError": 0.002476709402,
+        "meanAbsoluteError": 0.002463957219,
         "tolerance": 0.015,
-        "withinTolerance": 936,
+        "withinTolerance": 935,
         "result": "PASS"
       }
     },
@@ -138,13 +138,13 @@
       "metricCode": "REUSED_DIGITIZED_DATA",
       "status": "verified-on-m0",
       "formula": "score = min(maxScore, maxScore * ratio / 80)",
-      "nullScoresExcluded": 48,
+      "nullScoresExcluded": 49,
       "evidence": {
-        "observations": 936,
+        "observations": 935,
         "maxAbsoluteError": 0.005,
-        "meanAbsoluteError": 0.002365918803,
+        "meanAbsoluteError": 0.00236657754,
         "tolerance": 0.015,
-        "withinTolerance": 936,
+        "withinTolerance": 935,
         "result": "PASS"
       }
     },
@@ -153,13 +153,13 @@
       "metricCode": "SO_HOA_GIAY_TO_GIAI_QUYET",
       "status": "verified-on-m0",
       "formula": "score = min(maxScore, maxScore * ratio / 100)",
-      "nullScoresExcluded": 48,
+      "nullScoresExcluded": 49,
       "evidence": {
-        "observations": 936,
+        "observations": 935,
         "maxAbsoluteError": 0.0048,
-        "meanAbsoluteError": 0.002009401709,
+        "meanAbsoluteError": 0.002024385027,
         "tolerance": 0.015,
-        "withinTolerance": 936,
+        "withinTolerance": 935,
         "result": "PASS"
       }
     },
@@ -168,13 +168,13 @@
       "metricCode": "SYNCED_WITH_DVCQG_PERSONAL_STORAGE",
       "status": "consistent-only-zero-observations",
       "formula": "score = min(maxScore, maxScore * ratio / 100)",
-      "nullScoresExcluded": 48,
+      "nullScoresExcluded": 49,
       "evidence": {
-        "observations": 936,
+        "observations": 935,
         "maxAbsoluteError": 0.0,
         "meanAbsoluteError": 0.0,
         "tolerance": 0.015,
-        "withinTolerance": 936,
+        "withinTolerance": 935,
         "result": "PASS"
       },
       "limitation": "All non-null M0 observations have ratio=0, so a positive-rate case is required before the slope can be verified."
@@ -187,7 +187,7 @@
       "evidence": {
         "observations": 984,
         "maxAbsoluteError": 0.005,
-        "meanAbsoluteError": 0.002358621896,
+        "meanAbsoluteError": 0.002419516482,
         "tolerance": 0.015,
         "withinTolerance": 984,
         "result": "PASS"
@@ -195,18 +195,19 @@
     },
     {
       "group": "provide-online-tree",
-      "status": "partially-verified-on-m0",
-      "verifiedComponent": "4 * onlineDossierCount / onlineServiceTotal",
-      "observedResidualForPhuTho": 7.460944798301,
+      "status": "unresolved-on-m0",
+      "candidateComponent": "4 * onlineDossierCount / onlineServiceTotal",
+      "candidateVerified": false,
+      "observedResidualForPhuTho": 7.640994079368,
       "doNotImplementAsCompleteFormula": true,
-      "limitation": "The six M0 parent observations keep authorityCount, partialCount and fullCount constant. They cannot identify how the remaining score is split among those parameters.",
+      "limitation": "The completed-month fixture makes the residual vary beyond the declared tolerance. The candidate is not a verified component, and the available observations cannot identify a complete formula.",
       "evidence": {
         "observations": 6,
-        "maxAbsoluteError": 0.00423566879,
-        "meanAbsoluteError": 0.002356687898,
+        "maxAbsoluteError": 0.3638026686,
+        "meanAbsoluteError": 0.240936196411,
         "tolerance": 0.015,
-        "withinTolerance": 6,
-        "result": "PASS"
+        "withinTolerance": 0,
+        "result": "FAIL"
       }
     },
     {
@@ -217,13 +218,13 @@
       "evidence": {
         "observations": 984,
         "maxAbsoluteError": 0.013726135616,
-        "meanAbsoluteError": 0.003743019531,
+        "meanAbsoluteError": 0.003701196968,
         "tolerance": 0.015,
         "withinTolerance": 984,
         "result": "PASS"
       }
     }
   ],
-  "result": "PASS",
-  "resultScope": "Captured M0 fixtures only; partial formulas remain explicitly non-executable"
+  "result": "INCOMPLETE",
+  "resultScope": "Captured M0 fixtures only; unresolved formulas remain explicitly non-executable"
 }

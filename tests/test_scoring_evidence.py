@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ScoringEvidenceTest(unittest.TestCase):
-    def test_checked_in_report_is_reproducible_and_passes_its_limited_scope(self):
+    def test_checked_in_report_is_reproducible_and_keeps_unknown_formula_incomplete(self):
         completed = subprocess.run(
             [
                 sys.executable,
@@ -27,13 +27,15 @@ class ScoringEvidenceTest(unittest.TestCase):
             )
         )
         self.assertEqual(generated, checked_in)
-        self.assertEqual(generated["result"], "PASS")
+        self.assertEqual(generated["result"], "INCOMPLETE")
         online = next(
             formula
             for formula in generated["formulas"]
             if formula["group"] == "provide-online-tree"
         )
         self.assertTrue(online["doNotImplementAsCompleteFormula"])
+        self.assertEqual(online["status"], "unresolved-on-m0")
+        self.assertFalse(online["candidateVerified"])
 
 
 if __name__ == "__main__":

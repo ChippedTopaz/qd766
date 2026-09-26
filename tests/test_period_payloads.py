@@ -65,7 +65,7 @@ class PeriodPayloadTest(unittest.TestCase):
                 continue
             group = capture["file"].split("/", 1)[0]
             period_type = capture["period"]
-            value = {"month": 9, "quarter": 3, "year": None}[period_type]
+            value = {"month": 8, "quarter": 3, "year": None}[period_type]
             formality_id = (
                 self.formality_id if capture["scope"] == "formality" else None
             )

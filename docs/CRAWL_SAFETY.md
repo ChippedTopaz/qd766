@@ -6,6 +6,12 @@ These are mandatory operational constraints for this project.
 
 Collect only the data needed for the DVCQG evaluation dataset while minimizing traffic, avoiding concurrent load, and failing closed when the site appears to reject or rate-limit requests.
 
+The collector also rejects periods that the public UI does not expose yet. A
+month is collectable only after its last calendar day. The current quarter and
+current year are collectable, while future quarters and years are rejected.
+For example, on 2026-09-27 the latest month is August 2026 and the latest
+quarter is Q3 2026.
+
 ## Mandatory safeguards
 
 1. **Sequential only.** Maximum concurrency is 1 request/session at a time. Never use multiprocessing, async fan-out, request pools, or parallel province crawls.

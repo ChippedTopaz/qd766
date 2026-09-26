@@ -104,27 +104,25 @@ Công thức tái tạo 984 parent/child là:
 Khi mẫu số bằng 0, tỷ lệ tương ứng bằng 0 trong các quan sát M0. Sai số lớn
 nhất là 0,0138 điểm do response chỉ công bố điểm đến hai chữ số thập phân.
 
-## Công thức mới xác nhận một phần
+## Công thức chưa xác định
 
-Với Dịch vụ công trực tuyến, sáu parent M0 cho thấy chắc chắn thành phần biến
-thiên sau:
+Với Dịch vụ công trực tuyến, từng có giả thuyết về thành phần:
 
 ```text
 4 × onlineDossierCount / onlineServiceTotal
 ```
 
-Sau khi trừ thành phần này, phần điểm còn lại của Phú Thọ ổn định quanh
-`7,4609`. Tuy nhiên `authorityCount`, `partialCount` và `fullCount` giống nhau ở
-cả sáu fixture nên không thể tách phần 7,4609 thành công thức của từng
-parameter. Giá trị này không được triển khai thành công thức tổng quát. Cần ít
-nhất một tỉnh khác có bộ ba parameter khác hoặc tài liệu công thức chính thức.
+Fixture tháng 8 đã kết thúc làm phần dư biến thiên vượt sai số cho phép, nên
+giả thuyết này **không được coi là thành phần đã xác nhận**. Toàn bộ parameters
+vẫn được lưu và hiển thị chi tiết, nhưng không dùng để tính lại điểm. Cần công
+thức do người dùng cung cấp hoặc thêm bằng chứng độc lập trước khi triển khai.
 
 ## Kỳ báo cáo của Mức độ hài lòng
 
 Người dùng vẫn chỉ chọn tháng, quý hoặc năm. Adapter tự chuyển lựa chọn thành
 khoảng ngày bao trọn kỳ:
 
-- tháng 9/2026: `2026-09-01` đến `2026-09-30`;
+- tháng 8/2026: `2026-08-01` đến `2026-08-31`;
 - quý 3/2026: `2026-07-01` đến `2026-09-30`;
 - năm 2026: `2026-01-01` đến `2026-12-31`.
 

@@ -34,7 +34,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    period = PeriodSelection(args.period, args.year, args.value)
+    try:
+        period = PeriodSelection(args.period, args.year, args.value)
+        period.validate_collectable()
+    except ValueError as error:
+        parser.error(str(error))
     plan = plan_evaluation_requests(
         period, args.root_department_id, args.formality_id
     )

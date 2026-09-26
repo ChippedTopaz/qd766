@@ -113,12 +113,13 @@ parameter chưa cung cấp hoặc dữ liệu của tỉnh khác.
 DVCQG:
 
 ```text
-python tools/collect_m1.py --period month --year 2026 --value 9 --root-department-id <id>
+python tools/collect_m1.py --period month --year 2026 --value 8 --root-department-id <id>
 ```
 
 Chỉ khi có `--execute` và `--output`, công cụ mới gửi request. Collector:
 
 - chạy tuần tự, không song song;
+- từ chối tháng chưa kết thúc và quý/năm tương lai trước khi gọi mạng;
 - có delay và jitter giữa request;
 - checkpoint raw bytes và manifest sau từng nhóm;
 - retry giới hạn với lỗi thông thường;

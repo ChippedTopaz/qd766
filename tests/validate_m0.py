@@ -50,10 +50,10 @@ def validate(root):
         size,key,codes=GROUPS[g]; period=cap['period']; scope=cap['scope']
         expected_payload={'rootDepartmentId':RID,'currentPage':1,'pageSize':size}
         if g=='handling-satisfaction':
-            expected_payload.update(fromDate={'year':'2026-01-01','quarter':'2026-07-01','month':'2026-09-01'}[period],toDate='2026-12-31' if period=='year' else '2026-09-30')
+            expected_payload.update(fromDate={'year':'2026-01-01','quarter':'2026-07-01','month':'2026-08-01'}[period],toDate={'year':'2026-12-31','quarter':'2026-09-30','month':'2026-08-31'}[period])
         else:
             expected_payload.update(timeType=period,year=2026)
-            if period!='year':expected_payload[period]=9 if period=='month' else 3
+            if period!='year':expected_payload[period]=8 if period=='month' else 3
         if scope=='formality': expected_payload[key]=FID
         require(p==expected_payload,f'{name}: payload mismatch including formality key casing')
         require(name==f'{g}/{period}-{scope}.json',f'{name}: scope label mismatch')
@@ -100,7 +100,7 @@ def validate(root):
         if r['metricCode']:
             require(r['metricCode'] in GROUPS[g][2],f"METRICS row {r['sourceRow']}: code missing in response")
             require(r['maxScore']==GROUPS[g][2][r['metricCode']],f"METRICS row {r['sourceRow']}: maximum differs")
-    return {'result':'PASS','scope':'Offline captured-fixture integrity, payload and response contract only; not production or scoring correctness','captures':len(names),'evaluationFixtures':33,'catalogFixtures':4,'metricsRows':24,'declaredProvinceMaximum':100,'qualityFlags':sorted(set(warnings)),'remainingGaps':['Dịch vụ công trực tuyến chưa đủ biến thiên để tách công thức điểm nền; xem scoring-formula-analysis.m0.json','SYNCED_WITH_DVCQG_PERSONAL_STORAGE chưa có quan sát tỷ lệ dương','METRICS maxScore blank at STT 7,8,9,10,18','Live responses do not echo formality ID; filtering evidence combines deployed client source, selected UI, catalog identity and changed all/formality results','Unseen provinces, periods, empty catalogs and error responses are outside this M0 sample']}
+    return {'result':'PASS','scope':'Offline captured-fixture integrity, payload and response contract only; not production or scoring correctness','captures':len(names),'evaluationFixtures':33,'catalogFixtures':4,'metricsRows':24,'declaredProvinceMaximum':100,'qualityFlags':sorted(set(warnings)),'remainingGaps':['Dịch vụ công trực tuyến chưa xác định được công thức; giả thuyết thành phần trước đây không ổn định trên fixture tháng 8','SYNCED_WITH_DVCQG_PERSONAL_STORAGE chưa có quan sát tỷ lệ dương','METRICS maxScore blank at STT 7,8,9,10,18','Live responses do not echo formality ID; filtering evidence combines deployed client source, selected UI, catalog identity and changed all/formality results','Unseen provinces, periods, empty catalogs and error responses are outside this M0 sample']}
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[1]);p.add_argument('--report',type=Path);args=p.parse_args()
     try: result=validate(args.root)

@@ -17,7 +17,7 @@ from qd766.normalization import IDENTITY_KEYS, SCORE_KEYS
 class M1NormalizationTest(unittest.TestCase):
     def test_all_scope_is_complete_and_uses_only_api_scores(self):
         for period in (
-            PeriodSelection("month", 2026, 9),
+            PeriodSelection("month", 2026, 8),
             PeriodSelection("quarter", 2026, 3),
             PeriodSelection("year", 2026),
         ):
@@ -28,7 +28,7 @@ class M1NormalizationTest(unittest.TestCase):
                 self.assertEqual(snapshot.provinceAggregatedMaximum, 100)
                 self.assertEqual(
                     snapshot.provinceAggregatedScore,
-                    sum(dataset.root.apiScore for dataset in snapshot.datasets),
+                    round(sum(dataset.root.apiScore for dataset in snapshot.datasets), 2),
                 )
                 for dataset in snapshot.datasets:
                     self.assertEqual(dataset.scorePolicy, "api-authoritative")

@@ -8,7 +8,7 @@
       "period": {
         "type": "month",
         "year": 2026,
-        "month": 9
+        "month": 8
       },
       "scope": "all",
       "state": "complete",
@@ -21,7 +21,7 @@
         "formality-online-payment-tree"
       ],
       "unsupportedGroups": [],
-      "provinceAggregatedScore": 56.43,
+      "provinceAggregatedScore": 59.91,
       "provinceAggregatedMaximum": 100,
       "rootEntities": 6,
       "childEntities": 978,
@@ -38,7 +38,7 @@
       "period": {
         "type": "month",
         "year": 2026,
-        "month": 9
+        "month": 8
       },
       "scope": "formality",
       "state": "complete",
@@ -52,7 +52,7 @@
       "unsupportedGroups": [
         "handling-satisfaction"
       ],
-      "provinceAggregatedScore": 50.08,
+      "provinceAggregatedScore": 50.94,
       "provinceAggregatedMaximum": 80,
       "rootEntities": 5,
       "childEntities": 815,
