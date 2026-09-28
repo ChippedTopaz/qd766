@@ -18,4 +18,10 @@ New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
 # must use the office machine's direct connection and domestic public IP.
 Remove-Item Env:HTTP_PROXY,Env:HTTPS_PROXY,Env:ALL_PROXY,Env:NO_PROXY -ErrorAction SilentlyContinue
 Set-Location -LiteralPath $RepositoryRoot
+$ErrorActionPreference = "Continue"
 & $Python tools\run_collection_worker.py *>> $LogFile
+$workerExitCode = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+if ($workerExitCode -ne 0) {
+    throw "QD766 worker exited with code $workerExitCode"
+}
