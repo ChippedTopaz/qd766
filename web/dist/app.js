@@ -268,6 +268,13 @@ async function loadSelection() {
         params.set("formality_id", data.formality.id);
     try {
         const response = await fetch(`/api/v1/dashboard/selection?${params.toString()}`);
+        if (response.status === 404) {
+            if (requestId !== selectionRequest)
+                return;
+            state.demo = "empty";
+            render();
+            return;
+        }
         if (!response.ok) {
             const problem = await response.json().catch(() => ({}));
             throw new Error(typeof problem.detail === "string" ? problem.detail : `HTTP ${response.status}`);

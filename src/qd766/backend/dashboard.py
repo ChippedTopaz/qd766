@@ -15,6 +15,7 @@ GROUP_LABELS = {
     "handling-satisfaction": "Mức độ hài lòng",
     "formality-online-payment-tree": "Thanh toán trực tuyến",
 }
+REPORTING_START_YEAR = 2026
 
 
 def _number(value: Decimal | None) -> float | None:
@@ -44,6 +45,63 @@ def _is_provisional(snapshot: Snapshot, today: date | None = None) -> bool:
     if snapshot.period_type == "quarter":
         return snapshot.period_value == ((current.month - 1) // 3) + 1
     return snapshot.period_value == current.month
+
+
+def _available_periods(snapshots: list[Snapshot], today: date | None = None) -> list[dict[str, Any]]:
+    current = today or date.today()
+    periods: dict[str, dict[str, Any]] = {}
+    for year in range(REPORTING_START_YEAR, current.year + 1):
+        last_month = current.month if year == current.year else 12
+        last_quarter = ((current.month - 1) // 3) + 1 if year == current.year else 4
+        for month in range(1, last_month + 1):
+            period_id = f"month-{year}-{month:02d}"
+            periods[period_id] = {
+                "id": period_id,
+                "label": f"Tháng {month}/{year}",
+                "type": "month",
+                "year": year,
+                "value": month,
+                "provisional": year == current.year and month == current.month,
+            }
+        for quarter in range(1, last_quarter + 1):
+            period_id = f"quarter-{year}-{quarter:02d}"
+            periods[period_id] = {
+                "id": period_id,
+                "label": f"Quý {quarter}/{year}",
+                "type": "quarter",
+                "year": year,
+                "value": quarter,
+                "provisional": year == current.year and quarter == last_quarter,
+            }
+        period_id = f"year-{year}"
+        periods[period_id] = {
+            "id": period_id,
+            "label": f"Năm {year}",
+            "type": "year",
+            "year": year,
+            "value": None,
+            "provisional": year == current.year,
+        }
+
+    # Preserve any historical database period outside the generated range.
+    for snapshot in snapshots:
+        period_id = _period_id(snapshot)
+        periods[period_id] = {
+            "id": period_id,
+            "label": _period_label(snapshot),
+            "type": snapshot.period_type,
+            "year": snapshot.year,
+            "value": snapshot.period_value,
+            "provisional": _is_provisional(snapshot, current),
+        }
+    return sorted(
+        periods.values(),
+        key=lambda item: (
+            -item["year"],
+            {"month": 0, "quarter": 1, "year": 2}[item["type"]],
+            -(item["value"] or 0),
+        ),
+    )
 
 
 def _entity(entity: Entity, *, include_detail: bool) -> dict[str, Any]:
@@ -123,32 +181,13 @@ def dashboard_payload(
     snapshots: list[Snapshot],
     formality: Formality | None,
 ) -> dict[str, Any]:
-    periods: dict[str, dict[str, Any]] = {}
     payload_snapshots: dict[str, dict[str, Any]] = {}
     for snapshot in snapshots:
         period_id = _period_id(snapshot)
-        periods.setdefault(
-            period_id,
-            {
-                "id": period_id,
-                "label": _period_label(snapshot),
-                "type": snapshot.period_type,
-                "year": snapshot.year,
-                "value": snapshot.period_value,
-                "provisional": _is_provisional(snapshot),
-            },
-        )
         payload_snapshots[f"{period_id}:{snapshot.scope}"] = snapshot_payload(snapshot)
 
     root = snapshots[0].root_department
-    ordered_periods = sorted(
-        periods.values(),
-        key=lambda item: (
-            -item["year"],
-            {"month": 0, "quarter": 1, "year": 2}[item["type"]],
-            -(item.get("month") or item.get("quarter") or 0),
-        ),
-    )
+    ordered_periods = _available_periods(snapshots)
     units: dict[str, dict[str, Any]] = {
         str(root.id): {
             "departmentId": str(root.id),

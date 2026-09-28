@@ -161,7 +161,10 @@ class BackendTest(unittest.TestCase):
         dashboard_body = dashboard.json()
         self.assertEqual(dashboard_body["defaultUnitId"], ROOT_ID)
         self.assertEqual(len(dashboard_body["units"]), 2)
-        self.assertEqual(dashboard_body["periods"][0]["value"], 8)
+        month_period = next(
+            item for item in dashboard_body["periods"] if item["id"] == "month-2026-08"
+        )
+        self.assertEqual(month_period["value"], 8)
         stored_dataset = dashboard_body["snapshots"]["month-2026-08:all"]["datasets"][0]
         self.assertEqual(stored_dataset["group"], "transparency")
         self.assertEqual(stored_dataset["children"][0]["metrics"][0]["code"], "EXAMPLE")
@@ -180,6 +183,16 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(selection.status_code, 200)
         self.assertEqual(selection.json()["metadata"]["result"], "database")
         self.assertEqual(selection.json()["snapshot"]["scope"], "all")
+        missing_selection = self.client.get(
+            "/api/v1/dashboard/selection",
+            params={
+                "period_type": "month",
+                "year": 2026,
+                "period_value": 7,
+                "scope": "all",
+            },
+        )
+        self.assertEqual(missing_selection.status_code, 404)
         system_status = self.client.get("/api/v1/system-status").json()
         self.assertEqual(system_status["snapshotCount"], 1)
         self.assertEqual(system_status["dashboardCache"]["entries"], 2)
