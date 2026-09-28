@@ -3,9 +3,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from qd766.periods import PeriodSelection
 
 
 def to_camel(value: str) -> str:
@@ -111,3 +113,28 @@ class CollectionControlResponse(ApiModel):
     lease_locked_at: datetime | None
     lease_locked_by: str | None
     updated_at: datetime
+
+
+class DashboardCollectionRequest(ApiModel):
+    period_type: Literal["month", "quarter", "year"]
+    year: int = Field(ge=2026, le=2200)
+    period_value: int | None = None
+    scope: Literal["all", "formality"] = "all"
+    formality_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> "DashboardCollectionRequest":
+        PeriodSelection(self.period_type, self.year, self.period_value).validate_collectable()
+        if self.scope == "all" and self.formality_id is not None:
+            raise ValueError("all scope must not include formalityId")
+        if self.scope == "formality" and self.formality_id is None:
+            raise ValueError("formality scope requires formalityId")
+        return self
+
+
+class DashboardCollectionResponse(ApiModel):
+    job_id: uuid.UUID | None
+    state: str
+    created: bool
+    circuit_state: str
+    message: str

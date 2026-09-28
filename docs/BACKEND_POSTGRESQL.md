@@ -31,7 +31,10 @@ collection_jobs <--- future worker <--- DVCQG (sequential/rate-limited)
 
 API đọc và collector không nằm cùng request lifecycle. Một snapshot chỉ được
 nhập khi trạng thái `complete`, không có `missingGroups`, mọi dataset có cùng
-`rootDepartmentId` và danh sách `loadedGroups` khớp dữ liệu thực tế.
+`rootDepartmentId` và danh sách `loadedGroups` khớp dữ liệu thực tế. Khi một kỳ
+chưa có snapshot, frontend chỉ tạo một job idempotent qua backend; request HTTP
+không tự gọi DVCQG. Nếu circuit breaker đang mở, job được giữ ở trạng thái chờ
+và giao diện không tự thăm dò liên tục.
 
 ## Mô hình dữ liệu
 
@@ -115,6 +118,7 @@ GET /api/v1/collection-jobs/{jobId}
 GET /api/v1/collection-control
 GET /api/v1/dashboard
 GET /api/v1/dashboard/selection
+POST /api/v1/dashboard/requests
 GET /api/v1/snapshots
 GET /api/v1/snapshots/latest
 GET /api/v1/snapshots/{snapshotId}
@@ -124,8 +128,8 @@ GET /api/v1/formalities
 GET /api/v1/formalities/{formalityId}
 ```
 
-Danh sách entity có phân trang `offset`/`limit`, tối đa 200 bản ghi. API chỉ
-cho phép CORS `GET` từ origin khai báo trong `QD766_CORS_ORIGINS`.
+Danh sách entity có phân trang `offset`/`limit`, tối đa 200 bản ghi. API cho
+phép CORS `GET` và `POST` từ origin khai báo trong `QD766_CORS_ORIGINS`.
 
 Dashboard dùng cache TTL 60 giây trong tiến trình backend. Các request cùng key
 đến đồng thời dùng single-flight nên chỉ một request truy vấn và dựng payload;
@@ -136,6 +140,9 @@ PostgreSQL, circuit, số snapshot và thống kê cache mà không lộ credent
 FastAPI phục vụ luôn frontend trong thư mục `web` tại `/`. Endpoint
 `/api/v1/dashboard/selection` nhận `period_type`, `year`, `period_value`,
 `scope`, `formality_id` và chỉ trả một snapshot đầy đủ cho lựa chọn đó.
+`POST /api/v1/dashboard/requests` nhận cùng lựa chọn ở dạng JSON camelCase,
+trả ngay trạng thái `ready` nếu PostgreSQL đã có snapshot; nếu chưa có thì chỉ
+xếp một job chống trùng và trả trạng thái circuit cho frontend.
 
 ## Cấu hình
 

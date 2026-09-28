@@ -12,11 +12,10 @@ from qd766 import PeriodSelection
 class PeriodAvailabilityTest(unittest.TestCase):
     as_of = date(2026, 9, 27)
 
-    def test_month_requires_the_calendar_month_to_have_ended(self):
+    def test_current_month_is_provisional_but_future_month_is_rejected(self):
         PeriodSelection("month", 2026, 8).validate_collectable(self.as_of)
-        with self.assertRaisesRegex(ValueError, "month has ended"):
-            PeriodSelection("month", 2026, 9).validate_collectable(self.as_of)
-        with self.assertRaisesRegex(ValueError, "month has ended"):
+        PeriodSelection("month", 2026, 9).validate_collectable(self.as_of)
+        with self.assertRaisesRegex(ValueError, "future month"):
             PeriodSelection("month", 2026, 10).validate_collectable(self.as_of)
 
     def test_current_quarter_is_available_but_future_quarter_is_not(self):

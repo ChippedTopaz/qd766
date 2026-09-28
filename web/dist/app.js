@@ -10,6 +10,7 @@ const screens = [
 let data;
 let state;
 let selectionRequest = 0;
+let pendingMessage = "";
 function normalizeLoadedData(loaded) {
     for (const item of loaded.periods) {
         const legacy = item;
@@ -91,6 +92,10 @@ function shell(content) {
 function unavailable(kind) {
     if (kind === "loading")
         return `${title("Đang tải dữ liệu", "Đang chuẩn hóa dữ liệu theo đơn vị và kỳ báo cáo.")}<div class="boot-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>`;
+    if (kind === "queued")
+        return `${title("Đang chờ cập nhật dữ liệu", "Yêu cầu đã được lưu trong hàng đợi an toàn.")}<div class="empty-state"><h2>Đang chuẩn bị dữ liệu cho lựa chọn này</h2><p>${esc(pendingMessage || "Hệ thống đang xử lý tuần tự và sẽ tự hiển thị khi snapshot hoàn chỉnh được lưu vào PostgreSQL.")}</p><button class="btn" data-action="retry-selection">Kiểm tra lại</button></div>`;
+    if (kind === "blocked")
+        return `${title("Đang chờ kết nối nguồn", "Yêu cầu đã được lưu nhưng kết nối DVCQG đang tạm dừng để bảo đảm an toàn.")}<div class="empty-state"><h2>Chưa thể cập nhật dữ liệu mới</h2><p>${esc(pendingMessage || "Quản trị viên cần kiểm tra kết nối trước khi mở lại bộ thu thập. Hệ thống không tự vượt WAF hoặc gửi thêm request.")}</p><button class="btn" data-action="retry-selection">Kiểm tra lại</button></div>`;
     if (kind === "error")
         return `${title("Dữ liệu không hợp lệ", "Hệ thống chưa thể tổng hợp báo cáo ở thời điểm này.")}<div class="empty-state"><h2>Không thể hiển thị báo cáo</h2><p>Vui lòng thử lại hoặc liên hệ cán bộ quản trị dữ liệu. Các trường chưa có dữ liệu không được tính là 0.</p><button class="btn primary" data-state="normal">Thử lại</button></div>`;
     if (kind === "empty")
@@ -234,6 +239,7 @@ function bind() {
     document.querySelector("[data-action=close-modal]")?.addEventListener("click", () => { state.modal = "none"; render(); });
     document.querySelector("[data-action=print]")?.addEventListener("click", () => window.print());
     document.querySelector("[data-action=open-quality]")?.addEventListener("click", () => { state.screen = "quality"; render(); });
+    document.querySelector("[data-action=retry-selection]")?.addEventListener("click", () => { void loadSelection(); });
 }
 function mergeUnits(snapshot) {
     const known = new Set(data.units.map(item => item.departmentId));
@@ -249,6 +255,65 @@ function mergeUnits(snapshot) {
 async function selectPeriod(periodId) {
     state.periodId = periodId;
     await loadSelection();
+}
+function pollCollectionJob(jobId, requestId) {
+    window.setTimeout(async () => {
+        if (requestId !== selectionRequest)
+            return;
+        try {
+            const response = await fetch(`/api/v1/collection-jobs/${encodeURIComponent(jobId)}`);
+            if (!response.ok)
+                throw new Error(`HTTP ${response.status}`);
+            const job = await response.json();
+            if (requestId !== selectionRequest)
+                return;
+            if (job.state === "succeeded") {
+                await loadSelection();
+                return;
+            }
+            if (job.state === "failed" || job.state === "halted") {
+                pendingMessage = job.error?.message ?? "Yêu cầu cập nhật dữ liệu đã dừng và cần quản trị viên kiểm tra.";
+                state.demo = "error";
+                render();
+                return;
+            }
+            pendingMessage = job.state === "running" ? "Hệ thống đang thu thập tuần tự và kiểm tra dữ liệu." : "Yêu cầu đang chờ đến lượt xử lý.";
+            state.demo = "queued";
+            render();
+            pollCollectionJob(jobId, requestId);
+        }
+        catch (error) {
+            if (requestId !== selectionRequest)
+                return;
+            console.error(error);
+            pendingMessage = "Chưa đọc được trạng thái hàng đợi. Vui lòng kiểm tra lại.";
+            state.demo = "error";
+            render();
+        }
+    }, 3000);
+}
+async function requestCollection(requestId) {
+    const selected = period();
+    const requestBody = { periodType: selected.type, year: selected.year, periodValue: selected.value ?? null, scope: state.scope };
+    if (state.scope === "formality" && data.formality.id)
+        requestBody.formalityId = data.formality.id;
+    const response = await fetch("/api/v1/dashboard/requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) });
+    if (!response.ok) {
+        const problem = await response.json().catch(() => ({}));
+        throw new Error(typeof problem.detail === "string" ? problem.detail : `HTTP ${response.status}`);
+    }
+    const result = await response.json();
+    if (requestId !== selectionRequest)
+        return;
+    if (result.state === "ready") {
+        await loadSelection();
+        return;
+    }
+    pendingMessage = result.message;
+    state.demo = result.circuitState === "open" ? "blocked" : "queued";
+    render();
+    if (result.circuitState !== "open" && result.jobId)
+        pollCollectionJob(result.jobId, requestId);
 }
 async function loadSelection() {
     const requestId = ++selectionRequest;
@@ -271,8 +336,7 @@ async function loadSelection() {
         if (response.status === 404) {
             if (requestId !== selectionRequest)
                 return;
-            state.demo = "empty";
-            render();
+            await requestCollection(requestId);
             return;
         }
         if (!response.ok) {

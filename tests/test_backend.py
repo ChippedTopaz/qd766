@@ -24,6 +24,7 @@ from qd766.backend.jobs import (
     claim_next_job,
     enqueue_job,
     halt_job,
+    open_collection_circuit,
     retry_or_fail_job,
     succeed_job,
 )
@@ -193,6 +194,18 @@ class BackendTest(unittest.TestCase):
             },
         )
         self.assertEqual(missing_selection.status_code, 404)
+        available_request = self.client.post(
+            "/api/v1/dashboard/requests",
+            json={
+                "periodType": "month",
+                "year": 2026,
+                "periodValue": 8,
+                "scope": "all",
+            },
+        )
+        self.assertEqual(available_request.status_code, 202)
+        self.assertEqual(available_request.json()["state"], "ready")
+        self.assertIsNone(available_request.json()["jobId"])
         system_status = self.client.get("/api/v1/system-status").json()
         self.assertEqual(system_status["snapshotCount"], 1)
         self.assertEqual(system_status["dashboardCache"]["entries"], 2)
@@ -259,6 +272,49 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(len(response.json()), 2)
         succeeded = self.client.get(f"/api/v1/collection-jobs/{urgent.id}")
         self.assertEqual(succeeded.json()["state"], "succeeded")
+
+    def test_missing_dashboard_selection_enqueues_once_and_honors_open_circuit(self):
+        with self.app.state.session_factory.begin() as session:
+            store_normalized_snapshot(session, snapshot_payload())
+            open_collection_circuit(
+                session,
+                reason="office-connectivity",
+                detail={"safe": True},
+            )
+
+        request = {
+            "periodType": "month",
+            "year": 2026,
+            "periodValue": 9,
+            "scope": "all",
+        }
+        first = self.client.post("/api/v1/dashboard/requests", json=request)
+        self.assertEqual(first.status_code, 202)
+        self.assertTrue(first.json()["created"])
+        self.assertEqual(first.json()["state"], "queued")
+        self.assertEqual(first.json()["circuitState"], "open")
+
+        duplicate = self.client.post("/api/v1/dashboard/requests", json=request)
+        self.assertEqual(duplicate.status_code, 202)
+        self.assertFalse(duplicate.json()["created"])
+        self.assertEqual(duplicate.json()["jobId"], first.json()["jobId"])
+
+        blocked = run_one_job(
+            self.app.state.session_factory,
+            lambda job_id, job_request: snapshot_payload(),
+            worker_id="worker-test",
+        )
+        self.assertEqual(blocked.state, "circuit-open")
+        with self.app.state.session_factory() as session:
+            jobs = session.scalars(select(CollectionJob)).all()
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual(jobs[0].state, "queued")
+
+        future = self.client.post(
+            "/api/v1/dashboard/requests",
+            json={**request, "periodValue": 10},
+        )
+        self.assertEqual(future.status_code, 422)
 
     def test_collection_job_retry_halt_and_lease_ownership(self):
         with self.app.state.session_factory.begin() as session:

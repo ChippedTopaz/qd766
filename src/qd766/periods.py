@@ -53,9 +53,8 @@ class PeriodSelection:
     def validate_collectable(self, as_of: date | None = None) -> None:
         """Reject periods that the public QĐ766 UI does not expose yet.
 
-        Month data is available only after that calendar month has ended. The
-        UI allows the current quarter and current year, but not a future
-        quarter or year. Keeping this check at the collection boundary lets
+        The UI allows the current month, quarter and year as provisional data,
+        but not a future period. Keeping this check at the collection boundary lets
         historical fixtures remain readable without treating them as live
         collection requests.
         """
@@ -65,8 +64,8 @@ class PeriodSelection:
             raise ValueError("reporting year is not available yet")
         if self.year < current.year:
             return
-        if self.type == "month" and self.value >= current.month:  # type: ignore[operator]
-            raise ValueError("monthly data is available only after the month has ended")
+        if self.type == "month" and self.value > current.month:  # type: ignore[operator]
+            raise ValueError("future month data is not available")
         if self.type == "quarter":
             current_quarter = (current.month - 1) // 3 + 1
             if self.value > current_quarter:  # type: ignore[operator]

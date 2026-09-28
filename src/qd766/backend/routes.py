@@ -10,11 +10,14 @@ from sqlalchemy.orm import Session, selectinload
 
 from .dashboard import dashboard_payload, snapshot_payload
 from .database import get_session
+from .jobs import enqueue_job
 from .models import CollectionControl, CollectionJob, Dataset, Entity, Formality, FormalityDepartment, Snapshot
 from .schemas import (
     CollectionControlResponse,
     CollectionJobResponse,
     DatasetResponse,
+    DashboardCollectionRequest,
+    DashboardCollectionResponse,
     EntityResponse,
     FormalityResponse,
     HealthResponse,
@@ -236,6 +239,83 @@ def dashboard_selection(
     response.headers["X-QD766-Cache"] = cache_result
     response.headers["Cache-Control"] = "private, max-age=30"
     return payload
+
+
+@router.post(
+    "/dashboard/requests",
+    response_model=DashboardCollectionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["dashboard"],
+)
+def request_dashboard_collection(
+    payload: DashboardCollectionRequest,
+    session: DbSession,
+) -> DashboardCollectionResponse:
+    root_department_id = session.scalar(
+        select(Snapshot.root_department_id)
+        .where(Snapshot.state == "complete")
+        .order_by(Snapshot.created_at.desc())
+        .limit(1)
+    )
+    if root_department_id is None:
+        raise HTTPException(status_code=409, detail="No root department is available")
+    if payload.formality_id is not None and session.get(Formality, payload.formality_id) is None:
+        raise HTTPException(status_code=404, detail="Formality not found")
+    control = session.get(CollectionControl, "dvcqg")
+    circuit_state = control.circuit_state if control else "closed"
+
+    existing = select(Snapshot.id).where(
+        Snapshot.state == "complete",
+        Snapshot.root_department_id == root_department_id,
+        Snapshot.period_type == payload.period_type,
+        Snapshot.year == payload.year,
+        Snapshot.scope == payload.scope,
+    )
+    existing = (
+        existing.where(Snapshot.period_value.is_(None))
+        if payload.period_value is None
+        else existing.where(Snapshot.period_value == payload.period_value)
+    )
+    existing = (
+        existing.where(Snapshot.formality_id.is_(None))
+        if payload.formality_id is None
+        else existing.where(Snapshot.formality_id == payload.formality_id)
+    )
+    if session.scalar(existing.limit(1)) is not None:
+        return DashboardCollectionResponse(
+            job_id=None,
+            state="ready",
+            created=False,
+            circuit_state=circuit_state,
+            message="Dữ liệu đã có trong PostgreSQL.",
+        )
+
+    period: dict[str, object] = {"type": payload.period_type, "year": payload.year}
+    if payload.period_type in {"month", "quarter"}:
+        period[payload.period_type] = payload.period_value
+    request_value: dict[str, object] = {
+        "kind": "evaluation-snapshot",
+        "rootDepartmentId": str(root_department_id),
+        "period": period,
+        "scope": payload.scope,
+    }
+    if payload.formality_id is not None:
+        request_value["formalityId"] = str(payload.formality_id)
+
+    job, created = enqueue_job(session, request_value, priority=50)
+    session.commit()
+    message = (
+        "Yêu cầu đã được lưu; đang chờ quản trị mở lại kết nối DVCQG."
+        if circuit_state == "open"
+        else "Yêu cầu đã được xếp hàng để cập nhật dữ liệu."
+    )
+    return DashboardCollectionResponse(
+        job_id=job.id,
+        state=job.state,
+        created=created,
+        circuit_state=circuit_state,
+        message=message,
+    )
 
 
 @router.get("/snapshots", response_model=list[SnapshotResponse], tags=["snapshots"])
