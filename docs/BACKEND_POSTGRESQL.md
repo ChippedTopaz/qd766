@@ -83,6 +83,11 @@ retry ở transport, checkpoint raw sau từng nhóm và dừng job ngay khi g�
 429, HTML, `Request Rejected`, `Access Denied` hoặc dữ liệu sai tỉnh. Worker chưa
 được đăng ký chạy tự động vì kết nối DVCQG trên máy cơ quan đang bị đóng.
 
+Bảng `collection_controls` giữ một lease toàn cục nên dù vô tình chạy nhiều
+worker, chỉ một worker được phép gọi DVCQG tại một thời điểm. Safety stop sẽ mở
+circuit breaker toàn cục; các job khác giữ nguyên trạng thái `queued` cho tới
+khi quản trị viên chủ động đóng lại cầu dao sau khi kiểm tra nguyên nhân.
+
 ## API đã có
 
 ```text
@@ -90,6 +95,7 @@ GET /api/v1/health/live
 GET /api/v1/health/ready
 GET /api/v1/collection-jobs
 GET /api/v1/collection-jobs/{jobId}
+GET /api/v1/collection-control
 GET /api/v1/snapshots
 GET /api/v1/snapshots/latest
 GET /api/v1/snapshots/{snapshotId}

@@ -100,3 +100,14 @@ class CollectionJobResponse(ApiModel):
     error: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime
+
+
+class CollectionControlResponse(ApiModel):
+    key: str
+    circuit_state: str
+    reason: str | None
+    detail: dict[str, Any] | None
+    opened_at: datetime | None
+    lease_locked_at: datetime | None
+    lease_locked_by: str | None
+    updated_at: datetime

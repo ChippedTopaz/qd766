@@ -22,9 +22,12 @@ from qd766.snapshot import build_collected_snapshot
 
 from .importer import store_normalized_snapshot
 from .jobs import (
+    acquire_collection_lease,
     claim_next_job,
     halt_job,
+    open_collection_circuit,
     requeue_expired_jobs,
+    release_collection_lease,
     retry_or_fail_job,
     succeed_job,
 )
@@ -35,7 +38,7 @@ SnapshotProcessor = Callable[[uuid.UUID, dict[str, Any]], dict[str, Any]]
 
 @dataclass(frozen=True)
 class WorkerResult:
-    job_id: uuid.UUID
+    job_id: uuid.UUID | None
     state: str
 
 
@@ -93,9 +96,17 @@ def run_one_job(
     retry_delay_seconds: int = 300,
 ) -> WorkerResult | None:
     with factory.begin() as session:
+        lease_state = acquire_collection_lease(
+            session,
+            worker_id,
+            lease_seconds=lease_seconds,
+        )
+        if lease_state != "acquired":
+            return WorkerResult(None, lease_state)
         requeue_expired_jobs(session, lease_seconds=lease_seconds)
         claimed = claim_next_job(session, worker_id)
         if claimed is None:
+            release_collection_lease(session, worker_id)
             return None
         job_id = claimed.id
         request = copy.deepcopy(claimed.request)
@@ -106,9 +117,17 @@ def run_one_job(
             job = _locked_job(session, job_id)
             store_normalized_snapshot(session, snapshot)
             succeed_job(session, job, worker_id)
+            release_collection_lease(session, worker_id)
         return WorkerResult(job_id, "succeeded")
     except SafetyStop as error:
-        _halt(factory, job_id, worker_id, "upstream-safety-stop", error)
+        _halt(
+            factory,
+            job_id,
+            worker_id,
+            "upstream-safety-stop",
+            error,
+            open_circuit=True,
+        )
         return WorkerResult(job_id, "halted")
     except (ValueError, KeyError, TypeError) as error:
         _halt(factory, job_id, worker_id, "invalid-job-or-data", error)
@@ -162,9 +181,16 @@ def _halt(
     worker_id: str,
     kind: str,
     error: Exception,
+    *,
+    open_circuit: bool = False,
 ) -> None:
     with factory.begin() as session:
-        halt_job(session, _locked_job(session, job_id), worker_id, _error(kind, error, retryable=False))
+        detail = _error(kind, error, retryable=False)
+        halt_job(session, _locked_job(session, job_id), worker_id, detail)
+        if open_circuit:
+            open_collection_circuit(session, reason=kind, detail=detail)
+        else:
+            release_collection_lease(session, worker_id)
 
 
 def _retry_or_fail(
@@ -187,4 +213,5 @@ def _retry_or_fail(
             max_attempts=max_attempts,
             delay_seconds=retry_delay_seconds,
         )
+        release_collection_lease(session, worker_id)
         return job.state

@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from .dashboard import dashboard_payload
 from .database import get_session
-from .models import CollectionJob, Dataset, Entity, Formality, FormalityDepartment, Snapshot
+from .models import CollectionControl, CollectionJob, Dataset, Entity, Formality, FormalityDepartment, Snapshot
 from .schemas import (
+    CollectionControlResponse,
     CollectionJobResponse,
     DatasetResponse,
     EntityResponse,
@@ -68,6 +69,15 @@ def get_collection_job(job_id: uuid.UUID, session: DbSession) -> CollectionJob:
     if job is None:
         raise HTTPException(status_code=404, detail="Collection job not found")
     return job
+
+
+@router.get(
+    "/collection-control",
+    response_model=CollectionControlResponse | None,
+    tags=["collection-jobs"],
+)
+def get_collection_control(session: DbSession) -> CollectionControl | None:
+    return session.get(CollectionControl, "dvcqg")
 
 
 @router.get("/dashboard", tags=["dashboard"])

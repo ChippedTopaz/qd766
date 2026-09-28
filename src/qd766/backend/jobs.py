@@ -9,7 +9,9 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import CollectionJob
+from .models import CollectionControl, CollectionJob
+
+COLLECTION_CONTROL_KEY = "dvcqg"
 
 
 class JobStateError(RuntimeError):
@@ -130,6 +132,79 @@ def requeue_expired_jobs(
         job.error = {"kind": "lease-expired", "retryable": True}
     session.flush()
     return len(jobs)
+
+
+def acquire_collection_lease(
+    session: Session,
+    worker_id: str,
+    *,
+    lease_seconds: int,
+    now: datetime | None = None,
+) -> str:
+    current = now or utc_now()
+    control = _locked_control(session)
+    if control.circuit_state == "open":
+        return "circuit-open"
+    if control.lease_locked_at is not None and control.lease_locked_by != worker_id:
+        locked_at = control.lease_locked_at
+        if locked_at.tzinfo is None:
+            locked_at = locked_at.replace(tzinfo=timezone.utc)
+        if locked_at > current - timedelta(seconds=lease_seconds):
+            return "busy"
+    control.lease_locked_at = current
+    control.lease_locked_by = worker_id
+    session.flush()
+    return "acquired"
+
+
+def release_collection_lease(session: Session, worker_id: str) -> None:
+    control = _locked_control(session)
+    if control.lease_locked_by not in {None, worker_id}:
+        raise JobStateError("Collection lease belongs to another worker")
+    control.lease_locked_at = None
+    control.lease_locked_by = None
+    session.flush()
+
+
+def open_collection_circuit(
+    session: Session,
+    *,
+    reason: str,
+    detail: dict[str, Any],
+    now: datetime | None = None,
+) -> CollectionControl:
+    control = _locked_control(session)
+    control.circuit_state = "open"
+    control.reason = reason
+    control.detail = detail
+    control.opened_at = now or utc_now()
+    control.lease_locked_at = None
+    control.lease_locked_by = None
+    session.flush()
+    return control
+
+
+def close_collection_circuit(session: Session) -> CollectionControl:
+    control = _locked_control(session)
+    control.circuit_state = "closed"
+    control.reason = None
+    control.detail = None
+    control.opened_at = None
+    session.flush()
+    return control
+
+
+def _locked_control(session: Session) -> CollectionControl:
+    control = session.scalar(
+        select(CollectionControl)
+        .where(CollectionControl.key == COLLECTION_CONTROL_KEY)
+        .with_for_update()
+    )
+    if control is None:
+        control = CollectionControl(key=COLLECTION_CONTROL_KEY, circuit_state="closed")
+        session.add(control)
+        session.flush()
+    return control
 
 
 def succeed_job(session: Session, job: CollectionJob, worker_id: str) -> None:

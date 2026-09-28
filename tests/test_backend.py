@@ -19,6 +19,7 @@ from qd766.backend.importer import (
     store_normalized_snapshot,
 )
 from qd766.backend.jobs import (
+    close_collection_circuit,
     JobStateError,
     claim_next_job,
     enqueue_job,
@@ -26,7 +27,7 @@ from qd766.backend.jobs import (
     retry_or_fail_job,
     succeed_job,
 )
-from qd766.backend.models import Base, CollectionJob, Dataset, Entity, Metric, Snapshot
+from qd766.backend.models import Base, CollectionControl, CollectionJob, Dataset, Entity, Metric, Snapshot
 from qd766.backend.worker import run_one_job
 from qd766.collection import SafetyStop
 
@@ -266,7 +267,8 @@ class BackendTest(unittest.TestCase):
 
     def test_worker_halts_on_upstream_safety_signal(self):
         with self.app.state.session_factory.begin() as session:
-            job, _ = enqueue_job(session, {"fixture": "rejected"})
+            job, _ = enqueue_job(session, {"fixture": "rejected"}, priority=1)
+            queued, _ = enqueue_job(session, {"fixture": "must-wait"}, priority=100)
 
         def rejected(job_id, request):
             raise SafetyStop("Request Rejected")
@@ -281,6 +283,26 @@ class BackendTest(unittest.TestCase):
             stored = session.get(CollectionJob, job.id)
             self.assertEqual(stored.state, "halted")
             self.assertEqual(stored.error["kind"], "upstream-safety-stop")
+            control = session.get(CollectionControl, "dvcqg")
+            self.assertEqual(control.circuit_state, "open")
+
+        blocked = run_one_job(
+            self.app.state.session_factory,
+            lambda job_id, request: snapshot_payload(),
+            worker_id="worker-other",
+        )
+        self.assertEqual(blocked.state, "circuit-open")
+        with self.app.state.session_factory() as session:
+            self.assertEqual(session.get(CollectionJob, queued.id).state, "queued")
+
+        with self.app.state.session_factory.begin() as session:
+            close_collection_circuit(session)
+        resumed = run_one_job(
+            self.app.state.session_factory,
+            lambda job_id, request: snapshot_payload(),
+            worker_id="worker-other",
+        )
+        self.assertEqual(resumed.state, "succeeded")
 
 
 if __name__ == "__main__":

@@ -240,3 +240,24 @@ class CollectionJob(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class CollectionControl(Base):
+    __tablename__ = "collection_controls"
+    __table_args__ = (
+        CheckConstraint(
+            "circuit_state IN ('closed', 'open')",
+            name="ck_collection_control_circuit_state",
+        ),
+    )
+
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    circuit_state: Mapped[str] = mapped_column(String(16), default="closed")
+    reason: Mapped[str | None] = mapped_column(String(160))
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JsonDocument)
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_locked_by: Mapped[str | None] = mapped_column(String(160))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
