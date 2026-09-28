@@ -3,6 +3,8 @@ $ErrorActionPreference = "Stop"
 $RepositoryRoot = Split-Path -Parent $PSScriptRoot
 $EnvironmentFile = Join-Path $RepositoryRoot ".env"
 $Python = Join-Path $RepositoryRoot ".venv\Scripts\python.exe"
+$LogDirectory = Join-Path (Split-Path -Parent $RepositoryRoot) "logs"
+$LogFile = Join-Path $LogDirectory "backend.log"
 
 if (-not (Test-Path -LiteralPath $EnvironmentFile)) {
     throw "Missing local configuration: $EnvironmentFile"
@@ -23,5 +25,6 @@ foreach ($line in Get-Content -LiteralPath $EnvironmentFile) {
 }
 Remove-Item Env:QD766_DATABASE_URL -ErrorAction SilentlyContinue
 
+New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
 Set-Location -LiteralPath $RepositoryRoot
-& $Python -m uvicorn qd766.backend.main:app --host 127.0.0.1 --port 8767
+& $Python -m uvicorn qd766.backend.main:app --host 127.0.0.1 --port 8767 *>> $LogFile

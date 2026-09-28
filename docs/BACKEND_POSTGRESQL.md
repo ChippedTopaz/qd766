@@ -200,8 +200,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\register_windows_tasks
 
 Ba task chạy dưới tài khoản Windows hiện tại với quyền `Limited`; không lưu mật
 khẩu PostgreSQL trong Task Scheduler. Worker ghi log trạng thái gọn vào
-`D:\QD766\logs\worker.log`. Backup chỉ chạy khi người dùng đang đăng nhập hoặc
-đăng nhập lại sau thời điểm đã định (`StartWhenAvailable`).
+`D:\QD766\logs\worker.log`, backend ghi vào `D:\QD766\logs\backend.log`. Tác
+vụ được thử khởi động lại tối đa ba lần nếu tiến trình thoát bất thường. Backup
+chỉ chạy khi người dùng đang đăng nhập hoặc đăng nhập lại sau thời điểm đã định
+(`StartWhenAvailable`).
 
 ## Triển khai ổn định trên máy cơ quan
 
