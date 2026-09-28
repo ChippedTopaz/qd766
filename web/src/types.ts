@@ -1,5 +1,5 @@
 export type Scope = "all" | "formality";
-export type ScreenId = "overview" | "time" | "peers" | "procedure" | "suggestions" | "quality";
+export type ScreenId = "overview" | "time" | "peers" | "procedure" | "suggestions" | "quality" | "operations";
 export type GroupId =
   | "transparency"
   | "dvc-progress-tree"

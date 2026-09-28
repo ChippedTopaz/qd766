@@ -27,3 +27,6 @@ select,input[type=search]{width:100%;min-width:0}
 .metric-table th:not(:first-child),.metric-table td:not(:first-child){text-align:right}.metric-table tfoot td{border-top:2px solid #cbd5e1;background:#f8fafc;font-weight:800}.metric-table tfoot td:first-child{text-align:right}.metric-table .lost{color:var(--red)}
 .period-notice{display:flex;align-items:center;gap:12px;margin-bottom:12px;padding:10px 14px;border:1px solid #f4c96b;border-left:4px solid var(--amber);border-radius:7px;background:#fff9e8;color:#704b00;font-size:12px}.period-notice strong{white-space:nowrap}.period-notice span{line-height:1.45}
 .period-notice.stale{border-color:#f0a7a7;border-left-color:var(--red);background:#fff4f4;color:#7f1d1d}
+.quality-card strong.status-text{font-size:20px}
+.empty-actions{display:flex;justify-content:center;gap:7px;flex-wrap:wrap;margin-top:18px}
+@media(max-width:760px){.nav{grid-template-columns:repeat(7,minmax(0,1fr))}}

@@ -11,11 +11,15 @@ const screens: Array<{id: ScreenId; label: string; icon: string}> = [
   {id:"overview",label:"Tổng quan",icon:"⌂"},{id:"time",label:"Theo thời gian",icon:"↗"},
   {id:"peers",label:"Trong tỉnh",icon:"≋"},{id:"procedure",label:"Theo TTHC",icon:"▦"},
   {id:"suggestions",label:"Gợi ý",icon:"◇"},{id:"quality",label:"Chất lượng dữ liệu",icon:"✓"},
+  {id:"operations",label:"Vận hành",icon:"⚙"},
 ];
 let data: AppData;
 let state: State;
 let selectionRequest=0;
 let pendingMessage="";
+interface OperationJob {id:string;state:string;attempts:number;createdAt:string;updatedAt:string;lockedBy:string|null;request:{period?:{type?:string;year?:number;month?:number;quarter?:number};scope?:string;formalityId?:string}}
+interface OperationData {loading:boolean;error:string|null;circuitState:string;circuitReason:string|null;snapshotCount:number;latestSnapshotAt:string|null;jobs:OperationJob[]}
+let operationData:OperationData={loading:false,error:null,circuitState:"unknown",circuitReason:null,snapshotCount:0,latestSnapshotAt:null,jobs:[]};
 
 function normalizeLoadedData(loaded: AppData): AppData {
   for (const item of loaded.periods) {
@@ -88,8 +92,8 @@ function context(): string {
 }
 
 function shell(content: string): void {
-  const periodNotice=period().provisional?`<div class="period-notice" role="status"><strong>Số liệu tạm thời</strong><span>Kỳ báo cáo này chưa kết thúc. Kết quả có thể thay đổi khi hệ thống nguồn cập nhật dữ liệu.</span></div>`:"";
   const loaded=data.snapshots[`${state.periodId}:${state.scope}`];
+  const periodNotice=state.demo==="normal"&&state.screen!=="operations"&&loaded&&period().provisional?`<div class="period-notice" role="status"><strong>Số liệu tạm thời</strong><span>Kỳ báo cáo này chưa kết thúc. Kết quả có thể thay đổi khi hệ thống nguồn cập nhật dữ liệu.</span></div>`:"";
   const staleNotice=loaded?.delivery?.stale?`<div class="period-notice stale" role="status"><strong>Chưa cập nhật được</strong><span>${esc(loaded.delivery.message??"Đang sử dụng bản dữ liệu hoàn chỉnh gần nhất.")}</span></div>`:"";
   root.innerHTML = `<div class="app-shell">${nav()}<div class="workspace">${context()}<main class="content">${staleNotice}${periodNotice}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : ""}</div>`;
   bind();
@@ -98,13 +102,14 @@ function shell(content: string): void {
 function unavailable(kind: DemoState): string {
   if (kind === "loading") return `${title("Đang tải dữ liệu", "Đang chuẩn hóa dữ liệu theo đơn vị và kỳ báo cáo.")}<div class="boot-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>`;
   if (kind === "queued") return `${title("Đang chờ cập nhật dữ liệu", "Yêu cầu đã được lưu trong hàng đợi an toàn.")}<div class="empty-state"><h2>Đang chuẩn bị dữ liệu cho lựa chọn này</h2><p>${esc(pendingMessage||"Hệ thống đang xử lý tuần tự và sẽ tự hiển thị khi snapshot hoàn chỉnh được lưu vào PostgreSQL.")}</p><button class="btn" data-action="retry-selection">Kiểm tra lại</button></div>`;
-  if (kind === "blocked") return `${title("Đang chờ kết nối nguồn", "Yêu cầu đã được lưu nhưng kết nối DVCQG đang tạm dừng để bảo đảm an toàn.")}<div class="empty-state"><h2>Chưa thể cập nhật dữ liệu mới</h2><p>${esc(pendingMessage||"Quản trị viên cần kiểm tra kết nối trước khi mở lại bộ thu thập. Hệ thống không tự vượt WAF hoặc gửi thêm request.")}</p><button class="btn" data-action="retry-selection">Kiểm tra lại</button></div>`;
+  if (kind === "blocked") return `${title("Đang chờ kết nối nguồn", "Yêu cầu đã được lưu an toàn và sẽ giữ nguyên cho tới khi kết nối DVCQG được quản trị viên kiểm tra.")}<div class="empty-state"><p>${esc(pendingMessage||"Hệ thống không tự vượt WAF hoặc gửi thêm request.")}</p><div class="empty-actions"><button class="btn" data-action="retry-selection">Kiểm tra lại</button><button class="btn primary" data-nav="operations">Xem trạng thái vận hành</button></div></div>`;
   if (kind === "error") return `${title("Dữ liệu không hợp lệ", "Hệ thống chưa thể tổng hợp báo cáo ở thời điểm này.")}<div class="empty-state"><h2>Không thể hiển thị báo cáo</h2><p>Vui lòng thử lại hoặc liên hệ cán bộ quản trị dữ liệu. Các trường chưa có dữ liệu không được tính là 0.</p><button class="btn primary" data-state="normal">Thử lại</button></div>`;
   if (kind === "empty") return `${title("Không có dữ liệu", "Đơn vị hoặc kỳ được chọn không có bản ghi hợp lệ.")}<div class="empty-state"><h2>Không có dữ liệu cho lựa chọn hiện tại</h2><p>Hãy đổi kỳ báo cáo hoặc phạm vi TTHC. Giá trị null được giữ nguyên và không tham gia xếp hạng.</p><button class="btn" data-state="normal">Về dữ liệu thật</button></div>`;
   return `${title("Chưa đủ dữ liệu lịch sử", "Hệ thống chưa có chuỗi kỳ đồng nhất để so sánh.")}<div class="empty-state"><h2>Cần tối thiểu hai kỳ cùng loại</h2><p>Hiện có Tháng 8/2026, Quý III/2026 và Năm 2026. Ba kỳ này khác độ dài nên không được ghép thành một xu hướng.</p><button class="btn" data-state="normal">Quay lại báo cáo</button></div>`;
 }
 
 function render(): void {
+  if (state.screen === "operations") return shell(operations());
   if (state.demo !== "normal") return shell(unavailable(state.demo));
   const content = state.screen==="overview"?overview()
     :state.screen==="time"?time()
@@ -200,6 +205,35 @@ function quality(): string {
   return `${title("Độ tin cậy của số liệu", "Theo dõi mức độ đầy đủ và các lưu ý khi sử dụng kết quả.", "Các trường không có số liệu, bằng 0 và không áp dụng được phân biệt rõ.")}<section class="quality-grid"><article class="quality-card"><h3>Mức độ đầy đủ</h3><strong class="num">${snap.status.loadedGroups.length}/${snap.status.requiredGroups.length}</strong><p>${snap.status.state==="complete"?"Đã có đủ sáu nhóm chỉ tiêu của kỳ đang xem.":"Một số nhóm chỉ tiêu chưa có đủ số liệu."}</p></article><article class="quality-card"><h3>Chưa có số liệu</h3><strong class="num">${missing}</strong><p>Các trường này hiển thị “Không có dữ liệu” và không được tính là 0.</p></article><article class="quality-card"><h3>Giá trị bằng 0</h3><strong class="num">${zeros}</strong><p>Đây là giá trị đã ghi nhận bằng 0, khác với trường hợp chưa có dữ liệu.</p></article><article class="quality-card"><h3>Số lượng hồ sơ quá ít</h3><strong class="num">${small}</strong><p>Một hồ sơ có thể làm tỷ lệ thay đổi mạnh; cần thận trọng khi đánh giá.</p></article><article class="quality-card"><h3>Không áp dụng ở cấp xã</h3><strong>Đang rà soát</strong><p>Tiêu chí không áp dụng được hưởng điểm tối đa theo quy định; nhãn sẽ hiển thị sau khi đối chiếu chính xác từng chỉ tiêu.</p></article><article class="quality-card"><h3>Giới hạn hiện tại</h3><strong class="num">2</strong><p>Mức độ hài lòng chưa tách theo TTHC; cách quy đổi chi tiết điểm DVC trực tuyến đang chờ xác nhận.</p></article></section><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Thời điểm cập nhật theo nhóm chỉ tiêu</h2><p>Giúp người dùng biết số liệu đang xem được cập nhật khi nào.</p></div><span class="badge good">Đã cập nhật</span></div><div class="table-wrap"><table><thead><tr><th>Nhóm chỉ tiêu</th><th>Thời điểm cập nhật</th><th>Trạng thái</th></tr></thead><tbody>${snap.datasets.map(d=>`<tr><td>${esc(d.label)}</td><td class="num">${esc(dateTime(d.capture.capturedAt))}</td><td><span class="badge good">Đầy đủ</span></td></tr>`).join("")}</tbody></table></div></section>`;
 }
 
+function operationPeriod(job:OperationJob):string{
+  const selected=job.request.period;
+  if(!selected)return "Không xác định";
+  if(selected.type==="month")return `Tháng ${selected.month}/${selected.year}`;
+  if(selected.type==="quarter")return `Quý ${selected.quarter}/${selected.year}`;
+  return `Năm ${selected.year??"—"}`;
+}
+
+function operations():string{
+  const queued=operationData.jobs.filter(job=>job.state==="queued").length;
+  const running=operationData.jobs.filter(job=>job.state==="running").length;
+  const stopped=operationData.jobs.filter(job=>job.state==="failed"||job.state==="halted").length;
+  const circuitOpen=operationData.circuitState==="open";
+  const rows=operationData.jobs.map(job=>`<tr><td class="num">${esc(job.id.slice(0,8))}</td><td>${esc(operationPeriod(job))}</td><td>${job.request.scope==="formality"?"Theo TTHC":"Tất cả TTHC"}</td><td><span class="badge ${job.state==="succeeded"?"good":job.state==="running"?"info":job.state==="queued"?"warn":"bad"}">${esc(job.state)}</span></td><td class="num">${job.attempts}</td><td>${esc(dateTime(job.createdAt))}</td></tr>`).join("");
+  const content=operationData.loading?`<div class="boot-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>`:operationData.error?`<div class="banner bad"><span>!</span><div><strong>Không đọc được trạng thái vận hành</strong><p>${esc(operationData.error)}</p></div></div>`:`<section class="quality-grid"><article class="quality-card"><h3>Kết nối DVCQG</h3><strong class="status-text ${circuitOpen?"negative":"positive"}">${circuitOpen?"Đang tạm dừng":"Sẵn sàng"}</strong><p>${circuitOpen?"Worker không được phép gọi nguồn cho tới khi quản trị viên kiểm tra và chủ động mở lại.":"Circuit đang đóng; worker chỉ xử lý tuần tự theo giới hạn an toàn."}</p></article><article class="quality-card"><h3>Job đang chờ</h3><strong class="num">${queued}</strong><p>${running} đang chạy · ${stopped} đã dừng hoặc thất bại.</p></article><article class="quality-card"><h3>Snapshot hoàn chỉnh</h3><strong class="num">${operationData.snapshotCount}</strong><p>Cập nhật gần nhất: ${esc(dateTime(operationData.latestSnapshotAt))}.</p></article></section><div class="banner ${circuitOpen?"warn":""}" style="margin-top:12px"><span>${circuitOpen?"!":"i"}</span><div><strong>${circuitOpen?"Cần kiểm tra kết nối trước khi chạy":"Luồng thu thập đang được bảo vệ"}</strong><p>${esc(operationData.circuitReason??(circuitOpen?"Chưa có mô tả nguyên nhân.":"Không có cảnh báo circuit."))} Màn hình này chỉ đọc; không tự mở circuit hoặc gửi request DVCQG.</p></div></div><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Hàng đợi cập nhật dữ liệu</h2><p>Các yêu cầu được chống trùng và xử lý ngoài vòng đời request giao diện.</p></div><button class="btn small" data-action="refresh-operations">Làm mới</button></div><div class="table-wrap"><table><thead><tr><th>Mã job</th><th>Kỳ</th><th>Phạm vi</th><th>Trạng thái</th><th>Số lần thử</th><th>Thời điểm tạo</th></tr></thead><tbody>${rows||`<tr><td colspan="6">Chưa có yêu cầu nào trong hàng đợi.</td></tr>`}</tbody></table></div></section>`;
+  return `${title("Trạng thái vận hành", "Theo dõi kết nối nguồn, snapshot và hàng đợi cập nhật dữ liệu.", "Chỉ hiển thị thông tin an toàn; việc mở circuit vẫn thực hiện theo runbook quản trị.")}${content}`;
+}
+
+async function loadOperations():Promise<void>{
+  operationData.loading=true;operationData.error=null;render();
+  try{
+    const [statusResponse,jobsResponse]=await Promise.all([fetch("/api/v1/system-status"),fetch("/api/v1/collection-jobs?limit=50")]);
+    if(!statusResponse.ok||!jobsResponse.ok)throw new Error(`HTTP ${statusResponse.status}/${jobsResponse.status}`);
+    const status=await statusResponse.json() as {circuitState:string;circuitReason:string|null;snapshotCount:number;latestSnapshotAt:string|null};
+    operationData={loading:false,error:null,circuitState:status.circuitState,circuitReason:status.circuitReason,snapshotCount:status.snapshotCount,latestSnapshotAt:status.latestSnapshotAt,jobs:await jobsResponse.json() as OperationJob[]};
+  }catch(error){operationData.loading=false;operationData.error=error instanceof Error?error.message:String(error)}
+  render();
+}
+
 function briefModal(): string {
   const view=unit(), list=buildSuggestions(view).filter(x=>x.severity==="critical"||x.severity==="warning").slice(0,3);
   return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Báo cáo ngắn cho lãnh đạo"><div class="modal"><div class="modal-top no-print"><strong>Báo cáo lãnh đạo · 1 trang</strong><div><button class="btn small" data-action="print">In / PDF</button> <button class="btn small" data-action="close-modal">Đóng</button></div></div><article class="brief"><p class="eyebrow">${esc(view.name)} · ${esc(period().label)}</p><h1>Báo cáo nhanh Bộ chỉ số 766</h1><p class="muted">Phạm vi ${state.scope==="all"?"tất cả thủ tục hành chính":data.formality.code}</p><section class="kpi-strip"><div class="kpi"><div class="kpi-label">Tổng điểm</div><div class="kpi-value large num">${n(view.totalScore)}/${n(view.totalMaximum)}</div></div><div class="kpi"><div class="kpi-label">Thứ hạng</div><div class="kpi-value num">${view.peer?`${view.peer.rank}/${view.peer.total}`:"Không áp dụng"}</div></div><div class="kpi"><div class="kpi-label">Phân vị</div><div class="kpi-value num">${view.peer?`P${Math.round(view.peer.percentile)}`:"—"}</div></div><div class="kpi"><div class="kpi-label">So kỳ trước</div><div class="kpi-value">Chưa đủ kỳ</div></div></section><div class="brief-groups">${view.groups.map(g=>`<div class="brief-item"><span>${esc(g.label)}</span><strong class="num">${n(scoreValue(g))}/${n(g.maximum)}</strong></div>`).join("")}</div><h2>Ba việc cần chú ý</h2>${list.length?list.map((x,i)=>`<p><strong>${i+1}. ${esc(x.finding)}</strong><br><span class="muted">${esc(x.evidence)} ${esc(x.action)}</span></p>`).join(""):`<p>Chưa phát hiện cảnh báo ưu tiên từ các thông tin hiện có.</p>`}<p class="muted">Lưu ý: chưa có hai kỳ cùng loại để xác nhận xu hướng; cách quy đổi chi tiết điểm DVC trực tuyến đang chờ xác nhận.</p></article></div></div>`;
@@ -210,7 +244,7 @@ function exportModal(): string {
 }
 
 function bind(): void {
-  document.querySelectorAll<HTMLElement>("[data-nav]").forEach(el=>el.addEventListener("click",()=>{state.screen=el.dataset.nav as ScreenId;state.demo="normal";render();scrollTo(0,0)}));
+  document.querySelectorAll<HTMLElement>("[data-nav]").forEach(el=>el.addEventListener("click",()=>{const destination=el.dataset.nav as ScreenId;state.screen=destination;if(destination==="operations"){state.demo="normal";render();void loadOperations()}else if(data.snapshots[`${state.periodId}:${state.scope}`]){state.demo="normal";render()}else{void loadSelection()}scrollTo(0,0)}));
   document.querySelectorAll<HTMLElement>("[data-state]").forEach(el=>el.addEventListener("click",()=>{state.demo=el.dataset.state as DemoState;render()}));
   document.querySelectorAll<HTMLElement>("[data-dimension]").forEach(el=>el.addEventListener("click",()=>{state.peerDimension=el.dataset.dimension as State["peerDimension"];render()}));
   document.querySelectorAll<HTMLElement>("[data-group-detail]").forEach(el=>el.addEventListener("click",()=>{state.selectedGroup=el.dataset.groupDetail as GroupId;render();document.querySelector("#group-detail")?.scrollIntoView({behavior:"smooth",block:"start"})}));
@@ -226,6 +260,7 @@ function bind(): void {
   document.querySelector<HTMLElement>("[data-action=print]")?.addEventListener("click",()=>window.print());
   document.querySelector<HTMLElement>("[data-action=open-quality]")?.addEventListener("click",()=>{state.screen="quality";render()});
   document.querySelector<HTMLElement>("[data-action=retry-selection]")?.addEventListener("click",()=>{void loadSelection()});
+  document.querySelector<HTMLElement>("[data-action=refresh-operations]")?.addEventListener("click",()=>{void loadOperations()});
 }
 
 function mergeUnits(snapshot: Snapshot): void {

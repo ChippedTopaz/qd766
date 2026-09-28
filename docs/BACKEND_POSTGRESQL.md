@@ -144,6 +144,11 @@ FastAPI phục vụ luôn frontend trong thư mục `web` tại `/`. Endpoint
 trả ngay trạng thái `ready` nếu PostgreSQL đã có snapshot; nếu chưa có thì chỉ
 xếp một job chống trùng và trả trạng thái circuit cho frontend.
 
+Mục **Vận hành** trên frontend đọc `system-status` và `collection-jobs` để hiển
+thị circuit, số snapshot và hàng đợi. Màn hình này không có thao tác mở circuit
+hoặc kích hoạt worker; các bước đó vẫn phải làm theo runbook sau khi kiểm tra
+kết nối nguồn.
+
 ## Cấu hình
 
 Chỉ dùng biến môi trường; không commit credential:
