@@ -1,0 +1,17 @@
+{
+  "name": "qd766-commune-analytics",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Commune-first analytics workspace for QĐ766 fixtures",
+  "scripts": {
+    "data": "python tools/build_web_data.py",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run data && tsc",
+    "serve": "python tools/serve_app.py",
+    "serve:static": "python tools/serve_web.py"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
+
