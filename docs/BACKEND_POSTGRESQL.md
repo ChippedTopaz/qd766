@@ -88,6 +88,22 @@ worker, chỉ một worker được phép gọi DVCQG tại một thời điểm
 circuit breaker toàn cục; các job khác giữ nguyên trạng thái `queued` cho tới
 khi quản trị viên chủ động đóng lại cầu dao sau khi kiểm tra nguyên nhân.
 
+Probe kết nối chỉ thực hiện một GET trang chủ, không theo redirect, không POST
+và không retry. Nếu DNS/HTTPS lỗi, nhận 403/429/5xx hoặc trang từ chối, tùy chọn
+`--record-control` sẽ mở circuit breaker. Kết quả thành công không tự đóng cầu
+dao:
+
+```powershell
+.venv\Scripts\python.exe tools\test_dvcqg_connectivity.py --record-control
+.venv\Scripts\python.exe tools\manage_collection_control.py status
+```
+
+Chỉ sau khi người vận hành đã đọc kết quả probe và xác nhận có thể thử lại:
+
+```powershell
+.venv\Scripts\python.exe tools\manage_collection_control.py close --confirm-reviewed
+```
+
 ## API đã có
 
 ```text

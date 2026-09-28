@@ -1,55 +1,57 @@
 #!/usr/bin/env python3
-"""Very small, read-only connectivity diagnostic for DVCQG.
-
-No POST is made. The script checks DNS/HTTPS connectivity to the public host
-and records timing/status only. It is intentionally lightweight and safe.
-"""
+"""One-shot, read-only DVCQG connectivity probe. Never POSTs or retries."""
 from __future__ import annotations
 
-import socket
-import ssl
+import argparse
+import json
 import sys
-import time
-import urllib.error
-import urllib.request
+from pathlib import Path
 
-HOST = "dichvucong.gov.vn"
-URL = "https://dichvucong.gov.vn/"
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from qd766.backend.config import Settings, load_environment_file
+from qd766.backend.connectivity import probe_dvcqg_connectivity
+from qd766.backend.database import create_database_engine, create_session_factory
+from qd766.backend.jobs import open_collection_circuit
 
 
 def main() -> int:
-    print(f"DNS {HOST}")
-    t0 = time.monotonic()
-    try:
-        infos = socket.getaddrinfo(HOST, 443, type=socket.SOCK_STREAM)
-        addresses = sorted({item[4][0] for item in infos})
-        print(f"DNS OK | {len(addresses)} address(es) | {', '.join(addresses[:10])}")
-    except Exception as exc:
-        print(f"DNS ERROR: {exc}")
-        return 1
-    print(f"DNS elapsed: {time.monotonic() - t0:.2f}s")
-
-    print(f"HTTPS GET {URL}")
-    t1 = time.monotonic()
-    request = urllib.request.Request(
-        URL,
-        method="GET",
-        headers={"User-Agent": "Mozilla/5.0 (compatible; qd766-connectivity-check/1.0)"},
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--record-control",
+        action="store_true",
+        help="Open the PostgreSQL circuit breaker when the probe returns a stop signal.",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=20, context=ssl.create_default_context()) as response:
-            sample = response.read(256)
-            print(f"HTTPS OK | status={response.status} | content-type={response.headers.get('Content-Type','')} | bytes-read={len(sample)}")
-    except urllib.error.HTTPError as exc:
-        print(f"HTTPS REACHED HOST | HTTP {exc.code} | content-type={exc.headers.get('Content-Type','')}")
-    except urllib.error.URLError as exc:
-        print(f"HTTPS NETWORK ERROR: {exc}")
-        return 2
-    except Exception as exc:
-        print(f"HTTPS ERROR: {exc}")
-        return 3
-    print(f"HTTPS elapsed: {time.monotonic() - t1:.2f}s")
-    return 0
+    arguments = parser.parse_args()
+    result = probe_dvcqg_connectivity()
+    payload = result.to_dict()
+
+    if arguments.record_control and not result.safe_to_review_for_reenable:
+        load_environment_file(ROOT / ".env")
+        engine = create_database_engine(Settings.from_env())
+        factory = create_session_factory(engine)
+        try:
+            with factory.begin() as session:
+                open_collection_circuit(
+                    session,
+                    reason="connectivity-probe-stop",
+                    detail={
+                        "kind": result.stop_reason,
+                        "retryable": False,
+                        "httpStatus": result.http_status,
+                        "errorType": result.error_type,
+                        "message": result.error_message,
+                    },
+                )
+            payload["circuitAction"] = "opened"
+        finally:
+            engine.dispose()
+    else:
+        payload["circuitAction"] = "unchanged"
+
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0 if result.safe_to_review_for_reenable else 2
 
 
 if __name__ == "__main__":
