@@ -8,7 +8,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
-from .dashboard import dashboard_payload
+from .dashboard import dashboard_payload, snapshot_payload
 from .database import get_session
 from .models import CollectionControl, CollectionJob, Dataset, Entity, Formality, FormalityDepartment, Snapshot
 from .schemas import (
@@ -156,6 +156,82 @@ def dashboard(
     payload, cache_result = request.app.state.dashboard_cache.get_or_load(
         cache_key,
         load_dashboard,
+    )
+    response.headers["X-QD766-Cache"] = cache_result
+    response.headers["Cache-Control"] = "private, max-age=30"
+    return payload
+
+
+@router.get("/dashboard/selection", tags=["dashboard"])
+def dashboard_selection(
+    request: Request,
+    response: Response,
+    session: DbSession,
+    period_type: str = Query(pattern="^(month|quarter|year)$"),
+    year: int = Query(ge=2000, le=2200),
+    scope: str = Query(default="all", pattern="^(all|formality)$"),
+    period_value: int | None = None,
+    formality_id: uuid.UUID | None = None,
+    root_department_id: uuid.UUID | None = None,
+) -> dict:
+    cache_key = ":".join(
+        [
+            "selection",
+            str(root_department_id or "latest"),
+            period_type,
+            str(year),
+            str(period_value or 0),
+            scope,
+            str(formality_id or "all"),
+        ]
+    )
+
+    def load_selection() -> dict:
+        resolved_root_id = root_department_id
+        if resolved_root_id is None:
+            resolved_root_id = session.scalar(
+                select(Snapshot.root_department_id)
+                .where(Snapshot.state == "complete")
+                .order_by(Snapshot.created_at.desc())
+                .limit(1)
+            )
+        statement = (
+            select(Snapshot)
+            .options(
+                selectinload(Snapshot.datasets)
+                .selectinload(Dataset.entities)
+                .selectinload(Entity.department),
+                selectinload(Snapshot.datasets)
+                .selectinload(Dataset.entities)
+                .selectinload(Entity.metrics),
+            )
+            .where(
+                Snapshot.state == "complete",
+                Snapshot.root_department_id == resolved_root_id,
+                Snapshot.period_type == period_type,
+                Snapshot.year == year,
+                Snapshot.scope == scope,
+            )
+            .order_by(Snapshot.created_at.desc())
+        )
+        statement = (
+            statement.where(Snapshot.period_value.is_(None))
+            if period_value is None
+            else statement.where(Snapshot.period_value == period_value)
+        )
+        statement = (
+            statement.where(Snapshot.formality_id.is_(None))
+            if formality_id is None
+            else statement.where(Snapshot.formality_id == formality_id)
+        )
+        selected = session.scalar(statement.limit(1))
+        if selected is None:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        item = snapshot_payload(selected)
+        return {"metadata": item["delivery"], "snapshot": item}
+
+    payload, cache_result = request.app.state.dashboard_cache.get_or_load(
+        cache_key, load_selection
     )
     response.headers["X-QD766-Cache"] = cache_result
     response.headers["Cache-Control"] = "private, max-age=30"

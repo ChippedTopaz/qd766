@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -32,6 +33,17 @@ def _period_label(snapshot: Snapshot) -> str:
     if snapshot.period_type == "quarter":
         return f"Quý {snapshot.period_value}/{snapshot.year}"
     return f"Năm {snapshot.year}"
+
+
+def _is_provisional(snapshot: Snapshot, today: date | None = None) -> bool:
+    current = today or date.today()
+    if snapshot.year != current.year:
+        return snapshot.year > current.year
+    if snapshot.period_type == "year":
+        return True
+    if snapshot.period_type == "quarter":
+        return snapshot.period_value == ((current.month - 1) // 3) + 1
+    return snapshot.period_value == current.month
 
 
 def _entity(entity: Entity, *, include_detail: bool) -> dict[str, Any]:
@@ -75,8 +87,35 @@ def _dataset(dataset: Dataset) -> dict[str, Any]:
         "formulaStatus": dataset.formula_status,
         "scorePolicy": dataset.score_policy,
         "root": _entity(root, include_detail=True),
-        "children": [_entity(entity, include_detail=False) for entity in children],
+        # The analytical frontend needs metrics/parameters for the selected child,
+        # not only for the provincial root. Keep one canonical response contract.
+        "children": [_entity(entity, include_detail=True) for entity in children],
         "raw": {"path": dataset.raw_path, "sha256": dataset.raw_sha256},
+        "capture": {
+            "capturedAt": dataset.snapshot.created_at.isoformat(),
+            "httpStatus": 200,
+            "contentType": "application/json",
+            "bytes": 0,
+        },
+    }
+
+
+def snapshot_payload(snapshot: Snapshot) -> dict[str, Any]:
+    return {
+        "scope": snapshot.scope,
+        "formalityId": str(snapshot.formality_id) if snapshot.formality_id else None,
+        "status": snapshot.status_detail,
+        "provinceAggregatedScore": _number(snapshot.province_aggregated_score),
+        "provinceAggregatedMaximum": _number(snapshot.province_aggregated_maximum),
+        "scorePolicy": snapshot.policy,
+        "datasets": [_dataset(dataset) for dataset in snapshot.datasets],
+        "delivery": {
+            "result": "database",
+            "capturedAt": snapshot.created_at.isoformat(),
+            "provisional": _is_provisional(snapshot),
+            "stale": False,
+            "message": "Dữ liệu lấy từ PostgreSQL trên máy chủ QD766.",
+        },
     }
 
 
@@ -95,24 +134,11 @@ def dashboard_payload(
                 "label": _period_label(snapshot),
                 "type": snapshot.period_type,
                 "year": snapshot.year,
-                **(
-                    {"month": snapshot.period_value}
-                    if snapshot.period_type == "month"
-                    else {"quarter": snapshot.period_value}
-                    if snapshot.period_type == "quarter"
-                    else {}
-                ),
+                "value": snapshot.period_value,
+                "provisional": _is_provisional(snapshot),
             },
         )
-        payload_snapshots[f"{period_id}:{snapshot.scope}"] = {
-            "scope": snapshot.scope,
-            "formalityId": str(snapshot.formality_id) if snapshot.formality_id else None,
-            "status": snapshot.status_detail,
-            "provinceAggregatedScore": _number(snapshot.province_aggregated_score),
-            "provinceAggregatedMaximum": _number(snapshot.province_aggregated_maximum),
-            "scorePolicy": snapshot.policy,
-            "datasets": [_dataset(dataset) for dataset in snapshot.datasets],
-        }
+        payload_snapshots[f"{period_id}:{snapshot.scope}"] = snapshot_payload(snapshot)
 
     root = snapshots[0].root_department
     ordered_periods = sorted(
@@ -123,6 +149,30 @@ def dashboard_payload(
             -(item.get("month") or item.get("quarter") or 0),
         ),
     )
+    units: dict[str, dict[str, Any]] = {
+        str(root.id): {
+            "departmentId": str(root.id),
+            "departmentName": root.name,
+            "departmentType": root.department_type,
+            "departmentLevel": "PROVINCE_TOTAL",
+        }
+    }
+    for snapshot in snapshots:
+        for dataset in snapshot.datasets:
+            for entity in dataset.entities:
+                if entity.entity_kind != "child":
+                    continue
+                department = entity.department
+                units.setdefault(
+                    str(department.id),
+                    {
+                        "departmentId": str(department.id),
+                        "departmentName": department.name,
+                        "departmentType": department.department_type,
+                        "departmentLevel": department.department_level,
+                    },
+                )
+
     return {
         "schemaVersion": 1,
         "source": "PostgreSQL snapshots; API scores are authoritative",
@@ -135,5 +185,8 @@ def dashboard_payload(
         "periods": ordered_periods,
         "groupOrder": list(GROUP_LABELS),
         "groupLabels": GROUP_LABELS,
+        "metricCatalog": [],
+        "defaultUnitId": str(root.id),
+        "units": list(units.values()),
         "snapshots": payload_snapshots,
     }

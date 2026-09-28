@@ -113,6 +113,8 @@ GET /api/v1/system-status
 GET /api/v1/collection-jobs
 GET /api/v1/collection-jobs/{jobId}
 GET /api/v1/collection-control
+GET /api/v1/dashboard
+GET /api/v1/dashboard/selection
 GET /api/v1/snapshots
 GET /api/v1/snapshots/latest
 GET /api/v1/snapshots/{snapshotId}
@@ -130,6 +132,10 @@ Dashboard dùng cache TTL 60 giây trong tiến trình backend. Các request cù
 những request còn lại nhận cùng kết quả. Header `X-QD766-Cache` cho biết
 `miss`, `hit` hoặc `shared`. Endpoint `system-status` cung cấp trạng thái
 PostgreSQL, circuit, số snapshot và thống kê cache mà không lộ credential.
+
+FastAPI phục vụ luôn frontend trong thư mục `web` tại `/`. Endpoint
+`/api/v1/dashboard/selection` nhận `period_type`, `year`, `period_value`,
+`scope`, `formality_id` và chỉ trả một snapshot đầy đủ cho lựa chọn đó.
 
 ## Cấu hình
 

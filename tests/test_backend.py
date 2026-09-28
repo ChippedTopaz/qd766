@@ -158,12 +158,31 @@ class BackendTest(unittest.TestCase):
         dashboard = self.client.get("/api/v1/dashboard")
         self.assertEqual(dashboard.status_code, 200)
         self.assertEqual(dashboard.headers["X-QD766-Cache"], "miss")
-        self.assertEqual(dashboard.json()["snapshots"]["month-2026-08:all"]["datasets"][0]["group"], "transparency")
+        dashboard_body = dashboard.json()
+        self.assertEqual(dashboard_body["defaultUnitId"], ROOT_ID)
+        self.assertEqual(len(dashboard_body["units"]), 2)
+        self.assertEqual(dashboard_body["periods"][0]["value"], 8)
+        stored_dataset = dashboard_body["snapshots"]["month-2026-08:all"]["datasets"][0]
+        self.assertEqual(stored_dataset["group"], "transparency")
+        self.assertEqual(stored_dataset["children"][0]["metrics"][0]["code"], "EXAMPLE")
+        self.assertIn("capturedAt", stored_dataset["capture"])
         cached = self.client.get("/api/v1/dashboard")
         self.assertEqual(cached.headers["X-QD766-Cache"], "hit")
+        selection = self.client.get(
+            "/api/v1/dashboard/selection",
+            params={
+                "period_type": "month",
+                "year": 2026,
+                "period_value": 8,
+                "scope": "all",
+            },
+        )
+        self.assertEqual(selection.status_code, 200)
+        self.assertEqual(selection.json()["metadata"]["result"], "database")
+        self.assertEqual(selection.json()["snapshot"]["scope"], "all")
         system_status = self.client.get("/api/v1/system-status").json()
         self.assertEqual(system_status["snapshotCount"], 1)
-        self.assertEqual(system_status["dashboardCache"]["entries"], 1)
+        self.assertEqual(system_status["dashboardCache"]["entries"], 2)
 
     def test_conflicting_snapshot_is_rejected(self):
         with self.app.state.session_factory.begin() as session:
