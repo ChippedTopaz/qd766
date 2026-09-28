@@ -10,6 +10,32 @@ const screens = [
 let data;
 let state;
 let selectionRequest = 0;
+function normalizeLoadedData(loaded) {
+    for (const item of loaded.periods) {
+        const legacy = item;
+        if (item.value === undefined)
+            item.value = legacy.month ?? legacy.quarter ?? null;
+        item.provisional = Boolean(item.provisional);
+    }
+    const discovered = new Map();
+    for (const snap of Object.values(loaded.snapshots)) {
+        for (const dataset of snap.datasets) {
+            dataset.capture ??= { capturedAt: "", httpStatus: 200, contentType: "application/json", bytes: 0 };
+            for (const entity of [dataset.root, ...dataset.children]) {
+                entity.metrics ??= [];
+                entity.parameters ??= {};
+                discovered.set(entity.departmentId, { departmentId: entity.departmentId, departmentName: entity.departmentName, departmentType: entity.departmentType, departmentLevel: entity === dataset.root ? "PROVINCE_TOTAL" : entity.departmentLevel });
+            }
+        }
+    }
+    if (!Array.isArray(loaded.units) || !loaded.units.length)
+        loaded.units = [...discovered.values()];
+    if (!loaded.defaultUnitId)
+        loaded.defaultUnitId = loaded.province.id;
+    if (!Array.isArray(loaded.metricCatalog))
+        loaded.metricCatalog = [];
+    return loaded;
+}
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char] ?? char);
 const n = (value, digits = 2) => value === null || value === undefined || !Number.isFinite(value) ? "N/A" : value.toLocaleString("vi-VN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const int = (value) => value === null || value === undefined || !Number.isFinite(value) ? "N/A" : value.toLocaleString("vi-VN", { maximumFractionDigits: 0 });
@@ -235,13 +261,13 @@ async function loadSelection() {
     }
     state.demo = "loading";
     render();
-    const params = new URLSearchParams({ periodType: selected.type, year: String(selected.year), scope: state.scope });
+    const params = new URLSearchParams({ period_type: selected.type, year: String(selected.year), scope: state.scope });
     if (selected.value !== null && selected.value !== undefined)
-        params.set("value", String(selected.value));
-    if (state.scope === "formality")
-        params.set("formalityId", data.formality.id);
+        params.set("period_value", String(selected.value));
+    if (state.scope === "formality" && data.formality.id)
+        params.set("formality_id", data.formality.id);
     try {
-        const response = await fetch(`/api/v1/snapshots?${params.toString()}`);
+        const response = await fetch(`/api/v1/dashboard/selection?${params.toString()}`);
         if (!response.ok) {
             const problem = await response.json().catch(() => ({}));
             throw new Error(typeof problem.detail === "string" ? problem.detail : `HTTP ${response.status}`);
@@ -262,24 +288,18 @@ async function loadSelection() {
     }
     render();
 }
-async function loadAvailablePeriods() {
-    try {
-        const response = await fetch("/api/v1/periods");
-        if (!response.ok)
-            return;
-        const body = await response.json();
-        if (Array.isArray(body.periods) && body.periods.length)
-            data.periods = body.periods;
-    }
-    catch { /* Static fixture preview keeps its bundled period list. */ }
-}
 async function start() {
     try {
-        const response = await fetch("./data/snapshots.json");
-        if (!response.ok)
-            throw new Error(`HTTP ${response.status}`);
-        data = await response.json();
-        await loadAvailablePeriods();
+        const apiResponse = await fetch("/api/v1/dashboard");
+        if (apiResponse.ok) {
+            data = normalizeLoadedData(await apiResponse.json());
+        }
+        else {
+            const fixtureResponse = await fetch("./data/snapshots.json");
+            if (!fixtureResponse.ok)
+                throw new Error(`API HTTP ${apiResponse.status}; fixture HTTP ${fixtureResponse.status}`);
+            data = normalizeLoadedData(await fixtureResponse.json());
+        }
         const initialPeriod = [...data.periods].reverse().find(item => item.type === "year" && Boolean(data.snapshots[`${item.id}:all`])) ?? [...data.periods].reverse().find(item => Boolean(data.snapshots[`${item.id}:all`]));
         if (!initialPeriod)
             throw new Error("Chưa có kỳ báo cáo ban đầu hoàn chỉnh");
