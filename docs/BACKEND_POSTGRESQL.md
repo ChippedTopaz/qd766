@@ -214,7 +214,8 @@ Chưa hoàn thành hoặc đang bị chặn:
 - ba fixture tháng M0 bị hỏng byte/JSON nên chưa được nhập; kiểm tra cho thấy
   không thể phục hồi trung thực chỉ bằng chuyển mã;
 - kết nối HTTPS tới DVCQG bị máy đích đóng cưỡng bức (`WinError 10054`); đã dừng
-  theo nguyên tắc an toàn, không gửi POST hoặc thử vượt WAF;
+  theo nguyên tắc an toàn, không gửi POST hoặc thử vượt WAF; probe một GET ngày
+  28/09/2026 xác nhận lỗi lặp lại và circuit breaker hiện đang `open`;
 - queue và processor đã có nhưng worker live chưa được bật/scheduled;
 - chưa có cache/single-flight và benchmark rate/concurrency;
 - chưa triển khai ứng dụng vào thư mục ổn định và chưa đăng ký Windows task;
