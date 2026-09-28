@@ -1,15 +1,23 @@
-# M2 dashboard
+# QĐ766 administrative-unit analytics frontend
 
-The dashboard reads the PostgreSQL API at `http://127.0.0.1:8767` and falls
-back to the normalized M0 fixture file when the API is unavailable. Start the
-backend and dashboard from the repository root:
+This frontend is a TypeScript analytical workspace for province-wide results,
+provincial departments, communes, and wards. It uses normalized M0 snapshots
+and treats scores published by the source system as authoritative.
 
 ```text
-tools\start_backend.ps1
-python tools/serve_web.py
+npm install
+npm run build
+npm run serve
 ```
 
-Open `http://127.0.0.1:8766`. API scores remain authoritative. The browser does
-not read raw fixture responses or recalculate scores from unresolved formulas.
-Set `window.QD766_API_BASE` before `app.js` when deploying against a public
-HTTPS backend URL.
+Open `http://127.0.0.1:8766`. The build regenerates `web/data/snapshots.json`
+from the raw fixtures and type-checks the UI. `npm run serve` starts the website
+and the on-demand data API together. Install `tools/requirements-server.txt`
+on the application server. Set `QD766_DATABASE_URL` to enable PostgreSQL; when
+it is absent, the development server uses the versioned file cache.
+
+The period selector reads available months, quarters and years from the API.
+Selecting a missing period starts one cache-aside collection; subsequent users
+reuse the complete version. The application does not infer unverified scoring
+formulas and does not combine unlike period types into a false time series.
+
