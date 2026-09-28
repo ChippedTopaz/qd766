@@ -256,9 +256,23 @@ function bindControls() {
 
 async function start() {
   try {
-    const response = await fetch("./data/snapshots.json");
+    const apiBase = window.QD766_API_BASE || "http://127.0.0.1:8767";
+    let response;
+    let sourceLabel = "PostgreSQL nội bộ · dữ liệu đã xác minh";
+    try {
+      response = await fetch(`${apiBase}/api/v1/dashboard`);
+      if (!response.ok) throw new Error(`API HTTP ${response.status}`);
+    } catch (apiError) {
+      console.warn("Không thể đọc PostgreSQL API; dùng snapshot tĩnh.", apiError);
+      response = await fetch("./data/snapshots.json");
+      sourceLabel = "Snapshot tĩnh dự phòng";
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.data = await response.json();
+    if (!state.data.snapshots[`${state.periodId}:${state.scope}`]) {
+      state.periodId = state.data.periods[0]?.id;
+    }
+    $("#source-label").textContent = sourceLabel;
     bindControls();
     render();
   } catch (error) {

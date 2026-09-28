@@ -2,5 +2,9 @@
 .venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
 /tests/runtime-collection/
 /tmp*/
+.env
+*.db
+/tests/runtime-backend/

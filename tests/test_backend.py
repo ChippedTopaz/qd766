@@ -1,0 +1,252 @@
+import copy
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+
+from qd766.backend import create_app
+from qd766.backend.config import Settings
+from qd766.backend.importer import (
+    SnapshotConflict,
+    SnapshotImportError,
+    store_formality_page,
+    store_normalized_snapshot,
+)
+from qd766.backend.jobs import (
+    JobStateError,
+    claim_next_job,
+    enqueue_job,
+    halt_job,
+    retry_or_fail_job,
+    succeed_job,
+)
+from qd766.backend.models import Base, CollectionJob, Dataset, Entity, Metric, Snapshot
+
+ROOT_ID = "019d2be3-6a88-732b-8b17-b68020c8553a"
+CHILD_ID = "019d2be3-6a88-732b-8b17-bb1e9a3f14ab"
+
+
+def entity(department_id, name, score):
+    return {
+        "departmentId": department_id,
+        "departmentName": name,
+        "departmentCode": "H44",
+        "departmentType": "PROVINCE",
+        "departmentLevel": "PROVINCE",
+        "agencyLevel": "level_1",
+        "apiScore": score,
+        "apiMaxScore": 10,
+        "apiRatio": 50,
+        "scoreSource": "dvcqg-api",
+        "formulaApplied": False,
+        "metrics": [
+            {
+                "code": "EXAMPLE",
+                "name": "Example",
+                "numerator": 1,
+                "denominator": 2,
+                "ratio": 50,
+                "apiScore": score,
+                "apiMaxScore": 10,
+                "extras": {},
+            }
+        ],
+        "parameters": {},
+        "metadata": {},
+    }
+
+
+def snapshot_payload():
+    return {
+        "schemaVersion": 1,
+        "period": {"type": "month", "year": 2026, "month": 8},
+        "scope": "all",
+        "formalityId": None,
+        "status": {
+            "state": "complete",
+            "requiredGroups": ["transparency"],
+            "loadedGroups": ["transparency"],
+            "unsupportedGroups": [],
+            "missingGroups": [],
+        },
+        "scorePolicy": {"authoritativeValue": "apiScore"},
+        "provinceAggregatedScore": 5,
+        "provinceAggregatedMaximum": 10,
+        "datasets": [
+            {
+                "group": "transparency",
+                "schemaKind": "metrics",
+                "formulaStatus": "metrics-returned-by-api",
+                "scorePolicy": "api-authoritative",
+                "period": {"type": "month", "year": 2026, "month": 8},
+                "scope": "all",
+                "formalityId": None,
+                "root": entity(ROOT_ID, "UBND tỉnh Phú Thọ", 5),
+                "children": [entity(CHILD_ID, "Văn phòng UBND", 4)],
+                "details": {"source": "fixture"},
+                "raw": {"path": "transparency/month-all.json", "sha256": "a" * 64},
+            }
+        ],
+    }
+
+
+class BackendTest(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app(Settings(database_url="sqlite+pysqlite://"))
+        Base.metadata.create_all(self.app.state.engine)
+        self.client = TestClient(self.app)
+
+    def tearDown(self):
+        Base.metadata.drop_all(self.app.state.engine)
+        self.app.state.engine.dispose()
+
+    def test_health_and_empty_snapshot_list(self):
+        self.assertEqual(self.client.get("/api/v1/health/live").json(), {"status": "ok"})
+        self.assertEqual(self.client.get("/api/v1/health/ready").status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/snapshots").json(), [])
+
+    def test_database_password_is_safely_encoded(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "QD766_DATABASE_PASSWORD": "example@password:with/symbols",
+                "QD766_DATABASE_USER": "qd766_app",
+            },
+            clear=True,
+        ):
+            url = Settings.from_env().database_url
+        self.assertIn("example%40password%3Awith%2Fsymbols", url)
+        self.assertIn("@127.0.0.1:5432/qd766", url)
+
+    def test_import_is_atomic_queryable_and_idempotent(self):
+        with self.app.state.session_factory.begin() as session:
+            first = store_normalized_snapshot(session, snapshot_payload())
+            first_id = first.id
+        with self.app.state.session_factory.begin() as session:
+            second = store_normalized_snapshot(session, snapshot_payload())
+            self.assertEqual(second.id, first_id)
+            self.assertEqual(session.scalar(select(func.count()).select_from(Snapshot)), 1)
+            self.assertEqual(session.scalar(select(func.count()).select_from(Dataset)), 1)
+            self.assertEqual(session.scalar(select(func.count()).select_from(Entity)), 2)
+            self.assertEqual(session.scalar(select(func.count()).select_from(Metric)), 2)
+
+        response = self.client.get(
+            "/api/v1/snapshots/latest",
+            params={
+                "root_department_id": ROOT_ID,
+                "period_type": "month",
+                "year": 2026,
+                "period_value": 8,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["provinceAggregatedScore"], "5.0000")
+        datasets = self.client.get(f"/api/v1/snapshots/{first_id}/datasets").json()
+        self.assertEqual(datasets[0]["group"], "transparency")
+        entities = self.client.get(f"/api/v1/datasets/{datasets[0]['id']}/entities").json()
+        self.assertEqual(len(entities), 2)
+        self.assertEqual(entities[0]["metrics"][0]["code"], "EXAMPLE")
+        dashboard = self.client.get("/api/v1/dashboard")
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(dashboard.json()["snapshots"]["month-2026-08:all"]["datasets"][0]["group"], "transparency")
+
+    def test_conflicting_snapshot_is_rejected(self):
+        with self.app.state.session_factory.begin() as session:
+            store_normalized_snapshot(session, snapshot_payload())
+        changed = copy.deepcopy(snapshot_payload())
+        changed["datasets"][0]["raw"]["sha256"] = "b" * 64
+        with self.assertRaises(SnapshotConflict):
+            with self.app.state.session_factory.begin() as session:
+                store_normalized_snapshot(session, changed)
+
+    def test_incomplete_snapshot_is_rejected(self):
+        payload = snapshot_payload()
+        payload["status"]["state"] = "incomplete"
+        payload["status"]["missingGroups"] = ["dossier-digitized"]
+        with self.assertRaises(SnapshotImportError):
+            with self.app.state.session_factory.begin() as session:
+                store_normalized_snapshot(session, payload)
+
+    def test_formality_relations_come_from_catalog_fields(self):
+        payload = {
+            "data": {
+                "items": [
+                    {
+                        "id": "019d2bfd-8e22-77ef-819f-e49460350904",
+                        "code": "2.000815",
+                        "name": "TTHC mẫu",
+                        "state": "PUBLISHED",
+                        "departmentId": ROOT_ID,
+                        "appliedDepartmentIds": [ROOT_ID, CHILD_ID],
+                        "publishingDepartmentIds": [ROOT_ID],
+                    }
+                ]
+            }
+        }
+        with self.app.state.session_factory.begin() as session:
+            self.assertEqual(store_formality_page(session, payload), (1, 3))
+        response = self.client.get("/api/v1/formalities", params={"code": "2.000815"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["code"], "2.000815")
+
+    def test_collection_jobs_are_idempotent_and_claimed_by_priority(self):
+        first_request = {"period": {"type": "year", "year": 2026}, "scope": "all"}
+        urgent_request = {"period": {"type": "quarter", "year": 2026, "quarter": 3}, "scope": "all"}
+        with self.app.state.session_factory.begin() as session:
+            first, created = enqueue_job(session, first_request, priority=100)
+            self.assertTrue(created)
+            duplicate, created = enqueue_job(session, first_request, priority=1)
+            self.assertFalse(created)
+            self.assertEqual(duplicate.id, first.id)
+            urgent, created = enqueue_job(session, urgent_request, priority=10)
+            self.assertTrue(created)
+
+        with self.app.state.session_factory.begin() as session:
+            claimed = claim_next_job(session, "worker-test")
+            self.assertEqual(claimed.id, urgent.id)
+            self.assertEqual(claimed.attempts, 1)
+            succeed_job(session, claimed, "worker-test")
+
+        response = self.client.get("/api/v1/collection-jobs")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 2)
+        succeeded = self.client.get(f"/api/v1/collection-jobs/{urgent.id}")
+        self.assertEqual(succeeded.json()["state"], "succeeded")
+
+    def test_collection_job_retry_halt_and_lease_ownership(self):
+        with self.app.state.session_factory.begin() as session:
+            job, _ = enqueue_job(session, {"fixture": "safe"})
+        with self.app.state.session_factory.begin() as session:
+            claimed = claim_next_job(session, "worker-a")
+            with self.assertRaises(JobStateError):
+                succeed_job(session, claimed, "worker-b")
+            retry_or_fail_job(
+                session,
+                claimed,
+                "worker-a",
+                {"kind": "timeout", "retryable": True},
+                delay_seconds=0,
+            )
+        with self.app.state.session_factory.begin() as session:
+            claimed = claim_next_job(session, "worker-a")
+            self.assertEqual(claimed.attempts, 2)
+            halt_job(
+                session,
+                claimed,
+                "worker-a",
+                {"kind": "upstream-safety-stop", "retryable": False},
+            )
+        with self.app.state.session_factory() as session:
+            stored = session.get(CollectionJob, job.id)
+            self.assertEqual(stored.state, "halted")
+            self.assertEqual(stored.error["kind"], "upstream-safety-stop")
+
+
+if __name__ == "__main__":
+    unittest.main()
