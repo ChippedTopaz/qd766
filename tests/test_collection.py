@@ -17,6 +17,7 @@ from qd766 import (
 from qd766.collection import (
     CollectionError,
     RateLimitStop,
+    SafetyStop,
     TransportFailure,
     TransportResponse,
 )
@@ -174,6 +175,33 @@ class CollectionTest(unittest.TestCase):
         self.assertFalse((output / plan[0].outputFile).exists())
         manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["status"], "failed")
+
+    def test_html_or_waf_response_halts_without_retry(self):
+        period = PeriodSelection("year", 2026)
+        plan = plan_evaluation_requests(period, ROOT_ID)[:1]
+        transport = FakeTransport(
+            [
+                TransportResponse(
+                    status=200,
+                    body=b"<html><title>Request Rejected</title></html>",
+                    contentType="text/html",
+                )
+            ]
+        )
+        with self.assertRaises(SafetyStop):
+            collect_snapshot(
+                plan,
+                period=period,
+                output_dir=self.runtime,
+                transport=transport,
+                minimum_delay_seconds=0,
+                jitter_seconds=0,
+                sleeper=lambda _: None,
+            )
+        self.assertEqual(len(transport.calls), 1)
+        manifest = json.loads((self.runtime / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["status"], "halted")
+        self.assertEqual(manifest["failure"]["reason"], "rejection-or-html-response")
 
     def test_transport_errors_have_a_bounded_retry_count(self):
         period = PeriodSelection("year", 2026)

@@ -43,7 +43,11 @@ class CollectionError(RuntimeError):
     pass
 
 
-class RateLimitStop(CollectionError):
+class SafetyStop(CollectionError):
+    """A server signal that requires operator review instead of retrying."""
+
+
+class RateLimitStop(SafetyStop):
     pass
 
 
@@ -237,6 +241,23 @@ def collect_snapshot(
                 _write_json(manifest_path, manifest)
                 raise RateLimitStop(
                     f"Stopped on HTTP {response.status} for {request.group}"
+                )
+            content_type = (response.contentType or "").lower()
+            rejection_body = response.body[:4096].lower()
+            if (
+                "text/html" in content_type
+                or b"request rejected" in rejection_body
+                or b"access denied" in rejection_body
+            ):
+                manifest["status"] = "halted"
+                manifest["failure"] = {
+                    "group": request.group,
+                    "httpStatus": response.status,
+                    "reason": "rejection-or-html-response",
+                }
+                _write_json(manifest_path, manifest)
+                raise SafetyStop(
+                    f"Stopped on rejection/HTML response for {request.group}"
                 )
             if response.status in (200, 201):
                 break

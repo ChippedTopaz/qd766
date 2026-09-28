@@ -27,6 +27,8 @@ from qd766.backend.jobs import (
     succeed_job,
 )
 from qd766.backend.models import Base, CollectionJob, Dataset, Entity, Metric, Snapshot
+from qd766.backend.worker import run_one_job
+from qd766.collection import SafetyStop
 
 ROOT_ID = "019d2be3-6a88-732b-8b17-b68020c8553a"
 CHILD_ID = "019d2be3-6a88-732b-8b17-bb1e9a3f14ab"
@@ -242,6 +244,39 @@ class BackendTest(unittest.TestCase):
                 "worker-a",
                 {"kind": "upstream-safety-stop", "retryable": False},
             )
+        with self.app.state.session_factory() as session:
+            stored = session.get(CollectionJob, job.id)
+            self.assertEqual(stored.state, "halted")
+            self.assertEqual(stored.error["kind"], "upstream-safety-stop")
+
+    def test_worker_imports_snapshot_and_finishes_job(self):
+        with self.app.state.session_factory.begin() as session:
+            job, _ = enqueue_job(session, {"fixture": "normalized"})
+
+        result = run_one_job(
+            self.app.state.session_factory,
+            lambda job_id, request: snapshot_payload(),
+            worker_id="worker-test",
+        )
+        self.assertEqual(result.state, "succeeded")
+        with self.app.state.session_factory() as session:
+            stored = session.get(CollectionJob, job.id)
+            self.assertEqual(stored.state, "succeeded")
+            self.assertEqual(session.scalar(select(func.count()).select_from(Snapshot)), 1)
+
+    def test_worker_halts_on_upstream_safety_signal(self):
+        with self.app.state.session_factory.begin() as session:
+            job, _ = enqueue_job(session, {"fixture": "rejected"})
+
+        def rejected(job_id, request):
+            raise SafetyStop("Request Rejected")
+
+        result = run_one_job(
+            self.app.state.session_factory,
+            rejected,
+            worker_id="worker-test",
+        )
+        self.assertEqual(result.state, "halted")
         with self.app.state.session_factory() as session:
             stored = session.get(CollectionJob, job.id)
             self.assertEqual(stored.state, "halted")

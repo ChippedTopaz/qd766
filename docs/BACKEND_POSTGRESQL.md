@@ -74,7 +74,14 @@ Trạng thái bền vững cho worker sau này: `queued`, `running`, `succeeded`
 và lõi queue đã hỗ trợ enqueue chống trùng, claim bằng
 `FOR UPDATE SKIP LOCKED`, retry có lịch, thu hồi lease hết hạn, hoàn tất và dừng
 an toàn. API chỉ công khai thao tác đọc trạng thái; việc tạo job và worker xử lý
-upstream chưa được mở qua HTTP.
+upstream không được mở qua HTTP.
+
+Processor đã nối queue với collector và importer theo ba transaction tách biệt:
+claim job, thu thập không giữ khóa database, rồi nhập snapshot/hoàn tất job.
+Collector luôn tuần tự, mặc định nghỉ ít nhất 5 giây giữa request, tối đa một lần
+retry ở transport, checkpoint raw sau từng nhóm và dừng job ngay khi gặp 403,
+429, HTML, `Request Rejected`, `Access Denied` hoặc dữ liệu sai tỉnh. Worker chưa
+được đăng ký chạy tự động vì kết nối DVCQG trên máy cơ quan đang bị đóng.
 
 ## API đã có
 
@@ -182,10 +189,11 @@ rollback toàn bộ snapshot.
 
 Chưa hoàn thành hoặc đang bị chặn:
 
-- ba fixture tháng M0 sai UTF-8 nên chưa được nhập;
+- ba fixture tháng M0 bị hỏng byte/JSON nên chưa được nhập; kiểm tra cho thấy
+  không thể phục hồi trung thực chỉ bằng chuyển mã;
 - kết nối HTTPS tới DVCQG bị máy đích đóng cưỡng bức (`WinError 10054`); đã dừng
   theo nguyên tắc an toàn, không gửi POST hoặc thử vượt WAF;
-- lõi queue đã có nhưng chưa có processor/adapter gọi DVCQG;
+- queue và processor đã có nhưng worker live chưa được bật/scheduled;
 - chưa có cache/single-flight và benchmark rate/concurrency;
 - chưa triển khai ứng dụng vào thư mục ổn định và chưa đăng ký Windows task;
 - chưa kết nối frontend công khai tới backend máy cơ quan qua HTTPS.
