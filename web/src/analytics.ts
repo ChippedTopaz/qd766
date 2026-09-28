@@ -245,4 +245,3 @@ export function buildSuggestions(unit: UnitView): Suggestion[] {
   const order = { critical: 0, warning: 1, positive: 2, info: 3 } as const;
   return suggestions.sort((a, b) => order[a.severity] - order[b.severity]);
 }
-

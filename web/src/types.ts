@@ -170,4 +170,3 @@ export interface Suggestion {
   confidence: "Cao" | "Trung bình" | "Thấp";
   deepLink: ScreenId;
 }
-

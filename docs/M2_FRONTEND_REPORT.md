@@ -69,4 +69,3 @@ Không có dữ liệu mô phỏng trộn vào dữ liệu thật.
 7. Dữ liệu lịch sử chỉ được thu thập từ ngày 01/01/2026. Không nhập, thu thập
    hoặc hiển thị dữ liệu năm 2025 trở về trước. Chuỗi tháng bắt đầu từ tháng
    1/2026 và chuỗi quý bắt đầu từ quý I/2026.
-

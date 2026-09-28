@@ -20,4 +20,3 @@ The period selector reads available months, quarters and years from the API.
 Selecting a missing period starts one cache-aside collection; subsequent users
 reuse the complete version. The application does not infer unverified scoring
 formulas and does not combine unlike period types into a false time series.
-
