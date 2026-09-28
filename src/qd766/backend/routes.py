@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import select, text
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -80,44 +80,86 @@ def get_collection_control(session: DbSession) -> CollectionControl | None:
     return session.get(CollectionControl, "dvcqg")
 
 
+@router.get("/system-status", tags=["health"])
+def system_status(request: Request, session: DbSession) -> dict:
+    control = session.get(CollectionControl, "dvcqg")
+    snapshot_count, latest_snapshot_at = session.execute(
+        select(func.count(Snapshot.id), func.max(Snapshot.created_at)).where(
+            Snapshot.state == "complete"
+        )
+    ).one()
+    cache_stats = request.app.state.dashboard_cache.stats()
+    return {
+        "databaseStatus": "ok",
+        "circuitState": control.circuit_state if control else "closed",
+        "circuitReason": control.reason if control else None,
+        "snapshotCount": snapshot_count,
+        "latestSnapshotAt": latest_snapshot_at,
+        "dashboardCache": {
+            "ttlSeconds": request.app.state.settings.dashboard_cache_ttl_seconds,
+            "entries": cache_stats.entries,
+            "inFlight": cache_stats.in_flight,
+            "hits": cache_stats.hits,
+            "misses": cache_stats.misses,
+            "waits": cache_stats.waits,
+        },
+    }
+
+
 @router.get("/dashboard", tags=["dashboard"])
 def dashboard(
+    request: Request,
+    response: Response,
     session: DbSession,
     root_department_id: uuid.UUID | None = None,
 ) -> dict:
-    if root_department_id is None:
-        root_department_id = session.scalar(
-            select(Snapshot.root_department_id)
-            .where(Snapshot.state == "complete")
-            .order_by(Snapshot.created_at.desc())
-            .limit(1)
+    cache_key = str(root_department_id) if root_department_id else "latest"
+
+    def load_dashboard() -> dict:
+        resolved_root_id = root_department_id
+        if resolved_root_id is None:
+            resolved_root_id = session.scalar(
+                select(Snapshot.root_department_id)
+                .where(Snapshot.state == "complete")
+                .order_by(Snapshot.created_at.desc())
+                .limit(1)
+            )
+        if resolved_root_id is None:
+            raise HTTPException(status_code=404, detail="No complete snapshots found")
+        statement = (
+            select(Snapshot)
+            .options(
+                selectinload(Snapshot.root_department),
+                selectinload(Snapshot.datasets)
+                .selectinload(Dataset.entities)
+                .selectinload(Entity.department),
+                selectinload(Snapshot.datasets)
+                .selectinload(Dataset.entities)
+                .selectinload(Entity.metrics),
+            )
+            .where(
+                Snapshot.state == "complete",
+                Snapshot.root_department_id == resolved_root_id,
+            )
+            .order_by(Snapshot.year.desc(), Snapshot.period_type, Snapshot.period_value.desc())
         )
-    if root_department_id is None:
-        raise HTTPException(status_code=404, detail="No complete snapshots found")
-    statement = (
-        select(Snapshot)
-        .options(
-            selectinload(Snapshot.root_department),
-            selectinload(Snapshot.datasets)
-            .selectinload(Dataset.entities)
-            .selectinload(Entity.department),
-            selectinload(Snapshot.datasets)
-            .selectinload(Dataset.entities)
-            .selectinload(Entity.metrics),
+        snapshots = list(session.scalars(statement).unique())
+        if not snapshots:
+            raise HTTPException(status_code=404, detail="No complete snapshots found")
+        formality_id = next(
+            (snapshot.formality_id for snapshot in snapshots if snapshot.formality_id is not None),
+            None,
         )
-        .where(Snapshot.state == "complete")
-        .order_by(Snapshot.year.desc(), Snapshot.period_type, Snapshot.period_value.desc())
+        formality = session.get(Formality, formality_id) if formality_id else None
+        return dashboard_payload(snapshots, formality)
+
+    payload, cache_result = request.app.state.dashboard_cache.get_or_load(
+        cache_key,
+        load_dashboard,
     )
-    statement = statement.where(Snapshot.root_department_id == root_department_id)
-    snapshots = list(session.scalars(statement).unique())
-    if not snapshots:
-        raise HTTPException(status_code=404, detail="No complete snapshots found")
-    formality_id = next(
-        (snapshot.formality_id for snapshot in snapshots if snapshot.formality_id is not None),
-        None,
-    )
-    formality = session.get(Formality, formality_id) if formality_id else None
-    return dashboard_payload(snapshots, formality)
+    response.headers["X-QD766-Cache"] = cache_result
+    response.headers["Cache-Control"] = "private, max-age=30"
+    return payload
 
 
 @router.get("/snapshots", response_model=list[SnapshotResponse], tags=["snapshots"])

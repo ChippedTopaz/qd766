@@ -109,6 +109,7 @@ Chỉ sau khi người vận hành đã đọc kết quả probe và xác nhận
 ```text
 GET /api/v1/health/live
 GET /api/v1/health/ready
+GET /api/v1/system-status
 GET /api/v1/collection-jobs
 GET /api/v1/collection-jobs/{jobId}
 GET /api/v1/collection-control
@@ -123,6 +124,12 @@ GET /api/v1/formalities/{formalityId}
 
 Danh sách entity có phân trang `offset`/`limit`, tối đa 200 bản ghi. API chỉ
 cho phép CORS `GET` từ origin khai báo trong `QD766_CORS_ORIGINS`.
+
+Dashboard dùng cache TTL 60 giây trong tiến trình backend. Các request cùng key
+đến đồng thời dùng single-flight nên chỉ một request truy vấn và dựng payload;
+những request còn lại nhận cùng kết quả. Header `X-QD766-Cache` cho biết
+`miss`, `hit` hoặc `shared`. Endpoint `system-status` cung cấp trạng thái
+PostgreSQL, circuit, số snapshot và thống kê cache mà không lộ credential.
 
 ## Cấu hình
 

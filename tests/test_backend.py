@@ -157,7 +157,13 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(entities[0]["metrics"][0]["code"], "EXAMPLE")
         dashboard = self.client.get("/api/v1/dashboard")
         self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(dashboard.headers["X-QD766-Cache"], "miss")
         self.assertEqual(dashboard.json()["snapshots"]["month-2026-08:all"]["datasets"][0]["group"], "transparency")
+        cached = self.client.get("/api/v1/dashboard")
+        self.assertEqual(cached.headers["X-QD766-Cache"], "hit")
+        system_status = self.client.get("/api/v1/system-status").json()
+        self.assertEqual(system_status["snapshotCount"], 1)
+        self.assertEqual(system_status["dashboardCache"]["entries"], 1)
 
     def test_conflicting_snapshot_is_rejected(self):
         with self.app.state.session_factory.begin() as session:

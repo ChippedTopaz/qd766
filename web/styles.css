@@ -49,6 +49,7 @@ button, select { cursor: pointer; }
   border-radius: 999px; background: rgba(255,255,255,.72); color: var(--muted); font-size: 13px;
 }
 .source-dot { width: 8px; height: 8px; border-radius: 50%; background: #29a674; box-shadow: 0 0 0 5px #dff1e9; }
+.source-badge.warning .source-dot { background: #d58a19; box-shadow: 0 0 0 5px #faedcf; }
 
 .hero { display: grid; grid-template-columns: 1fr auto; gap: 40px; align-items: end; padding: 60px 0 34px; }
 .eyebrow, .section-kicker { margin: 0 0 11px; color: var(--green); font-size: 12px; font-weight: 800; letter-spacing: .14em; }

@@ -259,6 +259,7 @@ async function start() {
     const apiBase = window.QD766_API_BASE || "http://127.0.0.1:8767";
     let response;
     let sourceLabel = "PostgreSQL nội bộ · dữ liệu đã xác minh";
+    let usingApi = true;
     try {
       response = await fetch(`${apiBase}/api/v1/dashboard`);
       if (!response.ok) throw new Error(`API HTTP ${response.status}`);
@@ -266,9 +267,24 @@ async function start() {
       console.warn("Không thể đọc PostgreSQL API; dùng snapshot tĩnh.", apiError);
       response = await fetch("./data/snapshots.json");
       sourceLabel = "Snapshot tĩnh dự phòng";
+      usingApi = false;
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.data = await response.json();
+    if (usingApi) {
+      try {
+        const statusResponse = await fetch(`${apiBase}/api/v1/system-status`);
+        if (statusResponse.ok) {
+          const systemStatus = await statusResponse.json();
+          if (systemStatus.circuitState === "open") {
+            sourceLabel = "PostgreSQL nội bộ · DVCQG tạm dừng · dữ liệu đã lưu";
+            document.querySelector(".source-badge").classList.add("warning");
+          }
+        }
+      } catch (statusError) {
+        console.warn("Không đọc được trạng thái hệ thống.", statusError);
+      }
+    }
     if (!state.data.snapshots[`${state.periodId}:${state.scope}`]) {
       state.periodId = state.data.periods[0]?.id;
     }

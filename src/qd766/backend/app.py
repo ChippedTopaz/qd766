@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .cache import SingleFlightTTLCache
 from .config import Settings
 from .database import create_database_engine, create_session_factory
 from .routes import router
@@ -15,6 +16,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
+    app.state.dashboard_cache = SingleFlightTTLCache[str, dict](
+        resolved.dashboard_cache_ttl_seconds
+    )
     if resolved.cors_origins:
         app.add_middleware(
             CORSMiddleware,

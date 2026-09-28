@@ -25,6 +25,15 @@ def _as_bool(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _positive_float(value: str | None, default: float) -> float:
+    if value is None:
+        return default
+    parsed = float(value)
+    if parsed <= 0:
+        raise ValueError("cache TTL must be positive")
+    return parsed
+
+
 def _database_url_from_env() -> str:
     explicit_url = os.getenv("QD766_DATABASE_URL")
     if explicit_url:
@@ -49,6 +58,7 @@ class Settings:
     database_url: str = DEFAULT_DATABASE_URL
     cors_origins: tuple[str, ...] = ()
     sql_echo: bool = False
+    dashboard_cache_ttl_seconds: float = 60.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -61,4 +71,8 @@ class Settings:
             database_url=_database_url_from_env(),
             cors_origins=origins,
             sql_echo=_as_bool(os.getenv("QD766_SQL_ECHO")),
+            dashboard_cache_ttl_seconds=_positive_float(
+                os.getenv("QD766_DASHBOARD_CACHE_TTL_SECONDS"),
+                60.0,
+            ),
         )
