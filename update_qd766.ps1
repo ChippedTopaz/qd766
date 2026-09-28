@@ -6,7 +6,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
-    (Join-Path $PSScriptRoot "tools\deploy_local_server.ps1")
+    (Join-Path $PSScriptRoot "tools\deploy_local_server.ps1") `
+    -RegisterTasks
 if ($LASTEXITCODE -ne 0) {
     throw "Triển khai QD766 không thành công."
 }

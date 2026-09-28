@@ -83,8 +83,9 @@ Processor đã nối queue với collector và importer theo ba transaction tác
 claim job, thu thập không giữ khóa database, rồi nhập snapshot/hoàn tất job.
 Collector luôn tuần tự, mặc định nghỉ ít nhất 5 giây giữa request, tối đa một lần
 retry ở transport, checkpoint raw sau từng nhóm và dừng job ngay khi gặp 403,
-429, HTML, `Request Rejected`, `Access Denied` hoặc dữ liệu sai tỉnh. Worker chưa
-được đăng ký chạy tự động vì kết nối DVCQG trên máy cơ quan đang bị đóng.
+429, HTML, `Request Rejected`, `Access Denied` hoặc dữ liệu sai tỉnh. Worker nền
+chạy qua `tools/run_collection_worker.py`; khi circuit mở, worker chỉ kiểm tra
+trạng thái PostgreSQL và không claim job hay gọi DVCQG.
 
 Bảng `collection_controls` giữ một lease toàn cục nên dù vô tình chạy nhiều
 worker, chỉ một worker được phép gọi DVCQG tại một thời điểm. Safety stop sẽ mở
@@ -190,15 +191,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\backup_postgresql.ps1
 Mặc định backup được ghi vào `F:\QD766\backups`. Script không tự xóa bản cũ;
 chính sách retention chỉ được bật sau khi đã kiểm thử phục hồi.
 
-Đăng ký backend chạy khi người dùng đăng nhập và backup lúc 01:30 mỗi ngày:
+Đăng ký backend và worker chạy khi người dùng đăng nhập, cùng backup lúc 01:30
+mỗi ngày:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\register_windows_tasks.ps1
 ```
 
-Hai task chạy dưới tài khoản Windows hiện tại với quyền `Limited`; không lưu mật
-khẩu PostgreSQL trong Task Scheduler. Backup chỉ chạy khi người dùng đang đăng
-nhập hoặc đăng nhập lại sau thời điểm đã định (`StartWhenAvailable`).
+Ba task chạy dưới tài khoản Windows hiện tại với quyền `Limited`; không lưu mật
+khẩu PostgreSQL trong Task Scheduler. Worker ghi log trạng thái gọn vào
+`D:\QD766\logs\worker.log`. Backup chỉ chạy khi người dùng đang đăng nhập hoặc
+đăng nhập lại sau thời điểm đã định (`StartWhenAvailable`).
 
 ## Triển khai ổn định trên máy cơ quan
 
@@ -210,7 +213,7 @@ migration và test, rồi tạo ngay một bản backup trên ổ F:
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\deploy_local_server.ps1
 ```
 
-Sau khi xác nhận deployment và backup thành công, đăng ký hai tác vụ Windows:
+Sau khi xác nhận deployment và backup thành công, đăng ký ba tác vụ Windows:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\deploy_local_server.ps1 -RegisterTasks
@@ -241,11 +244,14 @@ Chưa hoàn thành hoặc đang bị chặn:
 - kết nối HTTPS tới DVCQG bị máy đích đóng cưỡng bức (`WinError 10054`); đã dừng
   theo nguyên tắc an toàn, không gửi POST hoặc thử vượt WAF; probe một GET ngày
   28/09/2026 xác nhận lỗi lặp lại và circuit breaker hiện đang `open`;
-- queue và processor đã có nhưng worker live chưa được bật/scheduled;
-- chưa có cache/single-flight và benchmark rate/concurrency;
-- chưa triển khai ứng dụng vào thư mục ổn định và chưa đăng ký Windows task;
+- queue, processor và worker nền đã có; worker được circuit bảo vệ và chỉ lấy
+  job sau khi quản trị viên kiểm tra kết nối rồi chủ động đóng circuit;
+- cache/single-flight đã có; benchmark rate/concurrency với DVCQG chưa thực
+  hiện vì circuit đang mở;
+- ứng dụng đã triển khai vào `D:\QD766\app`; backend, worker và backup được
+  quản lý bằng Windows Task Scheduler;
 - chưa kết nối frontend công khai tới backend máy cơ quan qua HTTPS.
 
-Thứ tự tiếp theo: triển khai ổn định và backup ra ổ F, đăng ký Windows task, sau
-đó xây worker/job theo chế độ tuần tự để kiểm thử bằng fixture trước khi thử lại
-kết nối DVCQG.
+Thứ tự tiếp theo: giữ circuit mở, chạy probe một GET duy nhất; chỉ khi người vận
+hành xác nhận kết quả an toàn mới đóng circuit để worker xử lý lần lượt các job
+đang chờ.
