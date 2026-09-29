@@ -6,6 +6,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from qd766.province_catalog import AmSieuTocCatalogClient, ProvinceCatalog
+
 from .cache import SingleFlightTTLCache
 from .config import Settings
 from .database import create_database_engine, create_session_factory
@@ -21,6 +23,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = create_session_factory(engine)
     app.state.dashboard_cache = SingleFlightTTLCache[str, dict](
         resolved.dashboard_cache_ttl_seconds
+    )
+    app.state.province_catalog_client = AmSieuTocCatalogClient(
+        resolved.province_catalog_index_url,
+        resolved.province_catalog_version_url,
+        resolved.province_catalog_rules_url,
+        timeout_seconds=resolved.province_catalog_timeout_seconds,
+    )
+    app.state.province_catalog_cache = SingleFlightTTLCache[str, ProvinceCatalog](
+        resolved.province_catalog_cache_ttl_seconds
     )
     if resolved.cors_origins:
         app.add_middleware(

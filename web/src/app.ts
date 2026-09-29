@@ -1,7 +1,7 @@
-import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerStats, similarVolumePeers, snapshotFor } from "./analytics.js";
+import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerStats, similarVolumePeers, snapshotFor, snapshotKey } from "./analytics.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 
-type DemoState = "normal" | "loading" | "queued" | "blocked" | "empty" | "error" | "insufficient";
+type DemoState = "normal" | "ready" | "loading" | "queued" | "blocked" | "empty" | "error" | "insufficient";
 interface State { screen: ScreenId; periodId: string; scope: Scope; unitId: string; peerDimension: "total" | GroupId; selectedGroup: GroupId; search: string; demo: DemoState; modal: "none" | "brief" | "export" }
 
 const root = document.querySelector<HTMLElement>("#app") as HTMLElement;
@@ -17,11 +17,27 @@ let data: AppData;
 let state: State;
 let selectionRequest=0;
 let pendingMessage="";
+let completionMessage="";
 interface OperationJob {id:string;state:string;attempts:number;createdAt:string;updatedAt:string;lockedBy:string|null;request:{period?:{type?:string;year?:number;month?:number;quarter?:number};scope?:string;formalityId?:string}}
-interface OperationData {loading:boolean;error:string|null;circuitState:string;circuitReason:string|null;snapshotCount:number;latestSnapshotAt:string|null;jobs:OperationJob[]}
-let operationData:OperationData={loading:false,error:null,circuitState:"unknown",circuitReason:null,snapshotCount:0,latestSnapshotAt:null,jobs:[]};
+interface OperationData {loading:boolean;error:string|null;circuitState:string;circuitReason:string|null;snapshotCount:number;latestSnapshotAt:string|null;jobs:OperationJob[];batches:BatchResult[]}
+let operationData:OperationData={loading:false,error:null,circuitState:"unknown",circuitReason:null,snapshotCount:0,latestSnapshotAt:null,jobs:[],batches:[]};
+interface CatalogItem {id:string;code:string;name:string;field:string;publishingAgency:string;executionLevels:string[];available:boolean}
+interface CatalogPreview {loading:boolean;error:string|null;level:""|"province"|"ward";field:string;query:string;fields:string[];selected:number;available:number;missing:number;items:CatalogItem[];selectedId:string|null;offset:number;mode:"single"|"filtered"}
+let catalogPreview:CatalogPreview={loading:false,error:null,level:"",field:"",query:"",fields:[],selected:0,available:0,missing:0,items:[],selectedId:null,offset:0,mode:"single"};
+let catalogPreviewRequest=0;
+let catalogSearchTimer=0;
+const catalogProvinceCode="25";
 
 function normalizeLoadedData(loaded: AppData): AppData {
+  if(loaded.formality.id){
+    for(const item of loaded.periods){
+      const legacyKey=`${item.id}:formality`;
+      if(loaded.snapshots[legacyKey]){
+        loaded.snapshots[snapshotKey(item.id,"formality",loaded.formality.id)]=loaded.snapshots[legacyKey]!;
+        delete loaded.snapshots[legacyKey];
+      }
+    }
+  }
   for (const item of loaded.periods) {
     const legacy=item as typeof item & {month?:number;quarter?:number};
     if(item.value===undefined)item.value=legacy.month??legacy.quarter??null;
@@ -88,18 +104,21 @@ function context(): string {
   const selectedPeriod=period();
   const sameType=data.periods.filter(item=>item.type===selectedPeriod.type&&item.year===selectedPeriod.year);
   const years=[...new Set(data.periods.map(item=>item.year))].sort((a,b)=>b-a);
-  return `<header class="contextbar"><div class="context-fields"><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type==="month"?"selected":""}>Tháng</option><option value="quarter" ${selectedPeriod.type==="quarter"?"selected":""}>Quý</option><option value="year" ${selectedPeriod.type==="year"?"selected":""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item=>`<option value="${item.id}" ${item.id===state.periodId?"selected":""}>${item.type==="month"?`Tháng ${item.value}`:item.type==="quarter"?`Quý ${item.value}`:"Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year=>`<option value="${year}" ${year===selectedPeriod.year?"selected":""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope==="all"?"selected":""}>Tất cả thủ tục hành chính</option><option value="formality" ${state.scope==="formality"?"selected":""}>${esc(data.formality.code)} · TTHC mẫu</option></select></label></div><div class="context-actions"><button class="btn" data-action="open-quality">● Dữ liệu đầy đủ</button><button class="btn" data-action="export">Xuất</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></header>`;
+  const canSubmit=state.scope==="formality"&&state.demo==="ready"&&(catalogPreview.mode==="filtered"?catalogPreview.selected>0:Boolean(catalogPreview.selectedId));
+  return `<header class="contextbar"><div class="context-fields"><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type==="month"?"selected":""}>Tháng</option><option value="quarter" ${selectedPeriod.type==="quarter"?"selected":""}>Quý</option><option value="year" ${selectedPeriod.type==="year"?"selected":""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item=>`<option value="${item.id}" ${item.id===state.periodId?"selected":""}>${item.type==="month"?`Tháng ${item.value}`:item.type==="quarter"?`Quý ${item.value}`:"Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year=>`<option value="${year}" ${year===selectedPeriod.year?"selected":""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope==="all"?"selected":""}>Tất cả thủ tục hành chính</option><option value="formality" ${state.scope==="formality"?"selected":""}>Theo thủ tục hành chính</option></select></label></div><div class="context-actions">${canSubmit?`<button class="btn primary" data-action="submit-statistics">Thống kê</button>`:""}<button class="btn" data-action="open-quality">● Dữ liệu đầy đủ</button><button class="btn" data-action="export">Xuất</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></header>`;
 }
 
 function shell(content: string): void {
-  const loaded=data.snapshots[`${state.periodId}:${state.scope}`];
+  const loaded=data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)];
   const periodNotice=state.demo==="normal"&&state.screen!=="operations"&&loaded&&period().provisional?`<div class="period-notice" role="status"><strong>Số liệu tạm thời</strong><span>Kỳ báo cáo này chưa kết thúc. Kết quả có thể thay đổi khi hệ thống nguồn cập nhật dữ liệu.</span></div>`:"";
   const staleNotice=loaded?.delivery?.stale?`<div class="period-notice stale" role="status"><strong>Chưa cập nhật được</strong><span>${esc(loaded.delivery.message??"Đang sử dụng bản dữ liệu hoàn chỉnh gần nhất.")}</span></div>`:"";
-  root.innerHTML = `<div class="app-shell">${nav()}<div class="workspace">${context()}<main class="content">${staleNotice}${periodNotice}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : ""}</div>`;
+  const completedNotice=completionMessage?`<div class="period-notice success" role="status"><strong>Thống kê hoàn tất</strong><span>${esc(completionMessage)}</span><button class="btn small" data-action="dismiss-completion">Đóng</button></div>`:"";
+  root.innerHTML = `<div class="app-shell">${nav()}<div class="workspace">${context()}<main class="content">${completedNotice}${staleNotice}${periodNotice}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : ""}</div>`;
   bind();
 }
 
 function unavailable(kind: DemoState): string {
+  if (kind === "ready") return catalogReady();
   if (kind === "loading") return `${title("Đang tải dữ liệu", "Đang chuẩn hóa dữ liệu theo đơn vị và kỳ báo cáo.")}<div class="boot-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>`;
   if (kind === "queued") return `${title("Đang chờ cập nhật dữ liệu", "Yêu cầu đã được lưu trong hàng đợi an toàn.")}<div class="empty-state"><h2>Đang chuẩn bị dữ liệu cho lựa chọn này</h2><p>${esc(pendingMessage||"Hệ thống đang xử lý tuần tự và sẽ tự hiển thị khi snapshot hoàn chỉnh được lưu vào PostgreSQL.")}</p><button class="btn" data-action="retry-selection">Kiểm tra lại</button></div>`;
   if (kind === "blocked") return `${title("Đang chờ kết nối nguồn", "Yêu cầu đã được lưu an toàn và sẽ giữ nguyên cho tới khi kết nối DVCQG được quản trị viên kiểm tra.")}<div class="empty-state"><p>${esc(pendingMessage||"Hệ thống không tự vượt WAF hoặc gửi thêm request.")}</p><div class="empty-actions"><button class="btn" data-action="retry-selection">Kiểm tra lại</button><button class="btn primary" data-nav="operations">Xem trạng thái vận hành</button></div></div>`;
@@ -160,7 +179,7 @@ function overviewGroupDetail(view: UnitView): string {
 function miniTicket(item: Suggestion, good: boolean): string { return `<div class="mini-ticket"><i class="ticket-dot ${good?"good":""}"></i><div><strong>${esc(item.finding)}</strong><p>${esc(item.evidence)} ${esc(item.action)}</p></div></div>`; }
 
 function time(): string {
-  const samples = data.periods.filter(p=>Boolean(data.snapshots[`${p.id}:${state.scope}`])).map((p)=>({p, v:buildUnitView(data,p.id,state.scope,state.unitId)}));
+  const samples = data.periods.filter(p=>Boolean(data.snapshots[snapshotKey(p.id,state.scope,data.formality.id)])).map((p)=>({p, v:buildUnitView(data,p.id,state.scope,state.unitId)}));
   return `${title("So sánh theo thời gian", "Theo dõi biến động điểm, thứ hạng và đóng góp của từng nhóm chỉ tiêu.", "Chỉ so sánh các kỳ cùng loại và đã kết thúc kỳ báo cáo.")}<div class="banner warn"><span>!</span><div><strong>Chưa đủ dữ liệu lịch sử để kết luận xu hướng</strong><p>Hiện có một kỳ tháng, một kỳ quý và một kỳ năm. Hệ thống không ghép các kỳ có độ dài khác nhau thành một chuỗi và không tạo số liệu minh họa.</p></div></div><div class="tabs"><button class="active">Tổng điểm</button><button>6 nhóm chỉ tiêu</button><button>Chỉ tiêu thành phần</button></div><section class="panel"><div class="panel-head"><div><h2>Chuỗi điểm và thứ hạng</h2><p>Chế độ: 6 kỳ · so với kỳ liền trước</p></div><div class="segmented"><button class="active">6 kỳ</button><button>12 kỳ</button><button>24 kỳ</button></div></div><div class="chart-placeholder"><div class="chart-message"><strong>Chưa có ít nhất hai kỳ cùng loại</strong><p>Biểu đồ xu hướng, phân tích nguyên nhân tăng giảm và chỉ số ổn định sẽ hiển thị khi có thêm dữ liệu lịch sử.</p></div></div></section><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Các kỳ hiện có</h2><p>Hiển thị độc lập để người dùng xem kết quả; không dùng làm chuỗi so sánh.</p></div><span class="badge info">Số liệu đã ghi nhận</span></div><div class="panel-body sample-grid">${samples.map(({p,v})=>`<article class="sample-card"><span>${esc(p.label)} · ${state.scope==="all"?"Tất cả TTHC":data.formality.code}</span><strong class="num">${n(v.totalScore)} / ${n(v.totalMaximum)}</strong><span>${rankText(v)}</span></article>`).join("")}</div></section>`;
 }
 
@@ -205,6 +224,16 @@ function quality(): string {
   return `${title("Độ tin cậy của số liệu", "Theo dõi mức độ đầy đủ và các lưu ý khi sử dụng kết quả.", "Các trường không có số liệu, bằng 0 và không áp dụng được phân biệt rõ.")}<section class="quality-grid"><article class="quality-card"><h3>Mức độ đầy đủ</h3><strong class="num">${snap.status.loadedGroups.length}/${snap.status.requiredGroups.length}</strong><p>${snap.status.state==="complete"?"Đã có đủ sáu nhóm chỉ tiêu của kỳ đang xem.":"Một số nhóm chỉ tiêu chưa có đủ số liệu."}</p></article><article class="quality-card"><h3>Chưa có số liệu</h3><strong class="num">${missing}</strong><p>Các trường này hiển thị “Không có dữ liệu” và không được tính là 0.</p></article><article class="quality-card"><h3>Giá trị bằng 0</h3><strong class="num">${zeros}</strong><p>Đây là giá trị đã ghi nhận bằng 0, khác với trường hợp chưa có dữ liệu.</p></article><article class="quality-card"><h3>Số lượng hồ sơ quá ít</h3><strong class="num">${small}</strong><p>Một hồ sơ có thể làm tỷ lệ thay đổi mạnh; cần thận trọng khi đánh giá.</p></article><article class="quality-card"><h3>Không áp dụng ở cấp xã</h3><strong>Đang rà soát</strong><p>Tiêu chí không áp dụng được hưởng điểm tối đa theo quy định; nhãn sẽ hiển thị sau khi đối chiếu chính xác từng chỉ tiêu.</p></article><article class="quality-card"><h3>Giới hạn hiện tại</h3><strong class="num">2</strong><p>Mức độ hài lòng chưa tách theo TTHC; cách quy đổi chi tiết điểm DVC trực tuyến đang chờ xác nhận.</p></article></section><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Thời điểm cập nhật theo nhóm chỉ tiêu</h2><p>Giúp người dùng biết số liệu đang xem được cập nhật khi nào.</p></div><span class="badge good">Đã cập nhật</span></div><div class="table-wrap"><table><thead><tr><th>Nhóm chỉ tiêu</th><th>Thời điểm cập nhật</th><th>Trạng thái</th></tr></thead><tbody>${snap.datasets.map(d=>`<tr><td>${esc(d.label)}</td><td class="num">${esc(dateTime(d.capture.capturedAt))}</td><td><span class="badge good">Đầy đủ</span></td></tr>`).join("")}</tbody></table></div></section>`;
 }
 
+function catalogReady():string{
+  const selected=catalogPreview.items.find(item=>item.id===catalogPreview.selectedId)??null;
+  const rows=catalogPreview.items.map(item=>`<label class="catalog-row ${item.id===catalogPreview.selectedId&&catalogPreview.mode==="single"?"selected":""}">${catalogPreview.mode==="single"?`<input type="radio" name="catalog-formality" value="${esc(item.id)}" ${item.id===catalogPreview.selectedId?"checked":""}>`:`<span class="catalog-batch-mark">✓</span>`}<span><strong>${esc(item.code)}</strong><small>${esc(item.name)}</small><em>${esc(item.field||"Chưa phân loại")} · ${item.executionLevels.includes("ward")?"Cấp xã":item.executionLevels.includes("province")?"Cấp tỉnh":""}</em></span><span class="badge ${item.available?"good":"neutral"}">${item.available?"Đã có dữ liệu":"Cần thống kê"}</span></label>`).join("");
+  const first=catalogPreview.selected?catalogPreview.offset+1:0;
+  const last=Math.min(catalogPreview.offset+catalogPreview.items.length,catalogPreview.selected);
+  const canSubmit=catalogPreview.mode==="filtered"?catalogPreview.selected>0:Boolean(selected);
+  const selectionText=catalogPreview.mode==="filtered"?`<strong>${int(catalogPreview.selected)} TTHC sau lọc</strong><span>${int(catalogPreview.available)} đã có · ${int(catalogPreview.missing)} cần thu thập tuần tự</span>`:selected?`<strong>${esc(selected.code)}</strong><span>${esc(selected.name)}</span>`:`<strong>Chưa chọn TTHC</strong><span>Chọn một dòng trong danh sách để tiếp tục.</span>`;
+  return `${title("Chọn thủ tục hành chính", "Lọc và xem trước phạm vi trước khi tạo yêu cầu thống kê.", "Thay đổi bộ lọc không tạo job và không gọi DVCQG.")}<section class="panel catalog-panel"><div class="catalog-mode"><button class="${catalogPreview.mode==="single"?"active":""}" data-catalog-mode="single">Một TTHC</button><button class="${catalogPreview.mode==="filtered"?"active":""}" data-catalog-mode="filtered">Toàn bộ kết quả sau lọc</button></div><div class="catalog-filters"><label class="field"><span>Cấp thực hiện</span><select id="catalog-level"><option value="">Cấp tỉnh và cấp xã</option><option value="province" ${catalogPreview.level==="province"?"selected":""}>Cấp tỉnh</option><option value="ward" ${catalogPreview.level==="ward"?"selected":""}>Cấp xã</option></select></label><label class="field"><span>Lĩnh vực</span><select id="catalog-field"><option value="">Tất cả lĩnh vực</option>${catalogPreview.fields.map(field=>`<option value="${esc(field)}" ${field===catalogPreview.field?"selected":""}>${esc(field)}</option>`).join("")}</select></label><label class="field catalog-search"><span>Tìm mã hoặc tên TTHC</span><input id="catalog-query" type="search" value="${esc(catalogPreview.query)}" placeholder="Ví dụ: 2.000815 hoặc từ khóa"></label></div><div class="catalog-summary"><article><span>Kết quả sau lọc</span><strong>${int(catalogPreview.selected)}</strong></article><article><span>Đã có trong PostgreSQL</span><strong>${int(catalogPreview.available)}</strong></article><article><span>Cần thống kê mới</span><strong>${int(catalogPreview.missing)}</strong></article></div>${catalogPreview.loading?`<div class="empty-state"><h2>Đang đọc danh mục…</h2></div>`:catalogPreview.error?`<div class="banner warn"><span>!</span><div><strong>Chưa đọc được danh mục</strong><p>${esc(catalogPreview.error)}</p></div></div>`:`<div class="catalog-list">${rows||`<div class="empty-state"><h2>Không tìm thấy TTHC phù hợp</h2><p>Hãy thay đổi cấp thực hiện, lĩnh vực hoặc từ khóa.</p></div>`}</div><div class="catalog-pagination"><span>Hiển thị ${int(first)}–${int(last)} trong ${int(catalogPreview.selected)} TTHC</span><div><button class="btn small" data-action="catalog-prev" ${catalogPreview.offset===0?"disabled":""}>Trang trước</button><button class="btn small" data-action="catalog-next" ${last>=catalogPreview.selected?"disabled":""}>Trang sau</button></div></div>`}<div class="catalog-submit"><div>${selectionText}</div><button class="btn primary" data-action="submit-statistics" ${canSubmit?"":"disabled"}>${catalogPreview.mode==="filtered"?"Thống kê toàn bộ":"Thống kê"}</button></div></section>`;
+}
+
 function operationPeriod(job:OperationJob):string{
   const selected=job.request.period;
   if(!selected)return "Không xác định";
@@ -219,17 +248,18 @@ function operations():string{
   const stopped=operationData.jobs.filter(job=>job.state==="failed"||job.state==="halted").length;
   const circuitOpen=operationData.circuitState==="open";
   const rows=operationData.jobs.map(job=>`<tr><td class="num">${esc(job.id.slice(0,8))}</td><td>${esc(operationPeriod(job))}</td><td>${job.request.scope==="formality"?"Theo TTHC":"Tất cả TTHC"}</td><td><span class="badge ${job.state==="succeeded"?"good":job.state==="running"?"info":job.state==="queued"?"warn":"bad"}">${esc(job.state)}</span></td><td class="num">${job.attempts}</td><td>${esc(dateTime(job.createdAt))}</td></tr>`).join("");
-  const content=operationData.loading?`<div class="boot-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>`:operationData.error?`<div class="banner bad"><span>!</span><div><strong>Không đọc được trạng thái vận hành</strong><p>${esc(operationData.error)}</p></div></div>`:`<section class="quality-grid"><article class="quality-card"><h3>Kết nối DVCQG</h3><strong class="status-text ${circuitOpen?"negative":"positive"}">${circuitOpen?"Đang tạm dừng":"Sẵn sàng"}</strong><p>${circuitOpen?"Worker không được phép gọi nguồn cho tới khi quản trị viên kiểm tra và chủ động mở lại.":"Circuit đang đóng; worker chỉ xử lý tuần tự theo giới hạn an toàn."}</p></article><article class="quality-card"><h3>Job đang chờ</h3><strong class="num">${queued}</strong><p>${running} đang chạy · ${stopped} đã dừng hoặc thất bại.</p></article><article class="quality-card"><h3>Snapshot hoàn chỉnh</h3><strong class="num">${operationData.snapshotCount}</strong><p>Cập nhật gần nhất: ${esc(dateTime(operationData.latestSnapshotAt))}.</p></article></section><div class="banner ${circuitOpen?"warn":""}" style="margin-top:12px"><span>${circuitOpen?"!":"i"}</span><div><strong>${circuitOpen?"Cần kiểm tra kết nối trước khi chạy":"Luồng thu thập đang được bảo vệ"}</strong><p>${esc(operationData.circuitReason??(circuitOpen?"Chưa có mô tả nguyên nhân.":"Không có cảnh báo circuit."))} Màn hình này chỉ đọc; không tự mở circuit hoặc gửi request DVCQG.</p></div></div><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Hàng đợi cập nhật dữ liệu</h2><p>Các yêu cầu được chống trùng và xử lý ngoài vòng đời request giao diện.</p></div><button class="btn small" data-action="refresh-operations">Làm mới</button></div><div class="table-wrap"><table><thead><tr><th>Mã job</th><th>Kỳ</th><th>Phạm vi</th><th>Trạng thái</th><th>Số lần thử</th><th>Thời điểm tạo</th></tr></thead><tbody>${rows||`<tr><td colspan="6">Chưa có yêu cầu nào trong hàng đợi.</td></tr>`}</tbody></table></div></section>`;
+  const batchRows=operationData.batches.map(batch=>{const finished=batch.availableItems+batch.completedItems;return `<tr><td class="num">${esc(batch.id.slice(0,8))}</td><td>${esc(batch.periodType)} ${batch.periodValue??""}/${batch.year}</td><td class="num">${int(finished)}/${int(batch.totalItems)}</td><td class="num">${int(batch.availableItems)}</td><td><span class="badge ${batch.state==="succeeded"?"good":batch.state==="running"?"info":batch.state==="queued"?"warn":"bad"}">${esc(batch.state)}</span></td><td>${batch.state==="failed"||batch.state==="halted"?`<button class="btn small" data-resume-batch="${esc(batch.id)}">Tiếp tục</button>`:"—"}</td></tr>`}).join("");
+  const content=operationData.loading?`<div class="boot-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>`:operationData.error?`<div class="banner bad"><span>!</span><div><strong>Không đọc được trạng thái vận hành</strong><p>${esc(operationData.error)}</p></div></div>`:`<section class="quality-grid"><article class="quality-card"><h3>Kết nối DVCQG</h3><strong class="status-text ${circuitOpen?"negative":"positive"}">${circuitOpen?"Đang tạm dừng":"Sẵn sàng"}</strong><p>${circuitOpen?"Worker không được phép gọi nguồn cho tới khi quản trị viên kiểm tra và chủ động mở lại.":"Circuit đang đóng; worker chỉ xử lý tuần tự theo giới hạn an toàn."}</p></article><article class="quality-card"><h3>Job đang chờ</h3><strong class="num">${queued}</strong><p>${running} đang chạy · ${stopped} đã dừng hoặc thất bại.</p></article><article class="quality-card"><h3>Snapshot hoàn chỉnh</h3><strong class="num">${operationData.snapshotCount}</strong><p>Cập nhật gần nhất: ${esc(dateTime(operationData.latestSnapshotAt))}.</p></article></section><div class="banner ${circuitOpen?"warn":""}" style="margin-top:12px"><span>${circuitOpen?"!":"i"}</span><div><strong>${circuitOpen?"Cần kiểm tra kết nối trước khi chạy":"Luồng thu thập đang được bảo vệ"}</strong><p>${esc(operationData.circuitReason??(circuitOpen?"Chưa có mô tả nguyên nhân.":"Không có cảnh báo circuit."))} Mỗi batch chỉ mở một job con tại một thời điểm.</p></div></div><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Batch thống kê theo TTHC</h2><p>Tiến độ được lưu trong PostgreSQL và có thể tiếp tục từ checkpoint.</p></div><button class="btn small" data-action="refresh-operations">Làm mới</button></div><div class="table-wrap"><table><thead><tr><th>Mã batch</th><th>Kỳ</th><th>Tiến độ</th><th>Dùng lại</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${batchRows||`<tr><td colspan="6">Chưa có batch thống kê nào.</td></tr>`}</tbody></table></div></section><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Hàng đợi cập nhật dữ liệu</h2><p>Các yêu cầu được chống trùng và xử lý ngoài vòng đời request giao diện.</p></div></div><div class="table-wrap"><table><thead><tr><th>Mã job</th><th>Kỳ</th><th>Phạm vi</th><th>Trạng thái</th><th>Số lần thử</th><th>Thời điểm tạo</th></tr></thead><tbody>${rows||`<tr><td colspan="6">Chưa có yêu cầu nào trong hàng đợi.</td></tr>`}</tbody></table></div></section>`;
   return `${title("Trạng thái vận hành", "Theo dõi kết nối nguồn, snapshot và hàng đợi cập nhật dữ liệu.", "Chỉ hiển thị thông tin an toàn; việc mở circuit vẫn thực hiện theo runbook quản trị.")}${content}`;
 }
 
 async function loadOperations():Promise<void>{
   operationData.loading=true;operationData.error=null;render();
   try{
-    const [statusResponse,jobsResponse]=await Promise.all([fetch("/api/v1/system-status"),fetch("/api/v1/collection-jobs?limit=50")]);
-    if(!statusResponse.ok||!jobsResponse.ok)throw new Error(`HTTP ${statusResponse.status}/${jobsResponse.status}`);
+    const [statusResponse,jobsResponse,batchesResponse]=await Promise.all([fetch("/api/v1/system-status"),fetch("/api/v1/collection-jobs?limit=50"),fetch("/api/v1/formality-batches?limit=20")]);
+    if(!statusResponse.ok||!jobsResponse.ok||!batchesResponse.ok)throw new Error(`HTTP ${statusResponse.status}/${jobsResponse.status}/${batchesResponse.status}`);
     const status=await statusResponse.json() as {circuitState:string;circuitReason:string|null;snapshotCount:number;latestSnapshotAt:string|null};
-    operationData={loading:false,error:null,circuitState:status.circuitState,circuitReason:status.circuitReason,snapshotCount:status.snapshotCount,latestSnapshotAt:status.latestSnapshotAt,jobs:await jobsResponse.json() as OperationJob[]};
+    operationData={loading:false,error:null,circuitState:status.circuitState,circuitReason:status.circuitReason,snapshotCount:status.snapshotCount,latestSnapshotAt:status.latestSnapshotAt,jobs:await jobsResponse.json() as OperationJob[],batches:await batchesResponse.json() as BatchResult[]};
   }catch(error){operationData.loading=false;operationData.error=error instanceof Error?error.message:String(error)}
   render();
 }
@@ -244,7 +274,7 @@ function exportModal(): string {
 }
 
 function bind(): void {
-  document.querySelectorAll<HTMLElement>("[data-nav]").forEach(el=>el.addEventListener("click",()=>{const destination=el.dataset.nav as ScreenId;state.screen=destination;if(destination==="operations"){state.demo="normal";render();void loadOperations()}else if(data.snapshots[`${state.periodId}:${state.scope}`]){state.demo="normal";render()}else{void loadSelection()}scrollTo(0,0)}));
+  document.querySelectorAll<HTMLElement>("[data-nav]").forEach(el=>el.addEventListener("click",()=>{const destination=el.dataset.nav as ScreenId;state.screen=destination;if(destination==="operations"){state.demo="normal";render();void loadOperations()}else if(data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]){state.demo="normal";render()}else if(state.scope==="formality"&&!catalogPreview.selectedId){state.demo="ready";render();void loadCatalogPreview()}else{void loadSelection()}scrollTo(0,0)}));
   document.querySelectorAll<HTMLElement>("[data-state]").forEach(el=>el.addEventListener("click",()=>{state.demo=el.dataset.state as DemoState;render()}));
   document.querySelectorAll<HTMLElement>("[data-dimension]").forEach(el=>el.addEventListener("click",()=>{state.peerDimension=el.dataset.dimension as State["peerDimension"];render()}));
   document.querySelectorAll<HTMLElement>("[data-group-detail]").forEach(el=>el.addEventListener("click",()=>{state.selectedGroup=el.dataset.groupDetail as GroupId;render();document.querySelector("#group-detail")?.scrollIntoView({behavior:"smooth",block:"start"})}));
@@ -252,7 +282,12 @@ function bind(): void {
   document.querySelector<HTMLSelectElement>("#period-type")?.addEventListener("change",e=>{const type=(e.target as HTMLSelectElement).value;const currentYear=period().year;const matches=data.periods.filter(item=>item.type===type&&item.year===currentYear);const fallback=data.periods.filter(item=>item.type===type);const match=matches.at(-1)??fallback.at(-1);if(match)void selectPeriod(match.id)});
   document.querySelector<HTMLSelectElement>("#period-value")?.addEventListener("change",e=>{void selectPeriod((e.target as HTMLSelectElement).value)});
   document.querySelector<HTMLSelectElement>("#report-year")?.addEventListener("change",e=>{const year=Number((e.target as HTMLSelectElement).value);const matches=data.periods.filter(item=>item.type===period().type&&item.year===year);const match=matches.at(-1);if(match)void selectPeriod(match.id)});
-  document.querySelector<HTMLSelectElement>("#scope-select")?.addEventListener("change",e=>{state.scope=(e.target as HTMLSelectElement).value as Scope;void loadSelection()});
+  document.querySelector<HTMLSelectElement>("#scope-select")?.addEventListener("change",e=>{completionMessage="";state.scope=(e.target as HTMLSelectElement).value as Scope;if(state.scope==="formality"){state.demo="ready";render();void loadCatalogPreview()}else{void loadSelection()}});
+  document.querySelector<HTMLSelectElement>("#catalog-level")?.addEventListener("change",e=>{catalogPreview.level=(e.target as HTMLSelectElement).value as CatalogPreview["level"];catalogPreview.selectedId=null;catalogPreview.offset=0;void loadCatalogPreview()});
+  document.querySelector<HTMLSelectElement>("#catalog-field")?.addEventListener("change",e=>{catalogPreview.field=(e.target as HTMLSelectElement).value;catalogPreview.selectedId=null;catalogPreview.offset=0;void loadCatalogPreview()});
+  document.querySelector<HTMLInputElement>("#catalog-query")?.addEventListener("input",e=>{catalogPreview.query=(e.target as HTMLInputElement).value;catalogPreview.selectedId=null;catalogPreview.offset=0;window.clearTimeout(catalogSearchTimer);catalogSearchTimer=window.setTimeout(()=>{void loadCatalogPreview()},350)});
+  document.querySelectorAll<HTMLInputElement>("input[name=catalog-formality]").forEach(el=>el.addEventListener("change",()=>{const item=catalogPreview.items.find(candidate=>candidate.id===el.value);if(!item)return;catalogPreview.selectedId=item.id;data.formality={id:item.id,code:item.code,name:item.name};void loadSelection()}));
+  document.querySelectorAll<HTMLElement>("[data-catalog-mode]").forEach(el=>el.addEventListener("click",()=>{catalogPreview.mode=el.dataset.catalogMode as CatalogPreview["mode"];state.demo="ready";render()}));
   document.querySelector<HTMLInputElement>("#peer-search")?.addEventListener("input",e=>{state.search=(e.target as HTMLInputElement).value;render()});
   document.querySelectorAll<HTMLElement>("[data-action=brief]").forEach(el=>el.addEventListener("click",()=>{state.modal="brief";render()}));
   document.querySelector<HTMLElement>("[data-action=export]")?.addEventListener("click",()=>{state.modal="export";render()});
@@ -260,7 +295,12 @@ function bind(): void {
   document.querySelector<HTMLElement>("[data-action=print]")?.addEventListener("click",()=>window.print());
   document.querySelector<HTMLElement>("[data-action=open-quality]")?.addEventListener("click",()=>{state.screen="quality";render()});
   document.querySelector<HTMLElement>("[data-action=retry-selection]")?.addEventListener("click",()=>{void loadSelection()});
+  document.querySelectorAll<HTMLElement>("[data-action=submit-statistics]").forEach(el=>el.addEventListener("click",()=>{void submitStatistics()}));
+  document.querySelector<HTMLElement>("[data-action=dismiss-completion]")?.addEventListener("click",()=>{completionMessage="";render()});
   document.querySelector<HTMLElement>("[data-action=refresh-operations]")?.addEventListener("click",()=>{void loadOperations()});
+  document.querySelectorAll<HTMLElement>("[data-resume-batch]").forEach(el=>el.addEventListener("click",async()=>{const id=el.dataset.resumeBatch;if(!id)return;el.setAttribute("disabled","");try{const response=await fetch(`/api/v1/formality-batches/${encodeURIComponent(id)}/resume`,{method:"POST"});if(!response.ok)throw new Error(`HTTP ${response.status}`);await loadOperations()}catch(error){operationData.error=error instanceof Error?error.message:String(error);render()}}));
+  document.querySelector<HTMLElement>("[data-action=catalog-prev]")?.addEventListener("click",()=>{catalogPreview.offset=Math.max(0,catalogPreview.offset-100);void loadCatalogPreview()});
+  document.querySelector<HTMLElement>("[data-action=catalog-next]")?.addEventListener("click",()=>{catalogPreview.offset+=100;void loadCatalogPreview()});
 }
 
 function mergeUnits(snapshot: Snapshot): void {
@@ -275,27 +315,48 @@ function mergeUnits(snapshot: Snapshot): void {
 }
 
 async function selectPeriod(periodId:string):Promise<void>{
+  completionMessage="";
   state.periodId=periodId;
-  await loadSelection();
+  if(state.scope==="formality"){
+    state.demo="ready";
+    render();
+    await loadCatalogPreview();
+  }else{
+    await loadSelection();
+  }
 }
 
 interface CollectionRequestResult {jobId:string|null;state:string;created:boolean;circuitState:string;message:string}
 
-function pollCollectionJob(jobId:string,requestId:number):void{
+function announceCollectionComplete():void{
+  completionMessage="Dữ liệu theo thủ tục hành chính đã được thống kê xong và sẵn sàng để xem.";
+  if("Notification" in window&&Notification.permission==="granted"){
+    new Notification("QD766 · Thống kê hoàn tất",{body:completionMessage});
+  }
+}
+
+function pollCollectionJob(jobId:string,requestId:number,requestedKey:string):void{
   window.setTimeout(async()=>{
-    if(requestId!==selectionRequest)return;
     try{
       const response=await fetch(`/api/v1/collection-jobs/${encodeURIComponent(jobId)}`);
       if(!response.ok)throw new Error(`HTTP ${response.status}`);
       const job=await response.json() as {state:string;error?:{message?:string}|null};
-      if(requestId!==selectionRequest)return;
-      if(job.state==="succeeded"){await loadSelection();return}
+      if(job.state==="succeeded"){
+        announceCollectionComplete();
+        const currentKey=snapshotKey(period().id,state.scope,data.formality.id);
+        if(currentKey===requestedKey)await loadSelection();else render();
+        return;
+      }
       if(job.state==="failed"||job.state==="halted"){
+        if(requestId!==selectionRequest)return;
         pendingMessage=job.error?.message??"Yêu cầu cập nhật dữ liệu đã dừng và cần quản trị viên kiểm tra.";
         state.demo="error";render();return;
       }
-      pendingMessage=job.state==="running"?"Hệ thống đang thu thập tuần tự và kiểm tra dữ liệu.":"Yêu cầu đang chờ đến lượt xử lý.";
-      state.demo="queued";render();pollCollectionJob(jobId,requestId);
+      if(requestId===selectionRequest){
+        pendingMessage=job.state==="running"?"Hệ thống đang thu thập tuần tự và kiểm tra dữ liệu.":"Yêu cầu đang chờ đến lượt xử lý.";
+        state.demo="queued";render();
+      }
+      pollCollectionJob(jobId,requestId,requestedKey);
     }catch(error){
       if(requestId!==selectionRequest)return;
       console.error(error);pendingMessage="Chưa đọc được trạng thái hàng đợi. Vui lòng kiểm tra lại.";state.demo="error";render();
@@ -306,7 +367,11 @@ function pollCollectionJob(jobId:string,requestId:number):void{
 async function requestCollection(requestId:number):Promise<void>{
   const selected=period();
   const requestBody:Record<string,unknown>={periodType:selected.type,year:selected.year,periodValue:selected.value??null,scope:state.scope};
-  if(state.scope==="formality"&&data.formality.id)requestBody.formalityId=data.formality.id;
+  if(state.scope==="formality"&&data.formality.id){
+    requestBody.formalityId=data.formality.id;
+    requestBody.provinceCode=catalogProvinceCode;
+    requestBody.formalityCode=data.formality.code;
+  }
   const response=await fetch("/api/v1/dashboard/requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(requestBody)});
   if(!response.ok){const problem=await response.json().catch(()=>({}));throw new Error(typeof problem.detail==="string"?problem.detail:`HTTP ${response.status}`)}
   const result=await response.json() as CollectionRequestResult;
@@ -314,13 +379,121 @@ async function requestCollection(requestId:number):Promise<void>{
   if(result.state==="ready"){await loadSelection();return}
   pendingMessage=result.message;
   state.demo=result.circuitState==="open"?"blocked":"queued";render();
-  if(result.circuitState!=="open"&&result.jobId)pollCollectionJob(result.jobId,requestId);
+  if(result.circuitState!=="open"&&result.jobId){
+    pollCollectionJob(result.jobId,requestId,snapshotKey(selected.id,state.scope,data.formality.id));
+  }
+}
+
+async function submitStatistics():Promise<void>{
+  if(state.scope!=="formality")return;
+  if(catalogPreview.mode==="filtered"){
+    if(!catalogPreview.selected)return;
+    await requestFilteredBatch();
+    return;
+  }
+  if(!catalogPreview.selectedId)return;
+  const requestId=++selectionRequest;
+  completionMessage="";
+  pendingMessage="Đang gửi yêu cầu thống kê...";
+  state.demo="loading";
+  render();
+  try{
+    await requestCollection(requestId);
+  }catch(error){
+    if(requestId!==selectionRequest)return;
+    console.error(error);
+    pendingMessage=error instanceof Error?error.message:String(error);
+    state.demo="error";
+    render();
+  }
+}
+
+interface BatchResult {id:string;state:string;periodType:string;year:number;periodValue:number|null;totalItems:number;availableItems:number;completedItems:number;failedItems:number}
+
+async function requestFilteredBatch():Promise<void>{
+  const requestId=++selectionRequest;
+  const selected=period();
+  state.demo="loading";render();
+  const payload:Record<string,unknown>={provinceCode:catalogProvinceCode,periodType:selected.type,year:selected.year,periodValue:selected.value??null,includeInternal:true};
+  if(catalogPreview.level)payload.level=catalogPreview.level;
+  if(catalogPreview.field)payload.field=catalogPreview.field;
+  if(catalogPreview.query.trim())payload.query=catalogPreview.query.trim();
+  try{
+    const response=await fetch("/api/v1/formality-batches",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    if(!response.ok){const problem=await response.json().catch(()=>({}));throw new Error(typeof problem.detail==="string"?problem.detail:`HTTP ${response.status}`)}
+    const batch=await response.json() as BatchResult;
+    if(requestId!==selectionRequest)return;
+    if(batch.state==="succeeded"){
+      announceCollectionComplete();
+      state.demo="ready";await loadCatalogPreview();return;
+    }
+    pendingMessage=`Batch gồm ${int(batch.totalItems)} TTHC đã được lưu. ${int(batch.availableItems)} TTHC đã có dữ liệu; hệ thống đang xử lý tuần tự phần còn thiếu.`;
+    state.demo="queued";render();pollFormalityBatch(batch.id,requestId);
+  }catch(error){
+    if(requestId!==selectionRequest)return;
+    console.error(error);pendingMessage=error instanceof Error?error.message:String(error);state.demo="error";render();
+  }
+}
+
+function pollFormalityBatch(batchId:string,requestId:number):void{
+  window.setTimeout(async()=>{
+    try{
+      const response=await fetch(`/api/v1/formality-batches/${encodeURIComponent(batchId)}`);
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      const batch=await response.json() as BatchResult;
+      const finished=batch.availableItems+batch.completedItems;
+      if(batch.state==="succeeded"){
+        completionMessage=`Đã hoàn tất thống kê ${int(batch.totalItems)} TTHC; ${int(batch.availableItems)} TTHC được dùng lại từ PostgreSQL.`;
+        if("Notification" in window&&Notification.permission==="granted")new Notification("QD766 · Batch thống kê hoàn tất",{body:completionMessage});
+        if(requestId===selectionRequest){state.demo="ready";await loadCatalogPreview()}else render();
+        return;
+      }
+      if(batch.state==="failed"||batch.state==="halted"){
+        if(requestId===selectionRequest){pendingMessage=`Batch đã dừng tại ${int(finished)}/${int(batch.totalItems)} TTHC. Tiến độ đã được lưu để tiếp tục sau.`;state.demo="blocked";render()}
+        return;
+      }
+      if(requestId===selectionRequest){pendingMessage=`Đã hoàn thành ${int(finished)}/${int(batch.totalItems)} TTHC. Hệ thống chỉ xử lý một TTHC tại một thời điểm.`;state.demo="queued";render()}
+      pollFormalityBatch(batchId,requestId);
+    }catch(error){
+      if(requestId===selectionRequest){console.error(error);pendingMessage="Chưa đọc được tiến độ batch. Có thể kiểm tra lại trong màn hình Vận hành.";state.demo="error";render()}
+    }
+  },3000);
+}
+
+async function loadCatalogPreview():Promise<void>{
+  const requestId=++catalogPreviewRequest;
+  const selected=period();
+  catalogPreview.loading=true;
+  catalogPreview.error=null;
+  if(state.scope==="formality"){state.demo="ready";render()}
+  const params=new URLSearchParams({period_type:selected.type,year:String(selected.year),include_internal:"true",offset:String(catalogPreview.offset),limit:"100"});
+  if(selected.value!==null&&selected.value!==undefined)params.set("period_value",String(selected.value));
+  if(catalogPreview.level)params.set("level",catalogPreview.level);
+  if(catalogPreview.field)params.set("field",catalogPreview.field);
+  if(catalogPreview.query.trim())params.set("q",catalogPreview.query.trim());
+  try{
+    const response=await fetch(`/api/v1/province-catalog/${catalogProvinceCode}/preview?${params.toString()}`);
+    if(!response.ok){const problem=await response.json().catch(()=>({}));throw new Error(typeof problem.detail==="string"?problem.detail:`HTTP ${response.status}`)}
+    const body=await response.json() as {counts:{selected:number;available:number;missing:number};fields:string[];items:CatalogItem[]};
+    if(requestId!==catalogPreviewRequest)return;
+    catalogPreview.loading=false;
+    catalogPreview.selected=body.counts.selected;
+    catalogPreview.available=body.counts.available;
+    catalogPreview.missing=body.counts.missing;
+    catalogPreview.fields=body.fields;
+    catalogPreview.items=body.items;
+  }catch(error){
+    if(requestId!==catalogPreviewRequest)return;
+    catalogPreview.loading=false;
+    catalogPreview.error=error instanceof Error?error.message:String(error);
+  }
+  if(state.scope==="formality"&&state.demo==="ready")render();
 }
 
 async function loadSelection():Promise<void>{
   const requestId=++selectionRequest;
   const selected=period();
-  const key=`${selected.id}:${state.scope}`;
+  const key=snapshotKey(selected.id,state.scope,data.formality.id);
   if(data.snapshots[key]){state.demo="normal";render();return}
   state.demo="loading";render();
   const params=new URLSearchParams({period_type:selected.type,year:String(selected.year),scope:state.scope});
@@ -330,6 +503,11 @@ async function loadSelection():Promise<void>{
     const response=await fetch(`/api/v1/dashboard/selection?${params.toString()}`);
     if(response.status===404){
       if(requestId!==selectionRequest)return;
+      if(state.scope==="formality"){
+        pendingMessage="";
+        state.demo="ready";
+        render();return;
+      }
       await requestCollection(requestId);return;
     }
     if(!response.ok){const problem=await response.json().catch(()=>({}));throw new Error(typeof problem.detail==="string"?problem.detail:`HTTP ${response.status}`)}

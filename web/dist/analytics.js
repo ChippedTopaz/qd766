@@ -1,6 +1,10 @@
 const EPSILON = 0.005;
+export function snapshotKey(periodId, scope, formalityId) {
+    return scope === "formality" ? `${periodId}:${scope}:${formalityId ?? "none"}` : `${periodId}:${scope}`;
+}
 export function snapshotFor(data, periodId, scope) {
-    const snapshot = data.snapshots[`${periodId}:${scope}`];
+    const key = snapshotKey(periodId, scope, data.formality.id);
+    const snapshot = data.snapshots[key];
     if (!snapshot)
         throw new Error(`Không tìm thấy snapshot ${periodId}/${scope}`);
     return snapshot;

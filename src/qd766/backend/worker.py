@@ -21,6 +21,7 @@ from qd766.periods import PeriodSelection
 from qd766.snapshot import build_collected_snapshot
 
 from .importer import store_normalized_snapshot
+from .batches import finish_batch_job, mark_batch_job_running
 from .jobs import (
     acquire_collection_lease,
     claim_next_job,
@@ -108,6 +109,7 @@ def run_one_job(
         if claimed is None:
             release_collection_lease(session, worker_id)
             return None
+        mark_batch_job_running(session, claimed)
         job_id = claimed.id
         request = copy.deepcopy(claimed.request)
 
@@ -117,6 +119,7 @@ def run_one_job(
             job = _locked_job(session, job_id)
             store_normalized_snapshot(session, snapshot)
             succeed_job(session, job, worker_id)
+            finish_batch_job(session, job, "succeeded")
             release_collection_lease(session, worker_id)
         return WorkerResult(job_id, "succeeded")
     except SafetyStop as error:
@@ -186,7 +189,9 @@ def _halt(
 ) -> None:
     with factory.begin() as session:
         detail = _error(kind, error, retryable=False)
-        halt_job(session, _locked_job(session, job_id), worker_id, detail)
+        job = _locked_job(session, job_id)
+        halt_job(session, job, worker_id, detail)
+        finish_batch_job(session, job, "halted", detail)
         if open_circuit:
             open_collection_circuit(session, reason=kind, detail=detail)
         else:
@@ -213,5 +218,7 @@ def _retry_or_fail(
             max_attempts=max_attempts,
             delay_seconds=retry_delay_seconds,
         )
+        if job.state == "failed":
+            finish_batch_job(session, job, "failed", job.error)
         release_collection_lease(session, worker_id)
         return job.state

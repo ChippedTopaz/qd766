@@ -5,13 +5,33 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, select, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
+from qd766.province_catalog import (
+    PROVINCES,
+    ProvinceCatalogError,
+    ProvinceCatalogFormatError,
+    ProvinceCatalogUnavailable,
+)
+
+from .batches import enqueue_next_batch_item, resume_batch
 from .dashboard import dashboard_payload, snapshot_payload
 from .database import get_session
-from .jobs import enqueue_job
-from .models import CollectionControl, CollectionJob, Dataset, Entity, Formality, FormalityDepartment, Snapshot
+from .jobs import enqueue_job, request_idempotency_key
+from .models import (
+    CollectionBatch,
+    CollectionBatchItem,
+    CollectionControl,
+    CollectionJob,
+    Dataset,
+    Entity,
+    Formality,
+    FormalityDepartment,
+    Snapshot,
+)
 from .schemas import (
     CollectionControlResponse,
     CollectionJobResponse,
@@ -19,6 +39,8 @@ from .schemas import (
     DashboardCollectionRequest,
     DashboardCollectionResponse,
     EntityResponse,
+    FormalityBatchRequest,
+    FormalityBatchResponse,
     FormalityResponse,
     HealthResponse,
     SnapshotResponse,
@@ -26,6 +48,193 @@ from .schemas import (
 
 router = APIRouter(prefix="/api/v1")
 DbSession = Annotated[Session, Depends(get_session)]
+
+
+@router.get("/province-catalog", tags=["formalities"])
+def list_province_catalogs() -> list[dict[str, str]]:
+    return [
+        {"code": code, "name": name, "slug": slug}
+        for code, (name, slug) in PROVINCES.items()
+    ]
+
+
+@router.get("/province-catalog/{province_code}", tags=["formalities"])
+def get_province_catalog(
+    province_code: str,
+    request: Request,
+    response: Response,
+    level: str | None = Query(default=None, pattern="^(province|ward)$"),
+    field: str | None = None,
+    q: str | None = None,
+    include_internal: bool = True,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    normalized_code = province_code.strip().zfill(2)
+    if normalized_code not in PROVINCES:
+        raise HTTPException(status_code=404, detail="Province catalog not found")
+    cache_key = f"{normalized_code}:internal={str(include_internal).lower()}"
+
+    def load_catalog():
+        return request.app.state.province_catalog_client.load(
+            normalized_code,
+            include_internal=include_internal,
+        )
+
+    try:
+        catalog, cache_result = request.app.state.province_catalog_cache.get_or_load(
+            cache_key,
+            load_catalog,
+        )
+        selected = catalog.select(level=level, field=field, query=q)
+    except ProvinceCatalogUnavailable as error:
+        raise HTTPException(status_code=503, detail="Province catalog source unavailable") from error
+    except ProvinceCatalogFormatError as error:
+        raise HTTPException(status_code=502, detail="Province catalog source is invalid") from error
+    except ProvinceCatalogError as error:
+        raise HTTPException(status_code=502, detail="Province catalog could not be loaded") from error
+
+    response.headers["X-QD766-Catalog-Cache"] = cache_result
+    response.headers["Cache-Control"] = "private, max-age=300"
+    items = selected[offset : offset + limit]
+    return {
+        "source": "am-sieu-toc-data:data/index.json + niemyet/isVertical.json",
+        "schemaVersion": 1,
+        "province": {
+            "code": catalog.province.code,
+            "name": catalog.province.name,
+            "slug": catalog.province.slug,
+        },
+        "masterUpdatedAt": catalog.master_updated_at,
+        "rulesSha256": catalog.rules_sha256,
+        "selection": {
+            "level": level,
+            "field": field,
+            "query": q,
+            "includeInternal": include_internal,
+            "formalityCount": len(selected),
+            "totalCount": catalog.total_count,
+            "provinceCount": catalog.province_count,
+            "wardCount": catalog.ward_count,
+        },
+        "offset": offset,
+        "limit": limit,
+        "fields": list(catalog.fields),
+        "items": [
+            {
+                "id": item.id,
+                "code": item.code,
+                "name": item.name,
+                "field": item.field,
+                "publishingAgency": item.publishing_agency,
+                "executionLevels": list(item.execution_levels),
+                "formalityType": item.formality_type,
+                "state": item.state,
+                "isVertical": item.is_vertical,
+            }
+            for item in items
+        ],
+    }
+
+
+@router.get("/province-catalog/{province_code}/preview", tags=["formalities"])
+def preview_province_catalog(
+    province_code: str,
+    request: Request,
+    response: Response,
+    session: DbSession,
+    period_type: str = Query(pattern="^(month|quarter|year)$"),
+    year: int = Query(ge=2000, le=2200),
+    period_value: int | None = None,
+    level: str | None = Query(default=None, pattern="^(province|ward)$"),
+    field: str | None = None,
+    q: str | None = None,
+    include_internal: bool = True,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    normalized_code = province_code.strip().zfill(2)
+    if normalized_code not in PROVINCES:
+        raise HTTPException(status_code=404, detail="Province catalog not found")
+    cache_key = f"{normalized_code}:internal={str(include_internal).lower()}"
+    try:
+        catalog, cache_result = request.app.state.province_catalog_cache.get_or_load(
+            cache_key,
+            lambda: request.app.state.province_catalog_client.load(
+                normalized_code, include_internal=include_internal
+            ),
+        )
+        selected = catalog.select(level=level, field=field, query=q)
+    except ProvinceCatalogUnavailable as error:
+        raise HTTPException(status_code=503, detail="Province catalog source unavailable") from error
+    except ProvinceCatalogError as error:
+        raise HTTPException(status_code=502, detail="Province catalog source is invalid") from error
+
+    root_department_id = session.scalar(
+        select(Snapshot.root_department_id)
+        .where(Snapshot.state == "complete")
+        .order_by(Snapshot.created_at.desc())
+        .limit(1)
+    )
+    available_statement = select(Snapshot.formality_id).where(
+        Snapshot.state == "complete",
+        Snapshot.scope == "formality",
+        Snapshot.period_type == period_type,
+        Snapshot.year == year,
+    )
+    if root_department_id is not None:
+        available_statement = available_statement.where(
+            Snapshot.root_department_id == root_department_id
+        )
+    available_statement = (
+        available_statement.where(Snapshot.period_value.is_(None))
+        if period_value is None
+        else available_statement.where(Snapshot.period_value == period_value)
+    )
+    available_ids = {
+        str(item) for item in session.scalars(available_statement) if item is not None
+    }
+    available_count = sum(item.id in available_ids for item in selected)
+    page = selected[offset : offset + limit]
+    response.headers["X-QD766-Catalog-Cache"] = cache_result
+    response.headers["Cache-Control"] = "private, max-age=60"
+    return {
+        "province": {
+            "code": catalog.province.code,
+            "name": catalog.province.name,
+        },
+        "filters": {
+            "level": level,
+            "field": field,
+            "query": q,
+            "includeInternal": include_internal,
+        },
+        "period": {
+            "type": period_type,
+            "year": year,
+            "value": period_value,
+        },
+        "counts": {
+            "selected": len(selected),
+            "available": available_count,
+            "missing": len(selected) - available_count,
+        },
+        "fields": list(catalog.fields),
+        "offset": offset,
+        "limit": limit,
+        "items": [
+            {
+                "id": item.id,
+                "code": item.code,
+                "name": item.name,
+                "field": item.field,
+                "publishingAgency": item.publishing_agency,
+                "executionLevels": list(item.execution_levels),
+                "available": item.id in available_ids,
+            }
+            for item in page
+        ],
+    }
 
 
 @router.get("/health/live", response_model=HealthResponse, tags=["health"])
@@ -41,6 +250,228 @@ def ready(session: DbSession, response: Response) -> HealthResponse:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return HealthResponse(status="unavailable")
     return HealthResponse(status="ok")
+
+
+@router.post(
+    "/formality-batches",
+    response_model=FormalityBatchResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["collection-batches"],
+)
+def create_formality_batch(
+    payload: FormalityBatchRequest,
+    request: Request,
+    session: DbSession,
+) -> CollectionBatch:
+    if payload.province_code not in PROVINCES:
+        raise HTTPException(status_code=404, detail="Province catalog not found")
+    root_department_id = session.scalar(
+        select(Snapshot.root_department_id)
+        .where(Snapshot.state == "complete")
+        .order_by(Snapshot.created_at.desc())
+        .limit(1)
+    )
+    if root_department_id is None:
+        raise HTTPException(status_code=409, detail="No root department is available")
+
+    cache_key = f"{payload.province_code}:internal={str(payload.include_internal).lower()}"
+    try:
+        catalog, _ = request.app.state.province_catalog_cache.get_or_load(
+            cache_key,
+            lambda: request.app.state.province_catalog_client.load(
+                payload.province_code,
+                include_internal=payload.include_internal,
+            ),
+        )
+    except ProvinceCatalogUnavailable as error:
+        raise HTTPException(status_code=503, detail="Province catalog source unavailable") from error
+    except ProvinceCatalogError as error:
+        raise HTTPException(status_code=502, detail="Province catalog source is invalid") from error
+    selected = catalog.select(
+        level=payload.level,
+        field=payload.field,
+        query=payload.query,
+    )
+    if not selected:
+        raise HTTPException(status_code=422, detail="No formalities match the selected filters")
+
+    key_request = {
+        "kind": "formality-batch",
+        "provinceCode": payload.province_code,
+        "rootDepartmentId": str(root_department_id),
+        "periodType": payload.period_type,
+        "year": payload.year,
+        "periodValue": payload.period_value,
+        "level": payload.level,
+        "field": payload.field,
+        "query": (payload.query or "").strip(),
+        "includeInternal": payload.include_internal,
+        "catalogUpdatedAt": catalog.master_updated_at,
+        "rulesSha256": catalog.rules_sha256,
+    }
+    idempotency_key = request_idempotency_key(key_request).replace(
+        "collection:v1:", "batch:v1:"
+    )
+    existing = session.scalar(
+        select(CollectionBatch).where(
+            CollectionBatch.idempotency_key == idempotency_key
+        )
+    )
+    if existing is not None:
+        return existing
+
+    available_statement = select(Snapshot.formality_id).where(
+        Snapshot.state == "complete",
+        Snapshot.scope == "formality",
+        Snapshot.root_department_id == root_department_id,
+        Snapshot.period_type == payload.period_type,
+        Snapshot.year == payload.year,
+    )
+    available_statement = (
+        available_statement.where(Snapshot.period_value.is_(None))
+        if payload.period_value is None
+        else available_statement.where(Snapshot.period_value == payload.period_value)
+    )
+    available_ids = {
+        str(value) for value in session.scalars(available_statement) if value is not None
+    }
+    selected_ids = {uuid.UUID(item.id) for item in selected}
+    known_ids = set(
+        session.scalars(select(Formality.id).where(Formality.id.in_(selected_ids)))
+    )
+    batch = CollectionBatch(
+        idempotency_key=idempotency_key,
+        state="queued",
+        province_code=payload.province_code,
+        root_department_id=root_department_id,
+        period_type=payload.period_type,
+        year=payload.year,
+        period_value=payload.period_value,
+        filters={
+            "level": payload.level,
+            "field": payload.field,
+            "query": payload.query,
+            "includeInternal": payload.include_internal,
+        },
+        catalog_version=f"{catalog.master_updated_at}:{catalog.rules_sha256}",
+        total_items=len(selected),
+        available_items=sum(item.id in available_ids for item in selected),
+        completed_items=0,
+        failed_items=0,
+    )
+    try:
+        with session.begin_nested():
+            session.add(batch)
+            session.flush()
+    except IntegrityError:
+        existing = session.scalar(
+            select(CollectionBatch).where(
+                CollectionBatch.idempotency_key == idempotency_key
+            )
+        )
+        if existing is None:
+            raise
+        return existing
+    new_formalities = [
+        {
+            "id": uuid.UUID(item.id),
+            "code": item.code,
+            "name": item.name,
+            "state": item.state or None,
+            "attributes": {
+                "field": item.field,
+                "publishingAgency": item.publishing_agency,
+                "executionLevels": list(item.execution_levels),
+                "catalogProvinceCode": payload.province_code,
+            },
+        }
+        for item in selected
+        if uuid.UUID(item.id) not in known_ids
+    ]
+    if new_formalities:
+        dialect_name = session.get_bind().dialect.name
+        if dialect_name == "postgresql":
+            session.execute(
+                postgresql_insert(Formality)
+                .values(new_formalities)
+                .on_conflict_do_nothing()
+            )
+        elif dialect_name == "sqlite":
+            session.execute(
+                sqlite_insert(Formality)
+                .values(new_formalities)
+                .on_conflict_do_nothing()
+            )
+        else:
+            for values in new_formalities:
+                session.add(Formality(**values))
+        session.flush()
+
+    for position, item in enumerate(selected):
+        formality_id = uuid.UUID(item.id)
+        session.add(
+            CollectionBatchItem(
+                batch_id=batch.id,
+                position=position,
+                formality_id=formality_id,
+                formality_code=item.code,
+                formality_name=item.name,
+                state="skipped" if item.id in available_ids else "pending",
+            )
+        )
+    session.flush()
+    enqueue_next_batch_item(session, batch)
+    session.commit()
+    return batch
+
+
+@router.get(
+    "/formality-batches",
+    response_model=list[FormalityBatchResponse],
+    tags=["collection-batches"],
+)
+def list_formality_batches(
+    session: DbSession,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[CollectionBatch]:
+    return list(
+        session.scalars(
+            select(CollectionBatch)
+            .order_by(CollectionBatch.created_at.desc())
+            .limit(limit)
+        )
+    )
+
+
+@router.get(
+    "/formality-batches/{batch_id}",
+    response_model=FormalityBatchResponse,
+    tags=["collection-batches"],
+)
+def get_formality_batch(batch_id: uuid.UUID, session: DbSession) -> CollectionBatch:
+    batch = session.get(CollectionBatch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Collection batch not found")
+    return batch
+
+
+@router.post(
+    "/formality-batches/{batch_id}/resume",
+    response_model=FormalityBatchResponse,
+    tags=["collection-batches"],
+)
+def resume_formality_batch(batch_id: uuid.UUID, session: DbSession) -> CollectionBatch:
+    batch = session.get(CollectionBatch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Collection batch not found")
+    if batch.state not in {"failed", "halted"}:
+        raise HTTPException(status_code=409, detail="Collection batch is not resumable")
+    control = session.get(CollectionControl, "dvcqg")
+    if control is not None and control.circuit_state == "open":
+        raise HTTPException(status_code=409, detail="DVCQG circuit is open")
+    resume_batch(session, batch)
+    session.commit()
+    return batch
 
 
 @router.get(
@@ -249,6 +680,7 @@ def dashboard_selection(
 )
 def request_dashboard_collection(
     payload: DashboardCollectionRequest,
+    request: Request,
     session: DbSession,
 ) -> DashboardCollectionResponse:
     root_department_id = session.scalar(
@@ -260,7 +692,59 @@ def request_dashboard_collection(
     if root_department_id is None:
         raise HTTPException(status_code=409, detail="No root department is available")
     if payload.formality_id is not None and session.get(Formality, payload.formality_id) is None:
-        raise HTTPException(status_code=404, detail="Formality not found")
+        if payload.province_code is None or payload.formality_code is None:
+            raise HTTPException(status_code=404, detail="Formality not found")
+        cache_key = f"{payload.province_code}:internal=true"
+        try:
+            catalog, _ = request.app.state.province_catalog_cache.get_or_load(
+                cache_key,
+                lambda: request.app.state.province_catalog_client.load(
+                    payload.province_code, include_internal=True
+                ),
+            )
+        except ProvinceCatalogUnavailable as error:
+            raise HTTPException(
+                status_code=503, detail="Province catalog source unavailable"
+            ) from error
+        except ProvinceCatalogError as error:
+            raise HTTPException(
+                status_code=502, detail="Province catalog source is invalid"
+            ) from error
+        catalog_item = next(
+            (
+                item
+                for item in catalog.formalities
+                if item.id == str(payload.formality_id)
+                and item.code == payload.formality_code
+            ),
+            None,
+        )
+        if catalog_item is None:
+            raise HTTPException(status_code=404, detail="Formality not found in province catalog")
+        values = {
+            "id": payload.formality_id,
+            "code": catalog_item.code,
+            "name": catalog_item.name,
+            "state": catalog_item.state or None,
+            "attributes": {
+                "field": catalog_item.field,
+                "publishingAgency": catalog_item.publishing_agency,
+                "executionLevels": list(catalog_item.execution_levels),
+                "catalogProvinceCode": payload.province_code,
+            },
+        }
+        dialect_name = session.get_bind().dialect.name
+        if dialect_name == "postgresql":
+            session.execute(
+                postgresql_insert(Formality).values(values).on_conflict_do_nothing()
+            )
+        elif dialect_name == "sqlite":
+            session.execute(
+                sqlite_insert(Formality).values(values).on_conflict_do_nothing()
+            )
+        else:
+            session.add(Formality(**values))
+        session.flush()
     control = session.get(CollectionControl, "dvcqg")
     circuit_state = control.circuit_state if control else "closed"
 
@@ -307,7 +791,10 @@ def request_dashboard_collection(
     message = (
         "Yêu cầu đã được lưu; đang chờ quản trị mở lại kết nối DVCQG."
         if circuit_state == "open"
-        else "Yêu cầu đã được xếp hàng để cập nhật dữ liệu."
+        else (
+            "Yêu cầu của bạn đã được đưa vào hàng đợi. "
+            "Hệ thống sẽ thông báo khi dữ liệu được thống kê xong."
+        )
     )
     return DashboardCollectionResponse(
         job_id=job.id,

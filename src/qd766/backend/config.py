@@ -59,6 +59,17 @@ class Settings:
     cors_origins: tuple[str, ...] = ()
     sql_echo: bool = False
     dashboard_cache_ttl_seconds: float = 60.0
+    province_catalog_index_url: str = (
+        "https://raw.githubusercontent.com/ChippedTopaz/am-sieu-toc-data/data/index.json"
+    )
+    province_catalog_version_url: str = (
+        "https://raw.githubusercontent.com/ChippedTopaz/am-sieu-toc-data/data/version.json"
+    )
+    province_catalog_rules_url: str = (
+        "https://raw.githubusercontent.com/ChippedTopaz/am-sieu-toc-data/niemyet/isVertical.json"
+    )
+    province_catalog_cache_ttl_seconds: float = 3600.0
+    province_catalog_timeout_seconds: float = 30.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -74,5 +85,22 @@ class Settings:
             dashboard_cache_ttl_seconds=_positive_float(
                 os.getenv("QD766_DASHBOARD_CACHE_TTL_SECONDS"),
                 60.0,
+            ),
+            province_catalog_index_url=os.getenv(
+                "QD766_PROVINCE_CATALOG_INDEX_URL", cls.province_catalog_index_url
+            ),
+            province_catalog_version_url=os.getenv(
+                "QD766_PROVINCE_CATALOG_VERSION_URL", cls.province_catalog_version_url
+            ),
+            province_catalog_rules_url=os.getenv(
+                "QD766_PROVINCE_CATALOG_RULES_URL", cls.province_catalog_rules_url
+            ),
+            province_catalog_cache_ttl_seconds=_positive_float(
+                os.getenv("QD766_PROVINCE_CATALOG_CACHE_TTL_SECONDS"),
+                3600.0,
+            ),
+            province_catalog_timeout_seconds=_positive_float(
+                os.getenv("QD766_PROVINCE_CATALOG_TIMEOUT_SECONDS"),
+                30.0,
             ),
         )

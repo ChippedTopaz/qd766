@@ -62,6 +62,14 @@ if ($LASTEXITCODE -ne 0) {
 
 Push-Location $resolvedTarget
 try {
+    # Always capture a recoverable database image before applying a migration.
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+        (Join-Path $resolvedTarget "tools\backup_postgresql.ps1") `
+        -Destination $BackupDestination
+    if ($LASTEXITCODE -ne 0) {
+        throw "Pre-migration PostgreSQL backup failed"
+    }
+
     & $python -m alembic upgrade head
     if ($LASTEXITCODE -ne 0) {
         throw "Database migration failed"
@@ -70,13 +78,6 @@ try {
     & $python tests\test_backend.py
     if ($LASTEXITCODE -ne 0) {
         throw "Backend verification failed"
-    }
-
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
-        (Join-Path $resolvedTarget "tools\backup_postgresql.ps1") `
-        -Destination $BackupDestination
-    if ($LASTEXITCODE -ne 0) {
-        throw "Initial PostgreSQL backup failed"
     }
 
     if ($RegisterTasks) {

@@ -121,6 +121,8 @@ class DashboardCollectionRequest(ApiModel):
     period_value: int | None = None
     scope: Literal["all", "formality"] = "all"
     formality_id: uuid.UUID | None = None
+    province_code: str | None = Field(default=None, pattern=r"^\d{2}$")
+    formality_code: str | None = None
 
     @model_validator(mode="after")
     def validate_selection(self) -> "DashboardCollectionRequest":
@@ -138,3 +140,35 @@ class DashboardCollectionResponse(ApiModel):
     created: bool
     circuit_state: str
     message: str
+
+
+class FormalityBatchRequest(ApiModel):
+    province_code: str = Field(pattern=r"^\d{2}$")
+    period_type: Literal["month", "quarter", "year"]
+    year: int = Field(ge=2026, le=2200)
+    period_value: int | None = None
+    level: Literal["province", "ward"] | None = None
+    field: str | None = None
+    query: str | None = None
+    include_internal: bool = True
+
+    @model_validator(mode="after")
+    def validate_period(self) -> "FormalityBatchRequest":
+        PeriodSelection(self.period_type, self.year, self.period_value).validate_collectable()
+        return self
+
+
+class FormalityBatchResponse(ApiModel):
+    id: uuid.UUID
+    state: str
+    province_code: str
+    period_type: str
+    year: int
+    period_value: int | None
+    filters: dict[str, Any]
+    total_items: int
+    available_items: int
+    completed_items: int
+    failed_items: int
+    created_at: datetime
+    updated_at: datetime

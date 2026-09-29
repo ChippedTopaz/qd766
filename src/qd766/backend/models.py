@@ -242,6 +242,73 @@ class CollectionJob(Base):
     )
 
 
+class CollectionBatch(Base):
+    __tablename__ = "collection_batches"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('queued', 'running', 'succeeded', 'failed', 'halted')",
+            name="ck_collection_batch_state",
+        ),
+        Index("ix_collection_batch_state_created", "state", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    idempotency_key: Mapped[str] = mapped_column(String(240), unique=True)
+    state: Mapped[str] = mapped_column(String(16), default="queued")
+    province_code: Mapped[str] = mapped_column(String(2))
+    root_department_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("departments.id", ondelete="RESTRICT"), index=True
+    )
+    period_type: Mapped[str] = mapped_column(String(16))
+    year: Mapped[int] = mapped_column(Integer)
+    period_value: Mapped[int | None] = mapped_column(Integer)
+    filters: Mapped[dict[str, Any]] = mapped_column(JsonDocument, default=dict)
+    catalog_version: Mapped[str] = mapped_column(String(160))
+    total_items: Mapped[int] = mapped_column(Integer)
+    available_items: Mapped[int] = mapped_column(Integer, default=0)
+    completed_items: Mapped[int] = mapped_column(Integer, default=0)
+    failed_items: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[dict[str, Any] | None] = mapped_column(JsonDocument)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CollectionBatchItem(Base):
+    __tablename__ = "collection_batch_items"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('pending', 'queued', 'running', 'succeeded', 'failed', 'halted', 'skipped')",
+            name="ck_collection_batch_item_state",
+        ),
+        UniqueConstraint("batch_id", "formality_id", name="uq_batch_item_formality"),
+        Index("ix_batch_item_next", "batch_id", "state", "position"),
+    )
+
+    id: Mapped[int] = mapped_column(RecordId, primary_key=True, autoincrement=True)
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collection_batches.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    formality_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    formality_code: Mapped[str] = mapped_column(String(80))
+    formality_name: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("collection_jobs.id", ondelete="SET NULL"), index=True
+    )
+    error: Mapped[dict[str, Any] | None] = mapped_column(JsonDocument)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class CollectionControl(Base):
     __tablename__ = "collection_controls"
     __table_args__ = (
