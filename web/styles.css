@@ -43,3 +43,4 @@ select,input[type=search]{width:100%;min-width:0}
 .group-comparison{margin-top:16px;overflow:hidden}.summary-table{min-width:760px}.summary-table th:not(:first-child),.summary-table td:not(:first-child){text-align:right}.selectable-row{cursor:pointer}.selectable-row:hover td,.selectable-row.selected td{background:#eff6ff}.row-link,.text-button{padding:0;border:0;background:transparent;color:var(--blue);font:inherit;font-size:11px;font-weight:800;cursor:pointer}.row-link{text-align:left}.detail-summary .text-button{display:block;margin:0 0 6px auto}.metric-comparison>strong{display:block;margin:8px 0 4px;font-size:12px;line-height:1.4}
 @media(max-width:900px){.progress-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.field.province,.field.unit{grid-column:1/-1;min-width:0}}
+.operation-scope{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

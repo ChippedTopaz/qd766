@@ -100,6 +100,9 @@ class CollectionJobResponse(ApiModel):
     locked_at: datetime | None
     locked_by: str | None
     error: dict[str, Any] | None
+    province_name: str | None = None
+    formality_code: str | None = None
+    formality_name: str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -57,6 +57,68 @@ router = APIRouter(prefix="/api/v1")
 DbSession = Annotated[Session, Depends(get_session)]
 
 
+def _collection_job_responses(
+    session: Session, jobs: list[CollectionJob]
+) -> list[CollectionJobResponse]:
+    department_ids = {
+        uuid.UUID(str(value))
+        for job in jobs
+        if (value := job.request.get("rootDepartmentId")) is not None
+    }
+    formality_ids = {
+        uuid.UUID(str(value))
+        for job in jobs
+        if (value := job.request.get("formalityId")) is not None
+    }
+    departments = (
+        {
+            item.id: item
+            for item in session.scalars(
+                select(Department).where(Department.id.in_(department_ids))
+            )
+        }
+        if department_ids
+        else {}
+    )
+    formalities = (
+        {
+            item.id: item
+            for item in session.scalars(
+                select(Formality).where(Formality.id.in_(formality_ids))
+            )
+        }
+        if formality_ids
+        else {}
+    )
+    responses: list[CollectionJobResponse] = []
+    for job in jobs:
+        department_value = job.request.get("rootDepartmentId")
+        formality_value = job.request.get("formalityId")
+        department = (
+            departments.get(uuid.UUID(str(department_value)))
+            if department_value is not None
+            else None
+        )
+        formality = (
+            formalities.get(uuid.UUID(str(formality_value)))
+            if formality_value is not None
+            else None
+        )
+        province_name = None
+        if department is not None:
+            province_name = department.attributes.get("provinceName") or department.name
+        responses.append(
+            CollectionJobResponse.model_validate(job).model_copy(
+                update={
+                    "province_name": province_name,
+                    "formality_code": formality.code if formality else None,
+                    "formality_name": formality.name if formality else None,
+                }
+            )
+        )
+    return responses
+
+
 def _province_code_for_name(department_name: str | None) -> str | None:
     normalized = (department_name or "").casefold()
     return next(
@@ -578,11 +640,11 @@ def list_collection_jobs(
         pattern="^(queued|running|succeeded|failed|halted)$",
     ),
     limit: int = Query(default=50, ge=1, le=200),
-) -> list[CollectionJob]:
+) -> list[CollectionJobResponse]:
     statement = select(CollectionJob).order_by(CollectionJob.created_at.desc()).limit(limit)
     if state is not None:
         statement = statement.where(CollectionJob.state == state)
-    return list(session.scalars(statement))
+    return _collection_job_responses(session, list(session.scalars(statement)))
 
 
 @router.get(
@@ -590,11 +652,11 @@ def list_collection_jobs(
     response_model=CollectionJobResponse,
     tags=["collection-jobs"],
 )
-def get_collection_job(job_id: uuid.UUID, session: DbSession) -> CollectionJob:
+def get_collection_job(job_id: uuid.UUID, session: DbSession) -> CollectionJobResponse:
     job = session.get(CollectionJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Collection job not found")
-    return job
+    return _collection_job_responses(session, [job])[0]
 
 
 @router.get(

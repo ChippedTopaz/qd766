@@ -34,7 +34,9 @@ from qd766.backend.models import (
     CollectionControl,
     CollectionJob,
     Dataset,
+    Department,
     Entity,
+    Formality,
     Metric,
     ProvinceCollectionBatch,
     ProvinceCollectionBatchItem,
@@ -360,13 +362,41 @@ class BackendTest(unittest.TestCase):
     def test_collection_jobs_are_idempotent_and_claimed_by_priority(self):
         first_request = {"period": {"type": "year", "year": 2026}, "scope": "all"}
         urgent_request = {"period": {"type": "quarter", "year": 2026, "quarter": 3}, "scope": "all"}
+        department_id = uuid.uuid4()
+        formality_id = uuid.uuid4()
         with self.app.state.session_factory.begin() as session:
+            session.add(
+                Department(
+                    id=department_id,
+                    name="UBND tỉnh Kiểm thử",
+                    attributes={"provinceName": "Tỉnh Kiểm thử"},
+                )
+            )
+            session.add(
+                Formality(
+                    id=formality_id,
+                    code="2.000815",
+                    name="Thủ tục kiểm thử hàng đợi",
+                    attributes={},
+                )
+            )
             first, created = enqueue_job(session, first_request, priority=100)
             self.assertTrue(created)
             duplicate, created = enqueue_job(session, first_request, priority=1)
             self.assertFalse(created)
             self.assertEqual(duplicate.id, first.id)
             urgent, created = enqueue_job(session, urgent_request, priority=10)
+            self.assertTrue(created)
+            detailed, created = enqueue_job(
+                session,
+                {
+                    "period": {"type": "month", "year": 2026, "month": 9},
+                    "scope": "formality",
+                    "rootDepartmentId": str(department_id),
+                    "formalityId": str(formality_id),
+                },
+                priority=20,
+            )
             self.assertTrue(created)
 
         with self.app.state.session_factory.begin() as session:
@@ -377,9 +407,13 @@ class BackendTest(unittest.TestCase):
 
         response = self.client.get("/api/v1/collection-jobs")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 2)
+        self.assertEqual(len(response.json()), 3)
         succeeded = self.client.get(f"/api/v1/collection-jobs/{urgent.id}")
         self.assertEqual(succeeded.json()["state"], "succeeded")
+        enriched = self.client.get(f"/api/v1/collection-jobs/{detailed.id}").json()
+        self.assertEqual(enriched["provinceName"], "Tỉnh Kiểm thử")
+        self.assertEqual(enriched["formalityCode"], "2.000815")
+        self.assertEqual(enriched["formalityName"], "Thủ tục kiểm thử hàng đợi")
 
     def test_missing_dashboard_selection_enqueues_once_and_honors_open_circuit(self):
         with self.app.state.session_factory.begin() as session:
