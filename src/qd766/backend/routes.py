@@ -635,6 +635,86 @@ def dashboard_provinces(session: DbSession) -> list[dict]:
     ]
 
 
+@router.get("/dashboard/province-rankings", tags=["dashboard"])
+def dashboard_province_rankings(
+    session: DbSession,
+    period_type: str = Query(pattern="^(month|quarter|year)$"),
+    year: int = Query(ge=2000, le=2200),
+    scope: str = Query(default="all", pattern="^(all|formality)$"),
+    period_value: int | None = None,
+    formality_id: uuid.UUID | None = None,
+) -> list[dict]:
+    """Return only provincial root scores needed for cross-province ranking."""
+    statement = (
+        select(
+            Snapshot.id,
+            Snapshot.root_department_id,
+            Department.name,
+            Snapshot.created_at,
+            Dataset.group_name,
+            Entity.api_score,
+            Entity.api_max_score,
+        )
+        .join(Department, Department.id == Snapshot.root_department_id)
+        .join(Dataset, Dataset.snapshot_id == Snapshot.id)
+        .join(Entity, Entity.dataset_id == Dataset.id)
+        .where(
+            Snapshot.state == "complete",
+            Snapshot.period_type == period_type,
+            Snapshot.year == year,
+            Snapshot.scope == scope,
+            Entity.entity_kind == "root",
+        )
+        .order_by(Snapshot.created_at.desc())
+    )
+    statement = (
+        statement.where(Snapshot.period_value.is_(None))
+        if period_value is None
+        else statement.where(Snapshot.period_value == period_value)
+    )
+    statement = (
+        statement.where(Snapshot.formality_id.is_(None))
+        if formality_id is None
+        else statement.where(Snapshot.formality_id == formality_id)
+    )
+    latest_by_root: dict[uuid.UUID, dict] = {}
+    rows = session.execute(statement)
+    for snapshot_id, root_id, name, created_at, group_name, score, maximum in rows:
+        item = latest_by_root.setdefault(
+            root_id,
+            {
+                "snapshotId": snapshot_id,
+                "rootDepartmentId": str(root_id),
+                "provinceName": name,
+                "groups": {},
+                "capturedAt": created_at.isoformat(),
+            },
+        )
+        if item["snapshotId"] != snapshot_id:
+            continue
+        item["groups"][group_name] = {
+            "score": float(score) if score is not None else None,
+            "maximum": float(maximum) if maximum is not None else None,
+        }
+    result: list[dict] = []
+    for item in latest_by_root.values():
+        groups = item["groups"]
+        scores = [item["score"] for item in groups.values()]
+        maximums = [item["maximum"] for item in groups.values()]
+        complete = groups and all(value is not None for value in scores + maximums)
+        result.append(
+            {
+                "rootDepartmentId": item["rootDepartmentId"],
+                "provinceName": item["provinceName"],
+                "totalScore": round(sum(scores), 2) if complete else None,
+                "totalMaximum": round(sum(maximums), 2) if complete else None,
+                "groups": groups,
+                "capturedAt": item["capturedAt"],
+            }
+        )
+    return sorted(result, key=lambda item: item["provinceName"])
+
+
 @router.get("/dashboard", tags=["dashboard"])
 def dashboard(
     request: Request,

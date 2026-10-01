@@ -248,6 +248,26 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(tay_ninh.json()["province"]["code"], "80")
         self.assertEqual(tay_ninh.json()["defaultUnitId"], TAY_NINH_ROOT_ID)
 
+        rankings = self.client.get(
+            "/api/v1/dashboard/province-rankings",
+            params={
+                "period_type": "month",
+                "year": 2026,
+                "period_value": 8,
+                "scope": "all",
+            },
+        )
+        self.assertEqual(rankings.status_code, 200)
+        ranking_by_id = {item["rootDepartmentId"]: item for item in rankings.json()}
+        self.assertEqual(set(ranking_by_id), {ROOT_ID, TAY_NINH_ROOT_ID})
+        self.assertEqual(ranking_by_id[ROOT_ID]["provinceName"], "UBND tỉnh Phú Thọ")
+        self.assertEqual(ranking_by_id[ROOT_ID]["totalScore"], 5.0)
+        self.assertEqual(ranking_by_id[ROOT_ID]["totalMaximum"], 10.0)
+        self.assertEqual(
+            ranking_by_id[ROOT_ID]["groups"]["transparency"]["score"],
+            5.0,
+        )
+
         queued = self.client.post(
             "/api/v1/dashboard/requests",
             json={

@@ -19,6 +19,8 @@ let pendingProvinceId = "";
 let searchableSelects = [];
 let operationData = { loading: false, error: null, circuitState: "unknown", circuitReason: null, snapshotCount: 0, latestSnapshotAt: null, jobs: [], batches: [] };
 let provinceOptions = [];
+let provinceBenchmarks = {};
+const benchmarkLoading = new Set();
 let catalogPreview = { loading: false, error: null, level: "", field: "", query: "", fields: [], selected: 0, available: 0, missing: 0, items: [], selectedId: null, offset: 0, mode: "single" };
 let catalogPreviewRequest = 0;
 let catalogSearchTimer = 0;
@@ -76,6 +78,31 @@ const scoreValue = (group) => group.score.kind === "VALID_NUMBER" || group.score
 const level = (ratio) => ratio === null ? ["Không có dữ liệu", "neutral"] : ratio >= 90 ? ["Tốt", "good"] : ratio >= 70 ? ["Cần theo dõi", "warn"] : ["Cần cải thiện", "bad"];
 const title = (name, description, note = "") => `<header class="page-head"><div><p class="eyebrow">${esc(data.province.name)} · ${esc(period().label)}</p><h1>${esc(name)}</h1><p>${esc(description)}</p></div>${note ? `<div class="head-note muted">${note}</div>` : ""}</header>`;
 const rankText = (view) => view.peer ? `Hạng ${view.peer.rank}/${view.peer.total}${view.peer.tiedCount > 1 ? ` · đồng hạng ${view.peer.tiedCount}` : ""}` : "Chưa xếp hạng";
+const periodOrder = (item) => item.type === "month" ? item.year * 12 + (item.value ?? 0) : item.type === "quarter" ? item.year * 4 + (item.value ?? 0) : item.year;
+function previousPeriodFor(periodId = state.periodId) {
+    const current = data.periods.find(item => item.id === periodId);
+    if (!current)
+        return null;
+    return data.periods
+        .filter(item => item.type === current.type && periodOrder(item) < periodOrder(current) && Boolean(data.snapshots[snapshotKey(item.id, state.scope, data.formality.id)]))
+        .sort((left, right) => periodOrder(right) - periodOrder(left))[0] ?? null;
+}
+const benchmarkCacheKey = (periodId) => `${periodId}:${state.scope}:${state.scope === "formality" ? data.formality.id : "all"}`;
+function benchmarkRank(periodId, groupId, rootId = state.unitId) {
+    const rows = provinceBenchmarks[benchmarkCacheKey(periodId)] ?? [];
+    const current = rows.find(item => item.rootDepartmentId === rootId);
+    const value = groupId ? current?.groups[groupId]?.score : current?.totalScore;
+    if (value === null || value === undefined)
+        return null;
+    const values = rows.flatMap(item => { const candidate = groupId ? item.groups[groupId]?.score : item.totalScore; return candidate === null || candidate === undefined ? [] : [candidate]; });
+    if (values.length < 2)
+        return null;
+    return peerStats(values, value);
+}
+function rankFor(view, periodId, groupId) {
+    const selected = data.units.find(item => item.departmentId === state.unitId);
+    return selected?.departmentLevel === "PROVINCE_TOTAL" ? benchmarkRank(periodId, groupId) : view.peer;
+}
 const alphabet = new Intl.Collator("vi", { sensitivity: "base", numeric: true });
 const displayProvinceName = (value) => value.replace(/^UBND\s+(tỉnh|thành phố)\s+/i, "");
 const byName = (left, right) => alphabet.compare(left.departmentName, right.departmentName);
@@ -177,22 +204,45 @@ function render() {
 }
 function overview() {
     const view = unit();
+    const previousPeriod = previousPeriodFor();
+    const previousView = previousPeriod ? buildUnitView(data, previousPeriod.id, state.scope, state.unitId) : null;
+    const currentRank = rankFor(view, state.periodId, null);
+    const previousRank = previousView && previousPeriod ? rankFor(previousView, previousPeriod.id, null) : null;
+    const scoreChange = previousView?.totalScore !== null && previousView?.totalScore !== undefined && view.totalScore !== null ? view.totalScore - previousView.totalScore : null;
+    const rankChange = currentRank && previousRank ? previousRank.rank - currentRank.rank : null;
     const suggestions = buildSuggestions(view);
     const priority = suggestions.filter((item) => item.severity === "critical" || item.severity === "warning").slice(0, 3);
     const strengths = suggestions.filter((item) => item.severity === "positive").slice(0, 3);
     const captures = snapshot().datasets.map((item) => item.capture.capturedAt).filter(Boolean).sort();
     return `${title("Tổng quan cơ quan, đơn vị", `Toàn cảnh điểm số, vị thế và việc cần ưu tiên của ${view.name}.`, "Mặc định hiển thị năm hiện tại và tất cả thủ tục hành chính.")}
-  <section class="kpi-strip" aria-label="Tóm tắt điều hành"><article class="kpi"><div class="kpi-label">Tổng điểm <span class="badge ${level(view.ratio)[1]}">${level(view.ratio)[0]}</span></div><div class="kpi-value large num">${n(view.totalScore)} <small>/ ${n(view.totalMaximum)}</small></div><div class="progress"><i style="width:${Math.min(view.ratio ?? 0, 100)}%"></i></div></article><article class="kpi"><div class="kpi-label">Vị thế trong nhóm cùng cấp</div><div class="kpi-value num">${view.peer ? `${view.peer.rank}/${view.peer.total}` : "Không áp dụng"}</div><div class="kpi-sub">${view.peer ? `Phân vị P${Math.round(view.peer.percentile)}${view.peer.tiedCount > 1 ? ` · ${view.peer.tiedCount} đơn vị đồng hạng` : ""}` : "Kết quả chung toàn tỉnh không xếp hạng"}</div></article><article class="kpi"><div class="kpi-label">So với kỳ trước</div><div class="kpi-value">Chưa đủ kỳ</div><div class="kpi-sub">Cần có hai kỳ cùng loại để tính thay đổi điểm và thứ hạng</div></article><article class="kpi"><div class="kpi-label">Trạng thái dữ liệu <span class="badge good">Đầy đủ</span></div><div class="kpi-value">6/6 nhóm</div><div class="kpi-sub">Cập nhật lúc ${esc(dateTime(captures.at(-1)))}</div></article></section>
+  <section class="kpi-strip" aria-label="Tóm tắt điều hành"><article class="kpi"><div class="kpi-label">Tổng điểm <span class="badge ${level(view.ratio)[1]}">${level(view.ratio)[0]}</span></div><div class="kpi-value large num">${n(view.totalScore)} <small>/ ${n(view.totalMaximum)}</small></div><div class="progress"><i style="width:${Math.min(view.ratio ?? 0, 100)}%"></i></div></article><article class="kpi"><div class="kpi-label">Vị thế trong nhóm cùng cấp</div><div class="kpi-value num">${currentRank ? `${currentRank.rank}/${currentRank.total}` : "Chưa xếp hạng"}</div><div class="kpi-sub">${currentRank ? `Phân vị P${Math.round(currentRank.percentile)}${currentRank.tiedCount > 1 ? ` · ${currentRank.tiedCount} đơn vị đồng hạng` : ""}` : "Chưa có đủ đơn vị cùng cấp trong kỳ"}</div></article><article class="kpi"><div class="kpi-label">So với kỳ trước</div><div class="kpi-value num ${scoreChange === null ? "" : scoreChange >= 0 ? "positive" : "negative"}">${scoreChange === null ? "Chưa đủ kỳ" : `${scoreChange >= 0 ? "+" : ""}${n(scoreChange)} điểm`}</div><div class="kpi-sub">${previousPeriod ? `${esc(previousPeriod.label)}${rankChange === null ? "" : ` · thứ hạng ${rankChange > 0 ? "tăng" : rankChange < 0 ? "giảm" : "không đổi"} ${Math.abs(rankChange)}`}` : "Cần thêm kỳ cùng loại để tính biến động"}</div></article><article class="kpi"><div class="kpi-label">Trạng thái dữ liệu <span class="badge good">Đầy đủ</span></div><div class="kpi-value">6/6 nhóm</div><div class="kpi-sub">Cập nhật lúc ${esc(dateTime(captures.at(-1)))}</div></article></section>
   <section class="group-grid">${view.groups.map(groupPanel).join("")}</section>
   ${overviewGroupDetail(view)}
   <section class="split"><article class="panel"><div class="panel-head"><div><h2>Vấn đề cần ưu tiên</h2><p>Dựa trên khoảng cách với trung vị và cảnh báo dữ liệu</p></div><span class="badge warn">${priority.length} phát hiện</span></div><div class="panel-body ticket-list">${priority.length ? priority.map((item) => miniTicket(item, false)).join("") : `<div class="empty-state"><h2>Chưa có cảnh báo ưu tiên</h2></div>`}</div></article><article class="panel"><div class="panel-head"><div><h2>Kết quả tốt cần duy trì</h2><p>Nhóm thuộc phân vị cao hoặc gần bão hòa điểm</p></div><span class="badge good">Điểm mạnh</span></div><div class="panel-body ticket-list">${strengths.length ? strengths.map((item) => miniTicket(item, true)).join("") : `<div class="empty-state"><h2>Chưa xác định điểm mạnh nổi bật</h2><p>Kết quả hiện tại chưa nằm trong nhóm dẫn đầu.</p></div>`}</div></article></section>`;
 }
 function groupPanel(group) {
     const score = scoreValue(group), maximum = group.maximum, ratio = score !== null && maximum ? score / maximum * 100 : null;
-    const marker = group.peer && maximum ? Math.max(0, Math.min(100, group.peer.median / maximum * 100)) : 0;
+    const peer = rankFor(group, state.periodId, group.id);
+    const marker = peer && maximum ? Math.max(0, Math.min(100, peer.median / maximum * 100)) : 0;
     const stateLabel = level(ratio);
-    const gap = group.peer?.gapToMedian ?? null;
-    return `<button class="group-panel ${state.selectedGroup === group.id ? "selected" : ""}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup === group.id}"><div class="group-top"><h3>${esc(group.label)}</h3><span class="badge ${stateLabel[1]}">${stateLabel[0]}</span></div><div class="score-row"><div><span class="score-main num">${n(score)}</span> <span class="score-max">/ ${n(maximum)}</span></div><span class="rank">${rankText(group)}</span></div><div class="bullet" title="Thanh xanh: điểm đơn vị; vạch đen: trung vị nhóm cùng cấp"><i class="bullet-fill" style="width:${Math.min(ratio ?? 0, 100)}%"></i><b class="bullet-marker" style="left:${marker}%"></b></div><div class="bullet-labels"><span>0</span><span>Trung vị ${n(group.peer?.median)}</span><span>${n(maximum)}</span></div><div class="gap-note ${(gap ?? 0) >= 0 ? "positive" : "negative"}">${gap === null ? "Chưa có chuẩn so sánh" : `${gap >= 0 ? "+" : ""}${n(gap)}đ ${gap >= 0 ? "trên" : "dưới"} trung vị`}</div><div class="mini-meta"><span class="badge neutral">Kỳ trước: chưa đủ dữ liệu</span>${group.id === "provide-online-tree" || group.id === "dvc-progress-tree" ? `<span class="badge good">Đã đối chiếu công thức</span>` : ""}${group.score.kind === "UNSUPPORTED_SOURCE" ? `<span class="badge info">Chưa có số liệu chi tiết</span>` : ""}</div><div class="group-link">Xem chi tiết nhóm chỉ tiêu →</div></button>`;
+    const gap = peer?.gapToMedian ?? null;
+    return `<button class="group-panel ${state.selectedGroup === group.id ? "selected" : ""}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup === group.id}"><div class="group-top"><h3>${esc(group.label)}</h3><span class="badge ${stateLabel[1]}">${stateLabel[0]}</span></div><div class="score-row"><div><span class="score-main num">${n(score)}</span> <span class="score-max">/ ${n(maximum)}</span></div><span class="rank">${peer ? `Hạng ${peer.rank}/${peer.total}` : "Chưa xếp hạng"}</span></div><div class="bullet" title="Thanh xanh: điểm đơn vị; vạch đen: trung vị nhóm cùng cấp"><i class="bullet-fill" style="width:${Math.min(ratio ?? 0, 100)}%"></i><b class="bullet-marker" style="left:${marker}%"></b></div><div class="bullet-labels"><span>0</span><span>Trung vị ${n(peer?.median)}</span><span>${n(maximum)}</span></div><div class="gap-note ${(gap ?? 0) >= 0 ? "positive" : "negative"}">${gap === null ? "Chưa có chuẩn so sánh" : `${gap >= 0 ? "+" : ""}${n(gap)}đ ${gap >= 0 ? "trên" : "dưới"} trung vị`}</div><div class="mini-meta"><span class="badge neutral">${previousPeriodFor() ? "Có dữ liệu kỳ trước" : "Kỳ trước: chưa đủ dữ liệu"}</span>${group.id === "provide-online-tree" || group.id === "dvc-progress-tree" ? `<span class="badge good">Đã đối chiếu công thức</span>` : ""}${group.score.kind === "UNSUPPORTED_SOURCE" ? `<span class="badge info">Chưa có số liệu chi tiết</span>` : ""}</div><div class="group-link">Xem chi tiết nhóm chỉ tiêu →</div></button>`;
+}
+function groupComparisonSummary(view) {
+    const previousPeriod = previousPeriodFor();
+    const previousView = previousPeriod ? buildUnitView(data, previousPeriod.id, state.scope, state.unitId) : null;
+    const cards = view.groups.map(group => {
+        const previousGroup = previousView?.groups.find(item => item.id === group.id) ?? null;
+        const currentScore = scoreValue(group);
+        const previousScore = previousGroup ? scoreValue(previousGroup) : null;
+        const scoreChange = currentScore !== null && previousScore !== null ? currentScore - previousScore : null;
+        const currentRank = rankFor(group, state.periodId, group.id);
+        const previousRank = previousGroup && previousPeriod ? rankFor(previousGroup, previousPeriod.id, group.id) : null;
+        const rankChange = currentRank && previousRank ? previousRank.rank - currentRank.rank : null;
+        const rankChangeText = rankChange === null ? "Chưa đủ dữ liệu" : rankChange > 0 ? `Tăng ${rankChange} bậc` : rankChange < 0 ? `Giảm ${Math.abs(rankChange)} bậc` : "Không đổi";
+        return `<article class="group-compare-card"><div><h3>${esc(group.label)}</h3><span class="badge ${level(group.ratio)[1]}">${level(group.ratio)[0]}</span></div><dl><dt>Điểm kỳ này</dt><dd class="num">${n(currentScore)} / ${n(group.maximum)}</dd><dt>Điểm kỳ trước</dt><dd class="num">${previousPeriod ? n(previousScore) : "—"}</dd><dt>Tăng/giảm điểm</dt><dd class="num ${scoreChange === null ? "" : scoreChange >= 0 ? "positive" : "negative"}">${scoreChange === null ? "—" : `${scoreChange >= 0 ? "+" : ""}${n(scoreChange)}`}</dd><dt>Thứ hạng hiện tại</dt><dd class="num">${currentRank ? `${currentRank.rank}/${currentRank.total}` : "—"}</dd><dt>Biến động thứ hạng</dt><dd class="${rankChange === null ? "" : rankChange >= 0 ? "positive" : "negative"}">${rankChangeText}</dd></dl><button class="text-button" data-group-detail="${group.id}">Xem chỉ tiêu thành phần →</button></article>`;
+    }).join("");
+    return `<section class="panel group-comparison" id="group-detail"><div class="panel-head"><div><p class="eyebrow">So sánh 6 nhóm chỉ tiêu</p><h2>Điểm số và biến động theo kỳ</h2><p>${esc(view.name)} · ${esc(period().label)}${previousPeriod ? ` so với ${esc(previousPeriod.label)}` : " · chưa có kỳ trước cùng loại"}</p></div><span class="badge info">6 nhóm theo hàng ngang</span></div><div class="group-comparison-scroll">${cards}</div></section>`;
 }
 function onlineAnalysis(entity) {
     const analysis = analyzeOnlineScore(entity);
@@ -220,10 +270,31 @@ function progressDetail(entity) {
     const averageDays = analysis.averageProcessingDays === null ? "N/A" : `${n(analysis.averageProcessingDays)} ngày`;
     return `<h3>Kết quả và công thức tính điểm</h3><div class="progress-kpis"><article><span>Tổng hồ sơ tiếp nhận</span><strong class="num">${int(analysis.totalReceived)}</strong><small>hồ sơ</small></article><article><span>Giải quyết đúng hạn</span><strong class="num positive">${int(analysis.totalOnTime)}</strong><small>${progressPercent(analysis.onTimeRatio)}</small></article><article><span>Hồ sơ quá hạn</span><strong class="num negative">${int(analysis.totalOverdue)}</strong><small>${progressPercent(analysis.overdueRatio)}${analysis.overdueDerived ? " · suy ra từ tổng và đúng hạn" : ""}</small></article><article><span>Giải quyết trung bình</span><strong class="num">${averageDays}</strong><small>hai chữ số thập phân</small></article></div><div class="banner ${tone} formula-banner progress-formula"><span>∑</span><div><strong>${esc(analysis.profileLabel)} · ${esc(status)}</strong><p>${esc(formula)}${difference} Điểm ghi nhận được tính bằng tỷ lệ đúng hạn nhân điểm tối đa.</p></div></div><div class="table-wrap"><table class="metric-table progress-table"><thead><tr><th>Nội dung</th><th>Số lượng</th><th>Tỷ lệ</th><th>Vai trò</th></tr></thead><tbody><tr><td>Tổng hồ sơ tiếp nhận</td><td class="num">${int(analysis.totalReceived)} hồ sơ</td><td class="num">—</td><td>Mẫu số tính tỷ lệ đúng hạn</td></tr><tr><td>Hồ sơ giải quyết đúng hạn</td><td class="num">${int(analysis.totalOnTime)} hồ sơ</td><td class="num positive">${progressPercent(analysis.onTimeRatio)}</td><td>Tử số tính tỷ lệ và điểm</td></tr><tr><td>Hồ sơ quá hạn</td><td class="num">${int(analysis.totalOverdue)} hồ sơ</td><td class="num negative">${progressPercent(analysis.overdueRatio)}</td><td>Chỉ số theo dõi bổ sung</td></tr><tr><td>Số ngày giải quyết trung bình</td><td class="num">${averageDays}</td><td class="num">—</td><td>Chỉ số thời gian tham khảo</td></tr></tbody><tfoot><tr><td>Điểm ghi nhận</td><td colspan="2" class="num">${n(analysis.calculatedScore)} / ${n(analysis.maxScore)} điểm</td><td class="lost">Còn ${n(analysis.missingScore)} điểm chưa đạt</td></tr></tfoot></table></div>`;
 }
+function groupPeerComparison(group) {
+    const selected = data.units.find(item => item.departmentId === state.unitId);
+    if (selected?.departmentLevel === "PROVINCE_TOTAL") {
+        const rows = (provinceBenchmarks[benchmarkCacheKey(state.periodId)] ?? []).flatMap(item => {
+            const score = item.groups[group.id]?.score;
+            return score === null || score === undefined ? [] : [{ id: item.rootDepartmentId, name: item.provinceName, score }];
+        }).sort((left, right) => right.score - left.score || alphabet.compare(left.name, right.name));
+        const currentIndex = rows.findIndex(item => item.id === state.unitId);
+        const nearby = currentIndex < 0 ? [] : rows.slice(Math.max(0, currentIndex - 2), Math.min(rows.length, currentIndex + 3));
+        const stats = benchmarkRank(state.periodId, group.id);
+        if (!stats)
+            return `<aside class="comparison-card"><h3>So với tỉnh/thành phố khác</h3><div class="empty-state"><h2>Chưa đủ dữ liệu liên tỉnh</h2><p>Cần có ít nhất hai tỉnh/thành phố cùng kỳ và cùng phạm vi để so sánh.</p></div></aside>`;
+        return `<aside class="comparison-card"><h3>So với tỉnh/thành phố khác</h3><div class="comparison-kpi"><span>Thứ hạng</span><strong class="num">${stats.rank}/${stats.total}</strong></div><div class="comparison-kpi"><span>Trung vị các tỉnh</span><strong class="num">${n(stats.median)}</strong></div><div class="nearby-list">${nearby.map(item => `<div class="peer-row ${item.id === state.unitId ? "mine" : ""}"><span>${esc(item.name)}</span><b class="num">${n(item.score)}</b><small>Hạng ${1 + rows.filter(other => other.score > item.score + .005).length}</small></div>`).join("")}</div></aside>`;
+    }
+    const comparable = (group.dataset?.children ?? []).filter(item => item.departmentLevel === selected?.departmentLevel && item.apiScore !== null).sort((a, b) => (b.apiScore ?? 0) - (a.apiScore ?? 0));
+    const position = comparable.findIndex(item => item.departmentId === state.unitId);
+    const nearby = position < 0 ? [] : comparable.slice(Math.max(0, position - 2), Math.min(comparable.length, position + 3));
+    return `<aside class="comparison-card"><h3>So với đơn vị cùng cấp</h3>${group.peer ? `<div class="comparison-kpi"><span>Trung vị</span><strong class="num">${n(group.peer.median)}</strong></div><div class="comparison-kpi"><span>Chênh lệch</span><strong class="num ${(group.peer.gapToMedian) >= 0 ? "positive" : "negative"}">${group.peer.gapToMedian >= 0 ? "+" : ""}${n(group.peer.gapToMedian)}</strong></div><div class="nearby-list">${nearby.map(item => `<div class="peer-row ${item.departmentId === state.unitId ? "mine" : ""}"><span>${esc(item.departmentName)}</span><b class="num">${n(item.apiScore)}</b><small>Hạng ${1 + comparable.filter(other => (other.apiScore ?? 0) > (item.apiScore ?? 0) + .005).length}</small></div>`).join("")}</div>` : `<div class="empty-state"><h2>Chưa đủ đơn vị cùng cấp</h2></div>`}</aside>`;
+}
 function overviewGroupDetail(view) {
-    const group = view.groups.find(item => item.id === state.selectedGroup) ?? view.groups[0];
+    if (state.selectedGroup === null)
+        return groupComparisonSummary(view);
+    const group = view.groups.find(item => item.id === state.selectedGroup);
     if (!group)
-        return "";
+        return groupComparisonSummary(view);
     const entity = group.entity;
     if (!entity)
         return `<section class="panel group-detail"><div class="panel-head"><div><h2>Chi tiết ${esc(group.label)}</h2><p>Chưa có số liệu chi tiết cho lựa chọn hiện tại.</p></div></div></section>`;
@@ -232,14 +303,13 @@ function overviewGroupDetail(view) {
     const metricRows = entity.metrics.map(m => `<tr><td>${esc(m.name)}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiScore !== null && m.apiMaxScore !== null ? n(Math.max(0, m.apiMaxScore - m.apiScore)) : "N/A"}</td></tr>`);
     const valueRows = calculated ? calculated.rows : Object.entries(entity.parameters).filter(([, value]) => value !== null).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Số liệu nghiệp vụ thành phần")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td colspan="3">Được sử dụng để theo dõi và phân tích kết quả</td></tr>`);
     const rows = [...metricRows, ...valueRows];
-    const selected = data.units.find(item => item.departmentId === state.unitId);
-    const comparable = (group.dataset?.children ?? []).filter(item => item.departmentLevel === selected?.departmentLevel && item.apiScore !== null).sort((a, b) => (b.apiScore ?? 0) - (a.apiScore ?? 0));
-    const position = comparable.findIndex(item => item.departmentId === state.unitId);
-    const nearby = position < 0 ? [] : comparable.slice(Math.max(0, position - 2), Math.min(comparable.length, position + 3));
     const lost = entity.apiScore !== null && entity.apiMaxScore !== null ? Math.max(0, entity.apiMaxScore - entity.apiScore) : null;
+    const comparison = groupPeerComparison(group);
+    const detailRank = rankFor(group, state.periodId, group.id);
+    const heading = `<div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary"><button class="text-button" data-action="close-group-detail">← Xem lại 6 nhóm</button><strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${detailRank ? `Hạng ${detailRank.rank}/${detailRank.total}` : "Chưa xếp hạng"}</span></div></div>`;
     if (progress)
-        return `<section class="panel group-detail" id="group-detail"><div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary"><strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${rankText(group)}</span></div></div><div class="panel-body progress-detail">${progress}</div></section>`;
-    return `<section class="panel group-detail" id="group-detail"><div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary"><strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${rankText(group)}</span></div></div><div class="detail-columns"><div><h3>Kết quả các chỉ tiêu thành phần</h3>${calculated?.notice ?? ""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="7">Nhóm này chưa có số liệu thành phần để hiển thị.</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div><aside class="comparison-card"><h3>So với đơn vị cùng cấp</h3>${group.peer ? `<div class="comparison-kpi"><span>Trung vị</span><strong class="num">${n(group.peer.median)}</strong></div><div class="comparison-kpi"><span>Chênh lệch</span><strong class="num ${(group.peer.gapToMedian) >= 0 ? "positive" : "negative"}">${group.peer.gapToMedian >= 0 ? "+" : ""}${n(group.peer.gapToMedian)}</strong></div><div class="nearby-list">${nearby.map((item, index) => `<div class="peer-row ${item.departmentId === state.unitId ? "mine" : ""}"><span>${esc(item.departmentName)}</span><b class="num">${n(item.apiScore)}</b><small>Hạng ${1 + comparable.filter(other => (other.apiScore ?? 0) > (item.apiScore ?? 0) + .005).length}</small></div>`).join("")}</div>` : `<div class="empty-state"><h2>Không áp dụng xếp hạng</h2><p>Kết quả chung toàn tỉnh không so hạng với cơ quan trực thuộc.</p></div>`}</aside></div></section>`;
+        return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="panel-body progress-detail">${progress}</div>${comparison}</div></section>`;
+    return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div><h3>Kết quả các chỉ tiêu thành phần</h3>${calculated?.notice ?? ""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="7">Nhóm này chưa có số liệu thành phần để hiển thị.</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div>${comparison}</div></section>`;
 }
 function miniTicket(item, good) { return `<div class="mini-ticket"><i class="ticket-dot ${good ? "good" : ""}"></i><div><strong>${esc(item.finding)}</strong><p>${esc(item.evidence)} ${esc(item.action)}</p></div></div>`; }
 function time() {
@@ -385,20 +455,21 @@ function bind() {
     document.querySelectorAll("[data-state]").forEach(el => el.addEventListener("click", () => { state.demo = el.dataset.state; render(); }));
     document.querySelectorAll("[data-dimension]").forEach(el => el.addEventListener("click", () => { state.peerDimension = el.dataset.dimension; render(); }));
     document.querySelectorAll("[data-group-detail]").forEach(el => el.addEventListener("click", () => { state.selectedGroup = el.dataset.groupDetail; render(); document.querySelector("#group-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }); }));
+    document.querySelector("[data-action=close-group-detail]")?.addEventListener("click", () => { state.selectedGroup = null; render(); document.querySelector("#group-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }); });
     document.querySelector("#province-select")?.addEventListener("change", e => { void switchProvince(e.target.value); });
-    document.querySelector("#unit-select")?.addEventListener("change", e => { state.unitId = e.target.value; render(); });
+    document.querySelector("#unit-select")?.addEventListener("change", e => { state.unitId = e.target.value; state.selectedGroup = null; render(); });
     document.querySelector("#period-type")?.addEventListener("change", e => { const type = e.target.value; const currentYear = period().year; const matches = data.periods.filter(item => item.type === type && item.year === currentYear); const fallback = data.periods.filter(item => item.type === type); const match = matches.at(-1) ?? fallback.at(-1); if (match)
         void selectPeriod(match.id); });
     document.querySelector("#period-value")?.addEventListener("change", e => { void selectPeriod(e.target.value); });
     document.querySelector("#report-year")?.addEventListener("change", e => { const year = Number(e.target.value); const matches = data.periods.filter(item => item.type === period().type && item.year === year); const match = matches.at(-1); if (match)
         void selectPeriod(match.id); });
-    document.querySelector("#scope-select")?.addEventListener("change", e => { completionMessage = ""; state.scope = e.target.value; if (state.scope === "formality") {
+    document.querySelector("#scope-select")?.addEventListener("change", e => { completionMessage = ""; state.scope = e.target.value; state.selectedGroup = null; if (state.scope === "formality") {
         state.demo = "ready";
         render();
         void loadCatalogPreview();
     }
     else {
-        void loadSelection();
+        void loadSelection().then(() => loadProvinceBenchmarks());
     } });
     document.querySelector("#catalog-level")?.addEventListener("change", e => { catalogPreview.level = e.target.value; catalogPreview.selectedId = null; catalogPreview.offset = 0; void loadCatalogPreview(); });
     document.querySelector("#catalog-field")?.addEventListener("change", e => { catalogPreview.field = e.target.value; catalogPreview.selectedId = null; catalogPreview.offset = 0; void loadCatalogPreview(); });
@@ -448,6 +519,7 @@ function mergeUnits(snapshot) {
 async function selectPeriod(periodId) {
     completionMessage = "";
     state.periodId = periodId;
+    state.selectedGroup = null;
     if (state.scope === "formality") {
         state.demo = "ready";
         render();
@@ -456,6 +528,40 @@ async function selectPeriod(periodId) {
     else {
         await loadSelection();
     }
+    void loadProvinceBenchmarks();
+}
+async function loadProvinceBenchmarks() {
+    const requestedPeriodId = state.periodId;
+    const requestedScope = state.scope;
+    const requestedFormalityId = data.formality.id;
+    const periods = [period(), previousPeriodFor()].filter((item) => Boolean(item));
+    let changed = false;
+    await Promise.all(periods.map(async (item) => {
+        const key = `${item.id}:${requestedScope}:${requestedScope === "formality" ? requestedFormalityId : "all"}`;
+        if (provinceBenchmarks[key] || benchmarkLoading.has(key))
+            return;
+        benchmarkLoading.add(key);
+        const params = new URLSearchParams({ period_type: item.type, year: String(item.year), scope: requestedScope });
+        if (item.value !== null && item.value !== undefined)
+            params.set("period_value", String(item.value));
+        if (requestedScope === "formality" && requestedFormalityId)
+            params.set("formality_id", requestedFormalityId);
+        try {
+            const response = await fetch(`/api/v1/dashboard/province-rankings?${params.toString()}`);
+            if (response.ok) {
+                provinceBenchmarks[key] = await response.json();
+                changed = true;
+            }
+        }
+        catch (error) {
+            console.error(error);
+        }
+        finally {
+            benchmarkLoading.delete(key);
+        }
+    }));
+    if (changed && state.periodId === requestedPeriodId && state.demo === "normal")
+        render();
 }
 function announceCollectionComplete() {
     completionMessage = "Dữ liệu theo thủ tục hành chính đã được thống kê xong và sẵn sàng để xem.";
@@ -751,7 +857,8 @@ async function openProvince(rootDepartmentId, requestId) {
     pendingProvinceId = "";
     document.title = `Phân tích Bộ chỉ số 766 · ${data.province.name.replace(/^UBND\s+/i, "")}`;
     catalogPreview = { loading: false, error: null, level: "", field: "", query: "", fields: [], selected: 0, available: 0, missing: 0, items: [], selectedId: null, offset: 0, mode: "single" };
-    state = { ...state, periodId: initialPeriod.id, scope: "all", unitId: data.defaultUnitId, selectedGroup: "transparency", search: "", demo: "normal", modal: "none" };
+    state = { ...state, periodId: initialPeriod.id, scope: "all", unitId: data.defaultUnitId, selectedGroup: null, search: "", demo: "normal", modal: "none" };
+    void loadProvinceBenchmarks();
     scrollTo(0, 0);
 }
 function pollProvinceJob(jobId, option, requestId) {
@@ -862,9 +969,10 @@ async function start() {
         const initialPeriod = initialPeriodFor(data);
         if (!initialPeriod)
             throw new Error("Chưa có kỳ báo cáo ban đầu hoàn chỉnh");
-        state = { screen: "overview", periodId: initialPeriod.id, scope: "all", unitId: data.defaultUnitId, peerDimension: "total", selectedGroup: "transparency", search: "", demo: "normal", modal: "none" };
+        state = { screen: "overview", periodId: initialPeriod.id, scope: "all", unitId: data.defaultUnitId, peerDimension: "total", selectedGroup: null, search: "", demo: "normal", modal: "none" };
         document.title = `Phân tích Bộ chỉ số 766 · ${data.province.name.replace(/^UBND\s+/i, "")}`;
         render();
+        void loadProvinceBenchmarks();
     }
     catch (error) {
         root.innerHTML = `<main class="content"><div class="empty-state"><h2>Không thể tải dữ liệu</h2><p>${esc(error instanceof Error ? error.message : error)}. Hãy mở website qua máy chủ cục bộ và kiểm tra web/data/snapshots.json.</p></div></main>`;
