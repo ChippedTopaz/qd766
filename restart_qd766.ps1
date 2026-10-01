@@ -2,7 +2,8 @@ $ErrorActionPreference = "Stop"
 
 $backendTask = Get-ScheduledTask -TaskName "QD766 Backend" -ErrorAction SilentlyContinue
 $workerTask = Get-ScheduledTask -TaskName "QD766 Worker" -ErrorAction SilentlyContinue
-foreach ($task in @($backendTask, $workerTask)) {
+$nationalSummaryTask = Get-ScheduledTask -TaskName "QD766 National Summary" -ErrorAction SilentlyContinue
+foreach ($task in @($backendTask, $workerTask, $nationalSummaryTask)) {
     if ($null -ne $task -and $task.State -eq "Running") {
         Stop-ScheduledTask -InputObject $task
     }
@@ -27,6 +28,9 @@ else {
 if ($null -ne $workerTask) {
     Start-ScheduledTask -InputObject $workerTask
 }
+if ($null -ne $nationalSummaryTask) {
+    Start-ScheduledTask -InputObject $nationalSummaryTask
+}
 
 Start-Sleep -Seconds 5
 $response = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8767/"
@@ -36,4 +40,8 @@ Write-Host "STATUS=$($response.StatusCode)"
 if ($null -ne $workerTask) {
     $workerState = (Get-ScheduledTask -TaskName "QD766 Worker").State
     Write-Host "WORKER_TASK=$workerState"
+}
+if ($null -ne $nationalSummaryTask) {
+    $nationalSummaryState = (Get-ScheduledTask -TaskName "QD766 National Summary").State
+    Write-Host "NATIONAL_SUMMARY_TASK=$nationalSummaryState"
 }
