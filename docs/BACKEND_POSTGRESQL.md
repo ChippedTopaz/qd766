@@ -269,5 +269,16 @@ hành xác nhận kết quả an toàn mới đóng circuit để worker xử l�
   thu lại ngày 28/09, đối chiếu manifest và SHA-256;
 - frontend đã có bộ chọn tỉnh/thành phố và đã kiểm tra chuyển hai chiều giữa
   Phú Thọ và Tây Ninh;
-- bản workspace mới cần được backup, triển khai lại vào `D:\QD766\app` và tạo
-  checkpoint Git trước khi mở rộng thêm tỉnh.
+- danh mục 34 `rootDepartmentId` cấp tỉnh được chụp bằng đúng một yêu cầu chỉ
+  đọc tới `service-results`, lưu tại `data/config/provinces.json`; mỗi bản ghi
+  giữ nguyên tên, mã đơn vị và đường dẫn nguồn để có thể kiểm tra lại;
+- backend hiển thị đủ 34 tỉnh. Tỉnh đã có snapshot được mở ngay; tỉnh chưa có
+  snapshot chỉ tạo một job tổng hợp chống trùng cho kỳ đang chọn. Worker tiếp
+  tục lấy sáu nhóm tuần tự, chịu sự bảo vệ của circuit và không tự sinh batch
+  hàng nghìn TTHC;
+- Hà Nội năm 2026 là tỉnh thứ ba dùng để kiểm tra luồng thêm tỉnh mới.
+
+Khi DVCQG thay đổi cơ cấu hoặc định danh đơn vị, chạy lại
+`tools/bootstrap_catalog_api.py` sau khi kiểm tra kết nối. Script chỉ gửi một
+yêu cầu, lưu bằng chứng tách biệt và từ chối kết quả nếu không đủ 34 tỉnh; không
+được tự suy đoán hoặc sửa tay UUID.

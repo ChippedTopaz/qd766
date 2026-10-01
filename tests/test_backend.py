@@ -36,6 +36,7 @@ ROOT_ID = "019d2be3-6a88-732b-8b17-b68020c8553a"
 CHILD_ID = "019d2be3-6a88-732b-8b17-bb1e9a3f14ab"
 TAY_NINH_ROOT_ID = "019d2be3-6a88-732b-8b23-f5575505c632"
 TAY_NINH_CHILD_ID = "019d2be3-6a88-732b-8b23-f5575505c633"
+HA_NOI_ROOT_ID = "019d2be3-6a86-70a8-a0af-76e986804225"
 
 
 def entity(department_id, name, score):
@@ -233,8 +234,11 @@ class BackendTest(unittest.TestCase):
         provinces = self.client.get("/api/v1/dashboard/provinces")
         self.assertEqual(provinces.status_code, 200)
         by_id = {item["id"]: item for item in provinces.json()}
+        self.assertEqual(len(by_id), 34)
         self.assertEqual(by_id[ROOT_ID]["provinceCode"], "25")
         self.assertEqual(by_id[TAY_NINH_ROOT_ID]["provinceCode"], "80")
+        self.assertTrue(by_id[ROOT_ID]["available"])
+        self.assertFalse(by_id[HA_NOI_ROOT_ID]["available"])
 
         tay_ninh = self.client.get(
             "/api/v1/dashboard",
@@ -258,6 +262,23 @@ class BackendTest(unittest.TestCase):
         with self.app.state.session_factory() as session:
             job = session.scalar(select(CollectionJob))
             self.assertEqual(job.request["rootDepartmentId"], TAY_NINH_ROOT_ID)
+
+    def test_new_province_can_enqueue_from_verified_root_catalog(self):
+        response = self.client.post(
+            "/api/v1/dashboard/requests",
+            json={
+                "periodType": "year",
+                "year": 2026,
+                "scope": "all",
+                "provinceCode": "01",
+            },
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(response.json()["created"])
+        with self.app.state.session_factory() as session:
+            job = session.scalar(select(CollectionJob))
+            self.assertEqual(job.request["rootDepartmentId"], HA_NOI_ROOT_ID)
+            self.assertEqual(job.request["scope"], "all")
 
     def test_conflicting_snapshot_is_rejected(self):
         with self.app.state.session_factory.begin() as session:

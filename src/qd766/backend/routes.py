@@ -16,6 +16,7 @@ from qd766.province_catalog import (
     ProvinceCatalogFormatError,
     ProvinceCatalogUnavailable,
 )
+from qd766.province_roots import load_province_roots, province_root
 
 from .batches import enqueue_next_batch_item, resume_batch
 from .dashboard import dashboard_payload, snapshot_payload
@@ -72,6 +73,9 @@ def _root_department_for_province(
     province = PROVINCES.get(province_code)
     if province is None:
         return None
+    registered = province_root(province_code)
+    if registered is not None:
+        return registered.root_department_id
     province_name = province[0].casefold()
     candidates = session.execute(
         select(Snapshot.root_department_id, Department.name)
@@ -571,19 +575,52 @@ def system_status(request: Request, session: DbSession) -> dict:
 
 @router.get("/dashboard/provinces", tags=["dashboard"])
 def dashboard_provinces(session: DbSession) -> list[dict]:
-    rows = session.execute(
-        select(
-            Snapshot.root_department_id,
-            Department.name,
-            Department.code,
-            func.count(Snapshot.id),
-            func.max(Snapshot.created_at),
+    rows = list(
+        session.execute(
+            select(
+                Snapshot.root_department_id,
+                Department.name,
+                Department.code,
+                func.count(Snapshot.id),
+                func.max(Snapshot.created_at),
+            )
+            .join(Department, Department.id == Snapshot.root_department_id)
+            .where(Snapshot.state == "complete")
+            .group_by(Snapshot.root_department_id, Department.name, Department.code)
+            .order_by(Department.name)
         )
-        .join(Department, Department.id == Snapshot.root_department_id)
-        .where(Snapshot.state == "complete")
-        .group_by(Snapshot.root_department_id, Department.name, Department.code)
-        .order_by(Department.name)
     )
+    observed = {
+        root_id: {
+            "name": name,
+            "departmentCode": department_code,
+            "snapshotCount": snapshot_count,
+            "latestSnapshotAt": latest_snapshot_at,
+        }
+        for root_id, name, department_code, snapshot_count, latest_snapshot_at in rows
+    }
+    roots = load_province_roots()
+    if roots:
+        return [
+            {
+                "id": str(root.root_department_id),
+                "name": observed.get(root.root_department_id, {}).get(
+                    "name", root.department_name
+                ),
+                "departmentCode": observed.get(root.root_department_id, {}).get(
+                    "departmentCode", root.department_code
+                ),
+                "provinceCode": root.province_code,
+                "snapshotCount": observed.get(root.root_department_id, {}).get(
+                    "snapshotCount", 0
+                ),
+                "latestSnapshotAt": observed.get(root.root_department_id, {}).get(
+                    "latestSnapshotAt"
+                ),
+                "available": root.root_department_id in observed,
+            }
+            for root in sorted(roots.values(), key=lambda item: item.province_name)
+        ]
     return [
         {
             "id": str(root_id),
@@ -592,6 +629,7 @@ def dashboard_provinces(session: DbSession) -> list[dict]:
             "provinceCode": _province_code_for_name(name),
             "snapshotCount": snapshot_count,
             "latestSnapshotAt": latest_snapshot_at,
+            "available": True,
         }
         for root_id, name, department_code, snapshot_count, latest_snapshot_at in rows
     ]

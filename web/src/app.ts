@@ -19,10 +19,11 @@ let state: State;
 let selectionRequest=0;
 let pendingMessage="";
 let completionMessage="";
+let pendingProvinceId="";
 interface OperationJob {id:string;state:string;attempts:number;createdAt:string;updatedAt:string;lockedBy:string|null;request:{period?:{type?:string;year?:number;month?:number;quarter?:number};scope?:string;formalityId?:string}}
 interface OperationData {loading:boolean;error:string|null;circuitState:string;circuitReason:string|null;snapshotCount:number;latestSnapshotAt:string|null;jobs:OperationJob[];batches:BatchResult[]}
 let operationData:OperationData={loading:false,error:null,circuitState:"unknown",circuitReason:null,snapshotCount:0,latestSnapshotAt:null,jobs:[],batches:[]};
-interface ProvinceOption {id:string;name:string;departmentCode:string|null;provinceCode:string|null;snapshotCount:number;latestSnapshotAt:string|null}
+interface ProvinceOption {id:string;name:string;departmentCode:string|null;provinceCode:string|null;snapshotCount:number;latestSnapshotAt:string|null;available:boolean}
 let provinceOptions:ProvinceOption[]=[];
 interface CatalogItem {id:string;code:string;name:string;field:string;publishingAgency:string;executionLevels:string[];available:boolean}
 interface CatalogPreview {loading:boolean;error:string|null;level:""|"province"|"ward";field:string;query:string;fields:string[];selected:number;available:number;missing:number;items:CatalogItem[];selectedId:string|null;offset:number;mode:"single"|"filtered"}
@@ -111,7 +112,8 @@ function context(): string {
   const years=[...new Set(data.periods.map(item=>item.year))].sort((a,b)=>b-a);
   const formalityScopeLabel=catalogPreview.mode==="single"&&catalogPreview.selectedId?`${data.formality.code} · ${data.formality.name}`:catalogPreview.mode==="filtered"&&catalogPreview.selected?`${int(catalogPreview.selected)} TTHC sau lọc`:"Theo thủ tục hành chính";
   const canSubmit=state.scope==="formality"&&state.demo==="ready"&&(catalogPreview.mode==="filtered"?catalogPreview.selected>0:Boolean(catalogPreview.selectedId));
-  const provinceItems=(provinceOptions.length?provinceOptions:[{id:data.province.id,name:data.province.name,departmentCode:null,provinceCode:data.province.code??null,snapshotCount:0,latestSnapshotAt:null}]).map(item=>`<option value="${esc(item.id)}" ${item.id===data.province.id?"selected":""}>${esc(item.name.replace(/^UBND\s+(tỉnh|thành phố)\s+/i,""))}</option>`).join("");
+  const selectedProvinceId=pendingProvinceId||data.province.id;
+  const provinceItems=(provinceOptions.length?provinceOptions:[{id:data.province.id,name:data.province.name,departmentCode:null,provinceCode:data.province.code??null,snapshotCount:0,latestSnapshotAt:null,available:true}]).map(item=>`<option value="${esc(item.id)}" ${item.id===selectedProvinceId?"selected":""}>${esc(item.name.replace(/^UBND\s+(tỉnh|thành phố)\s+/i,""))}${item.available?"":" · chưa có dữ liệu"}</option>`).join("");
   return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type==="month"?"selected":""}>Tháng</option><option value="quarter" ${selectedPeriod.type==="quarter"?"selected":""}>Quý</option><option value="year" ${selectedPeriod.type==="year"?"selected":""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item=>`<option value="${item.id}" ${item.id===state.periodId?"selected":""}>${item.type==="month"?`Tháng ${item.value}`:item.type==="quarter"?`Quý ${item.value}`:"Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year=>`<option value="${year}" ${year===selectedPeriod.year?"selected":""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope==="all"?"selected":""}>Tất cả thủ tục hành chính</option><option value="formality" ${state.scope==="formality"?"selected":""}>${esc(formalityScopeLabel)}</option></select></label></div><div class="context-actions">${canSubmit?`<button class="btn primary" data-action="submit-statistics">Thống kê</button>`:""}<button class="btn" data-action="open-quality">● Dữ liệu đầy đủ</button><button class="btn" data-action="export">Xuất</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></header>`;
 }
 
@@ -318,7 +320,7 @@ function bind(): void {
   document.querySelector<HTMLElement>("[data-action=close-modal]")?.addEventListener("click",()=>{state.modal="none";render()});
   document.querySelector<HTMLElement>("[data-action=print]")?.addEventListener("click",()=>window.print());
   document.querySelector<HTMLElement>("[data-action=open-quality]")?.addEventListener("click",()=>{state.screen="quality";render()});
-  document.querySelector<HTMLElement>("[data-action=retry-selection]")?.addEventListener("click",()=>{void loadSelection()});
+  document.querySelector<HTMLElement>("[data-action=retry-selection]")?.addEventListener("click",()=>{if(pendingProvinceId)void switchProvince(pendingProvinceId);else void loadSelection()});
   document.querySelectorAll<HTMLElement>("[data-action=submit-statistics]").forEach(el=>el.addEventListener("click",()=>{void submitStatistics()}));
   document.querySelector<HTMLElement>("[data-action=dismiss-completion]")?.addEventListener("click",()=>{completionMessage="";render()});
   document.querySelector<HTMLElement>("[data-action=refresh-operations]")?.addEventListener("click",()=>{void loadOperations()});
@@ -542,28 +544,89 @@ async function loadSelection():Promise<void>{
   render();
 }
 
+async function openProvince(rootDepartmentId:string,requestId:number):Promise<void>{
+  const response=await fetch(`/api/v1/dashboard?root_department_id=${encodeURIComponent(rootDepartmentId)}`);
+  if(!response.ok)throw new Error(`HTTP ${response.status}`);
+  const loaded=normalizeLoadedData(await response.json() as AppData);
+  if(requestId!==selectionRequest)return;
+  const initialPeriod=initialPeriodFor(loaded);
+  if(!initialPeriod)throw new Error("Tỉnh/thành phố chưa có kỳ báo cáo hoàn chỉnh");
+  data=loaded;
+  pendingProvinceId="";
+  document.title=`Phân tích Bộ chỉ số 766 · ${data.province.name.replace(/^UBND\s+/i,"")}`;
+  catalogPreview={loading:false,error:null,level:"",field:"",query:"",fields:[],selected:0,available:0,missing:0,items:[],selectedId:null,offset:0,mode:"single"};
+  state={...state,periodId:initialPeriod.id,scope:"all",unitId:data.defaultUnitId,selectedGroup:"transparency",search:"",demo:"normal",modal:"none"};
+  scrollTo(0,0);
+}
+
+function pollProvinceJob(jobId:string,option:ProvinceOption,requestId:number):void{
+  window.setTimeout(async()=>{
+    try{
+      const response=await fetch(`/api/v1/collection-jobs/${encodeURIComponent(jobId)}`);
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      const job=await response.json() as {state:string;error?:{message?:string}|null};
+      if(job.state==="succeeded"){
+        option.available=true;
+        option.snapshotCount=Math.max(1,option.snapshotCount);
+        await openProvince(option.id,requestId);
+        render();
+        return;
+      }
+      if(job.state==="failed"||job.state==="halted"){
+        if(requestId!==selectionRequest)return;
+        pendingProvinceId="";
+        pendingMessage=job.error?.message??"Yêu cầu thêm tỉnh đã dừng và cần quản trị viên kiểm tra.";
+        state.demo="error";render();return;
+      }
+      if(requestId===selectionRequest){
+        pendingMessage=job.state==="running"?`Đang thu thập 6 nhóm chỉ số của ${option.name} theo thứ tự an toàn.`:`${option.name} đã được đưa vào hàng đợi. Chưa tạo bất kỳ batch TTHC nào.`;
+        state.demo="queued";render();
+      }
+      pollProvinceJob(jobId,option,requestId);
+    }catch(error){
+      if(requestId!==selectionRequest)return;
+      pendingProvinceId="";
+      console.error(error);pendingMessage="Chưa đọc được trạng thái thêm tỉnh. Vui lòng kiểm tra màn hình Vận hành.";state.demo="error";render();
+    }
+  },3000);
+}
+
+async function requestProvinceSnapshot(option:ProvinceOption,requestId:number):Promise<void>{
+  const selected=period();
+  const response=await fetch("/api/v1/dashboard/requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({periodType:selected.type,year:selected.year,periodValue:selected.value??null,scope:"all",provinceCode:option.provinceCode})});
+  if(!response.ok){const problem=await response.json().catch(()=>({}));throw new Error(typeof problem.detail==="string"?problem.detail:`HTTP ${response.status}`)}
+  const result=await response.json() as CollectionRequestResult;
+  if(requestId!==selectionRequest)return;
+  if(result.state==="ready"){
+    option.available=true;
+    await openProvince(option.id,requestId);
+    return;
+  }
+  pendingMessage=result.message;
+  state.demo=result.circuitState==="open"?"blocked":"queued";
+  render();
+  if(result.circuitState!=="open"&&result.jobId)pollProvinceJob(result.jobId,option,requestId);
+}
+
 async function switchProvince(rootDepartmentId:string):Promise<void>{
   if(rootDepartmentId===data.province.id)return;
   const requestId=++selectionRequest;
+  pendingProvinceId=rootDepartmentId;
   ++catalogPreviewRequest;
   completionMessage="";
   pendingMessage="Đang chuyển dữ liệu tỉnh/thành phố...";
   state.demo="loading";
   render();
   try{
-    const response=await fetch(`/api/v1/dashboard?root_department_id=${encodeURIComponent(rootDepartmentId)}`);
-    if(!response.ok)throw new Error(`HTTP ${response.status}`);
-    const loaded=normalizeLoadedData(await response.json() as AppData);
-    if(requestId!==selectionRequest)return;
-    const initialPeriod=initialPeriodFor(loaded);
-    if(!initialPeriod)throw new Error("Tỉnh/thành phố chưa có kỳ báo cáo hoàn chỉnh");
-    data=loaded;
-    document.title=`Phân tích Bộ chỉ số 766 · ${data.province.name.replace(/^UBND\s+/i,"")}`;
-    catalogPreview={loading:false,error:null,level:"",field:"",query:"",fields:[],selected:0,available:0,missing:0,items:[],selectedId:null,offset:0,mode:"single"};
-    state={...state,periodId:initialPeriod.id,scope:"all",unitId:data.defaultUnitId,selectedGroup:"transparency",search:"",demo:"normal",modal:"none"};
-    scrollTo(0,0);
+    const option=provinceOptions.find(item=>item.id===rootDepartmentId);
+    if(option&&!option.available){
+      await requestProvinceSnapshot(option,requestId);
+    }else{
+      await openProvince(rootDepartmentId,requestId);
+    }
   }catch(error){
     if(requestId!==selectionRequest)return;
+    pendingProvinceId="";
     console.error(error);
     pendingMessage=error instanceof Error?error.message:String(error);
     state.demo="error";
