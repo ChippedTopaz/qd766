@@ -79,6 +79,8 @@ def _payload(session, batch: ProvinceCollectionBatch, *, created: bool | None = 
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="action", required=True)
     create = subparsers.add_parser("create")
