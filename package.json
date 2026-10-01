@@ -2,11 +2,13 @@
   "name": "qd766-commune-analytics",
   "private": true,
   "version": "0.2.0",
+  "type": "module",
   "description": "Commune-first analytics workspace for QĐ766 fixtures",
   "scripts": {
     "data": "python tools/build_web_data.py",
     "typecheck": "tsc --noEmit",
     "build": "npm run data && tsc",
+    "test:progress": "npm run build && node web/tests/progress-scoring.test.mjs",
     "serve": "python tools/serve_app.py",
     "serve:static": "python tools/serve_web.py"
   },

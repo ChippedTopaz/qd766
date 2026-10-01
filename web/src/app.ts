@@ -1,5 +1,6 @@
 import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerStats, similarVolumePeers, snapshotFor, snapshotKey } from "./analytics.js";
 import { analyzeOnlineScore, ONLINE_SCORING_PROFILE } from "./online-scoring.js";
+import { analyzeProgressScore } from "./progress-scoring.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 import type TomSelectControl from "tom-select";
 
@@ -144,7 +145,7 @@ function initSearchableSelects():void{
   for(const item of settings){
     const element=document.querySelector<HTMLSelectElement>(item.selector);
     if(!element)continue;
-    searchableSelects.push(new TomSelect(element,{
+    const control=new TomSelect(element,{
       create:false,
       maxItems:1,
       maxOptions:null,
@@ -152,7 +153,12 @@ function initSearchableSelects():void{
       searchField:["text"],
       sortField:[{field:"$score",direction:"desc"},{field:"$order",direction:"asc"}],
       render:{no_results:()=>'<div class="no-results">Không tìm thấy kết quả phù hợp</div>'},
-    }));
+    });
+    const showSearchHint=()=>{control.control_input.placeholder=item.placeholder};
+    control.on("focus",()=>{window.requestAnimationFrame(showSearchHint)});
+    control.on("dropdown_open",showSearchHint);
+    control.on("blur",()=>{control.control_input.placeholder=""});
+    searchableSelects.push(control);
   }
 }
 
@@ -196,7 +202,7 @@ function groupPanel(group: UnitGroupView): string {
   const marker = group.peer && maximum ? Math.max(0,Math.min(100,group.peer.median/maximum*100)) : 0;
   const stateLabel = level(ratio);
   const gap = group.peer?.gapToMedian ?? null;
-  return `<button class="group-panel ${state.selectedGroup===group.id?"selected":""}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup===group.id}"><div class="group-top"><h3>${esc(group.label)}</h3><span class="badge ${stateLabel[1]}">${stateLabel[0]}</span></div><div class="score-row"><div><span class="score-main num">${n(score)}</span> <span class="score-max">/ ${n(maximum)}</span></div><span class="rank">${rankText(group)}</span></div><div class="bullet" title="Thanh xanh: điểm đơn vị; vạch đen: trung vị nhóm cùng cấp"><i class="bullet-fill" style="width:${Math.min(ratio??0,100)}%"></i><b class="bullet-marker" style="left:${marker}%"></b></div><div class="bullet-labels"><span>0</span><span>Trung vị ${n(group.peer?.median)}</span><span>${n(maximum)}</span></div><div class="gap-note ${(gap??0)>=0?"positive":"negative"}">${gap===null?"Chưa có chuẩn so sánh":`${gap>=0?"+":""}${n(gap)}đ ${gap>=0?"trên":"dưới"} trung vị`}</div><div class="mini-meta"><span class="badge neutral">Kỳ trước: chưa đủ dữ liệu</span>${group.id==="provide-online-tree"?`<span class="badge good">Đã đối chiếu công thức</span>`:""}${group.score.kind==="UNSUPPORTED_SOURCE"?`<span class="badge info">Chưa có số liệu chi tiết</span>`:""}</div><div class="group-link">Xem chi tiết nhóm chỉ tiêu →</div></button>`;
+  return `<button class="group-panel ${state.selectedGroup===group.id?"selected":""}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup===group.id}"><div class="group-top"><h3>${esc(group.label)}</h3><span class="badge ${stateLabel[1]}">${stateLabel[0]}</span></div><div class="score-row"><div><span class="score-main num">${n(score)}</span> <span class="score-max">/ ${n(maximum)}</span></div><span class="rank">${rankText(group)}</span></div><div class="bullet" title="Thanh xanh: điểm đơn vị; vạch đen: trung vị nhóm cùng cấp"><i class="bullet-fill" style="width:${Math.min(ratio??0,100)}%"></i><b class="bullet-marker" style="left:${marker}%"></b></div><div class="bullet-labels"><span>0</span><span>Trung vị ${n(group.peer?.median)}</span><span>${n(maximum)}</span></div><div class="gap-note ${(gap??0)>=0?"positive":"negative"}">${gap===null?"Chưa có chuẩn so sánh":`${gap>=0?"+":""}${n(gap)}đ ${gap>=0?"trên":"dưới"} trung vị`}</div><div class="mini-meta"><span class="badge neutral">Kỳ trước: chưa đủ dữ liệu</span>${group.id==="provide-online-tree"||group.id==="dvc-progress-tree"?`<span class="badge good">Đã đối chiếu công thức</span>`:""}${group.score.kind==="UNSUPPORTED_SOURCE"?`<span class="badge info">Chưa có số liệu chi tiết</span>`:""}</div><div class="group-link">Xem chi tiết nhóm chỉ tiêu →</div></button>`;
 }
 
 function onlineAnalysis(entity:Entity):{rows:string[];notice:string;catalog:string}|null {
@@ -211,12 +217,27 @@ function onlineAnalysis(entity:Entity):{rows:string[];notice:string;catalog:stri
   return {rows,notice:notice+catalog,catalog};
 }
 
+function progressDetail(entity:Entity):string|null {
+  const analysis=analyzeProgressScore(entity);
+  if(!analysis)return null;
+  const progressPercent=(value:number|null)=>value===null?"—":`${n(value)}%`;
+  const status=analysis.matchesApi===true?"Khớp với điểm Cổng công bố":analysis.matchesApi===false?"Có chênh lệch, cần rà soát dữ liệu":"Chưa đủ dữ liệu để đối chiếu";
+  const tone=analysis.matchesApi===false?"warn":"";
+  const difference=analysis.difference===null?"":` · chênh ${n(Math.abs(analysis.difference),3)} điểm`;
+  const formula=analysis.onTimeRatio===null||analysis.calculatedScore===null
+    ? "Không tính tỷ lệ và điểm khi tổng hồ sơ tiếp nhận bằng 0."
+    : `${int(analysis.totalOnTime)} / ${int(analysis.totalReceived)} = ${progressPercent(analysis.onTimeRatio)}; ${progressPercent(analysis.onTimeRatio)} × ${n(analysis.maxScore)} = ${n(analysis.calculatedScore)} điểm.`;
+  const averageDays=analysis.averageProcessingDays===null?"N/A":`${n(analysis.averageProcessingDays)} ngày`;
+  return `<h3>Kết quả và công thức tính điểm</h3><div class="progress-kpis"><article><span>Tổng hồ sơ tiếp nhận</span><strong class="num">${int(analysis.totalReceived)}</strong><small>hồ sơ</small></article><article><span>Giải quyết đúng hạn</span><strong class="num positive">${int(analysis.totalOnTime)}</strong><small>${progressPercent(analysis.onTimeRatio)}</small></article><article><span>Hồ sơ quá hạn</span><strong class="num negative">${int(analysis.totalOverdue)}</strong><small>${progressPercent(analysis.overdueRatio)}${analysis.overdueDerived?" · suy ra từ tổng và đúng hạn":""}</small></article><article><span>Giải quyết trung bình</span><strong class="num">${averageDays}</strong><small>hai chữ số thập phân</small></article></div><div class="banner ${tone} formula-banner progress-formula"><span>∑</span><div><strong>${esc(analysis.profileLabel)} · ${esc(status)}</strong><p>${esc(formula)}${difference} Điểm ghi nhận được tính bằng tỷ lệ đúng hạn nhân điểm tối đa.</p></div></div><div class="table-wrap"><table class="metric-table progress-table"><thead><tr><th>Nội dung</th><th>Số lượng</th><th>Tỷ lệ</th><th>Vai trò</th></tr></thead><tbody><tr><td>Tổng hồ sơ tiếp nhận</td><td class="num">${int(analysis.totalReceived)} hồ sơ</td><td class="num">—</td><td>Mẫu số tính tỷ lệ đúng hạn</td></tr><tr><td>Hồ sơ giải quyết đúng hạn</td><td class="num">${int(analysis.totalOnTime)} hồ sơ</td><td class="num positive">${progressPercent(analysis.onTimeRatio)}</td><td>Tử số tính tỷ lệ và điểm</td></tr><tr><td>Hồ sơ quá hạn</td><td class="num">${int(analysis.totalOverdue)} hồ sơ</td><td class="num negative">${progressPercent(analysis.overdueRatio)}</td><td>Chỉ số theo dõi bổ sung</td></tr><tr><td>Số ngày giải quyết trung bình</td><td class="num">${averageDays}</td><td class="num">—</td><td>Chỉ số thời gian tham khảo</td></tr></tbody><tfoot><tr><td>Điểm ghi nhận</td><td colspan="2" class="num">${n(analysis.calculatedScore)} / ${n(analysis.maxScore)} điểm</td><td class="lost">Còn ${n(analysis.missingScore)} điểm chưa đạt</td></tr></tfoot></table></div>`;
+}
+
 function overviewGroupDetail(view: UnitView): string {
   const group=view.groups.find(item=>item.id===state.selectedGroup)??view.groups[0];
   if(!group)return "";
   const entity=group.entity;
   if(!entity)return `<section class="panel group-detail"><div class="panel-head"><div><h2>Chi tiết ${esc(group.label)}</h2><p>Chưa có số liệu chi tiết cho lựa chọn hiện tại.</p></div></div></section>`;
   const calculated=group.id==="provide-online-tree"?onlineAnalysis(entity):null;
+  const progress=group.id==="dvc-progress-tree"?progressDetail(entity):null;
   const metricRows=entity.metrics.map(m=>`<tr><td>${esc(m.name)}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiScore!==null&&m.apiMaxScore!==null?n(Math.max(0,m.apiMaxScore-m.apiScore)):"N/A"}</td></tr>`);
   const valueRows=calculated?calculated.rows:Object.entries(entity.parameters).filter(([,value])=>value!==null).map(([key,value])=>`<tr><td>${esc(parameterLabels[key]??"Số liệu nghiệp vụ thành phần")}</td><td colspan="3" class="num">${esc(typeof value==="number"?int(value):value)}</td><td colspan="3">Được sử dụng để theo dõi và phân tích kết quả</td></tr>`);
   const rows=[...metricRows,...valueRows];
@@ -225,6 +246,7 @@ function overviewGroupDetail(view: UnitView): string {
   const position=comparable.findIndex(item=>item.departmentId===state.unitId);
   const nearby=position<0?[]:comparable.slice(Math.max(0,position-2),Math.min(comparable.length,position+3));
   const lost=entity.apiScore!==null&&entity.apiMaxScore!==null?Math.max(0,entity.apiMaxScore-entity.apiScore):null;
+  if(progress)return `<section class="panel group-detail" id="group-detail"><div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary"><strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${rankText(group)}</span></div></div><div class="panel-body progress-detail">${progress}</div></section>`;
   return `<section class="panel group-detail" id="group-detail"><div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary"><strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${rankText(group)}</span></div></div><div class="detail-columns"><div><h3>Kết quả các chỉ tiêu thành phần</h3>${calculated?.notice??""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length?rows.join(""):`<tr><td colspan="7">Nhóm này chưa có số liệu thành phần để hiển thị.</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div><aside class="comparison-card"><h3>So với đơn vị cùng cấp</h3>${group.peer?`<div class="comparison-kpi"><span>Trung vị</span><strong class="num">${n(group.peer.median)}</strong></div><div class="comparison-kpi"><span>Chênh lệch</span><strong class="num ${(group.peer.gapToMedian)>=0?"positive":"negative"}">${group.peer.gapToMedian>=0?"+":""}${n(group.peer.gapToMedian)}</strong></div><div class="nearby-list">${nearby.map((item,index)=>`<div class="peer-row ${item.departmentId===state.unitId?"mine":""}"><span>${esc(item.departmentName)}</span><b class="num">${n(item.apiScore)}</b><small>Hạng ${1+comparable.filter(other=>(other.apiScore??0)>(item.apiScore??0)+.005).length}</small></div>`).join("")}</div>`:`<div class="empty-state"><h2>Không áp dụng xếp hạng</h2><p>Kết quả chung toàn tỉnh không so hạng với cơ quan trực thuộc.</p></div>`}</aside></div></section>`;
 }
 
@@ -259,6 +281,8 @@ function procedure(): string {
 
 function diagnostic(group:UnitGroupView):string {
   const entity=group.entity; if(!entity)return `<div class="empty-state"><h2>${esc(group.label)}</h2><p>Nguồn không trả dữ liệu cho TTHC này.</p></div>`;
+  const progress=group.id==="dvc-progress-tree"?progressDetail(entity):null;
+  if(progress)return `<section class="panel" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>Tính điểm từ tỷ lệ hồ sơ giải quyết đúng hạn; tỷ lệ quá hạn và thời gian xử lý được hiển thị để phân tích.</p></div><span class="badge good">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div><div class="panel-body progress-detail">${progress}</div></section>`;
   const calculated=group.id==="provide-online-tree"?onlineAnalysis(entity):null;
   const rows=calculated?calculated.rows.join(""):entity.metrics.length?entity.metrics.map(m=>`<tr><td>${esc(m.name)}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiScore!==null&&m.apiMaxScore!==null?n(Math.max(0,m.apiMaxScore-m.apiScore)):"N/A"}</td></tr>`).join(""):Object.entries(entity.parameters).map(([key,value])=>`<tr><td>${esc(parameterLabels[key]??"Chỉ số nghiệp vụ")}</td><td colspan="3" class="num">${esc(typeof value==="number"?int(value):value)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`).join("");
   const lost=entity.apiScore!==null&&entity.apiMaxScore!==null?Math.max(0,entity.apiMaxScore-entity.apiScore):null;
