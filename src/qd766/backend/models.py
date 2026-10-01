@@ -242,6 +242,44 @@ class CollectionJob(Base):
     )
 
 
+class NationalSummarySnapshot(Base):
+    __tablename__ = "national_summary_snapshots"
+    __table_args__ = (
+        CheckConstraint(
+            "period_type IN ('month', 'quarter', 'year')",
+            name="ck_national_summary_period",
+        ),
+        CheckConstraint(
+            "(period_type = 'month' AND period_value BETWEEN 1 AND 12) OR "
+            "(period_type = 'quarter' AND period_value BETWEEN 1 AND 4) OR "
+            "(period_type = 'year' AND period_value IS NULL)",
+            name="ck_national_summary_period_value",
+        ),
+        Index(
+            "ix_national_summary_lookup",
+            "period_type",
+            "year",
+            "period_value",
+            "captured_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    summary_key: Mapped[str] = mapped_column(String(240), unique=True)
+    period_type: Mapped[str] = mapped_column(String(16))
+    year: Mapped[int] = mapped_column(Integer)
+    period_value: Mapped[int | None] = mapped_column(Integer)
+    department_type: Mapped[str] = mapped_column(String(40), default="ADMINISTRATIVE_UNIT")
+    province_count: Mapped[int] = mapped_column(Integer)
+    raw_sha256: Mapped[str] = mapped_column(String(64))
+    request_payload: Mapped[dict[str, Any]] = mapped_column(JsonDocument)
+    response_data: Mapped[dict[str, Any]] = mapped_column(JsonDocument)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class CollectionBatch(Base):
     __tablename__ = "collection_batches"
     __table_args__ = (

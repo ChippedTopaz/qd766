@@ -194,14 +194,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\backup_postgresql.ps1
 Mặc định backup được ghi vào `F:\QD766\backups`. Script không tự xóa bản cũ;
 chính sách retention chỉ được bật sau khi đã kiểm thử phục hồi.
 
-Đăng ký backend và worker chạy khi người dùng đăng nhập, cùng backup lúc 01:30
-mỗi ngày:
+Đăng ký backend và worker chạy khi người dùng đăng nhập, cập nhật tổng hợp quốc
+gia mỗi giờ, cùng backup lúc 01:30 mỗi ngày:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\register_windows_tasks.ps1
 ```
 
-Ba task chạy dưới tài khoản Windows hiện tại với quyền `Limited`; không lưu mật
+Bốn task chạy dưới tài khoản Windows hiện tại với quyền `Limited`; không lưu mật
 khẩu PostgreSQL trong Task Scheduler. Worker ghi log trạng thái gọn vào
 `D:\QD766\logs\worker.log`, backend ghi vào `D:\QD766\logs\backend.log`. Tác
 vụ được thử khởi động lại tối đa ba lần nếu tiến trình thoát bất thường. Backup
@@ -218,7 +218,7 @@ migration và test, rồi tạo ngay một bản backup trên ổ F:
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\deploy_local_server.ps1
 ```
 
-Sau khi xác nhận deployment và backup thành công, đăng ký ba tác vụ Windows:
+Sau khi xác nhận deployment và backup thành công, đăng ký bốn tác vụ Windows:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\deploy_local_server.ps1 -RegisterTasks
@@ -309,3 +309,29 @@ trước. Sau đó tiếp tục đúng checkpoint bằng:
 Hai endpoint `province-batches` chỉ đọc tiến độ. Việc tạo/resume không mở cho
 frontend nhằm tránh người dùng phổ thông vô tình kích hoạt lượt thu thập toàn
 quốc.
+
+### Tổng hợp toàn quốc theo một request
+
+Endpoint `service-results` trả điểm tổng hợp và sáu nhóm chỉ tiêu của toàn bộ
+34 tỉnh/thành trong một response. QD766 lưu mỗi response thay đổi thành một
+phiên bản bất biến trong `national_summary_snapshots`, chống trùng bằng
+SHA-256.
+
+```powershell
+.\.venv\Scripts\python.exe .\tools\refresh_national_summaries.py
+```
+
+Không truyền tham số thì công cụ cập nhật tuần tự tháng, quý và năm hiện tại.
+Công cụ dùng chung PostgreSQL collection lease với worker; nếu worker đang gọi
+nguồn hoặc circuit đang mở thì không gửi request. HTTP 403, 429 và phản hồi
+HTML/rejection tiếp tục mở circuit theo quy tắc an toàn.
+
+Task `QD766 National Summary` chạy mỗi giờ. Dashboard cấp tỉnh ưu tiên tổng
+điểm, điểm sáu nhóm và thứ hạng từ bản tổng hợp mới nhất; chi tiết sở, xã, chỉ
+tiêu thành phần và TTHC vẫn dùng sáu adapter chuyên sâu. Dữ liệu kỳ đang mở quá
+hai giờ được đánh dấu `stale` thay vì báo sai là mới.
+
+API chỉ đọc:
+
+- `GET /api/v1/national-summaries`
+- `GET /api/v1/national-summaries/latest?period_type=year&year=2026`

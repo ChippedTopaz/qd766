@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
 from qd766.province_catalog import PROVINCES
 
-from .models import Dataset, Entity, Formality, Snapshot
+from .models import Dataset, Entity, Formality, NationalSummarySnapshot, Snapshot
 
 
 GROUP_LABELS = {
@@ -16,6 +16,22 @@ GROUP_LABELS = {
     "dossier-digitized": "Số hóa hồ sơ",
     "handling-satisfaction": "Mức độ hài lòng",
     "formality-online-payment-tree": "Thanh toán trực tuyến",
+}
+NATIONAL_GROUP_CODES = {
+    "transparency": "CKMB",
+    "dvc-progress-tree": "TDGQ",
+    "provide-online-tree": "CLGQ",
+    "dossier-digitized": "MDSH",
+    "handling-satisfaction": "MDHL",
+    "formality-online-payment-tree": "TTTT",
+}
+NATIONAL_GROUP_MAXIMUMS = {
+    "transparency": 18.0,
+    "dvc-progress-tree": 20.0,
+    "provide-online-tree": 12.0,
+    "dossier-digitized": 22.0,
+    "handling-satisfaction": 18.0,
+    "formality-online-payment-tree": 10.0,
 }
 REPORTING_START_YEAR = 2026
 
@@ -47,6 +63,31 @@ def _is_provisional(snapshot: Snapshot, today: date | None = None) -> bool:
     if snapshot.period_type == "quarter":
         return snapshot.period_value == ((current.month - 1) // 3) + 1
     return snapshot.period_value == current.month
+
+
+def _national_summary_is_stale(
+    summary: NationalSummarySnapshot,
+    now: datetime | None = None,
+) -> bool:
+    current = now or datetime.now(timezone.utc)
+    current_date = current.date()
+    is_open = summary.year == current_date.year and (
+        summary.period_type == "year"
+        or (
+            summary.period_type == "month"
+            and summary.period_value == current_date.month
+        )
+        or (
+            summary.period_type == "quarter"
+            and summary.period_value == ((current_date.month - 1) // 3) + 1
+        )
+    )
+    if not is_open:
+        return False
+    captured_at = summary.captured_at
+    if captured_at.tzinfo is None:
+        captured_at = captured_at.replace(tzinfo=timezone.utc)
+    return captured_at < current - timedelta(hours=2)
 
 
 def _available_periods(snapshots: list[Snapshot], today: date | None = None) -> list[dict[str, Any]]:
@@ -160,8 +201,11 @@ def _dataset(dataset: Dataset) -> dict[str, Any]:
     }
 
 
-def snapshot_payload(snapshot: Snapshot) -> dict[str, Any]:
-    return {
+def snapshot_payload(
+    snapshot: Snapshot,
+    national_summary: NationalSummarySnapshot | None = None,
+) -> dict[str, Any]:
+    result = {
         "scope": snapshot.scope,
         "formalityId": str(snapshot.formality_id) if snapshot.formality_id else None,
         "status": snapshot.status_detail,
@@ -177,16 +221,65 @@ def snapshot_payload(snapshot: Snapshot) -> dict[str, Any]:
             "message": "Dữ liệu lấy từ PostgreSQL trên máy chủ QD766.",
         },
     }
+    if national_summary is not None and snapshot.scope == "all":
+        row = next(
+            (
+                item
+                for item in national_summary.response_data.get("evaluation", [])
+                if item.get("departmentId") == str(snapshot.root_department_id)
+            ),
+            None,
+        )
+        if row is not None:
+            group_scores = row.get("groupScores", {})
+            for dataset in result["datasets"]:
+                score = group_scores.get(NATIONAL_GROUP_CODES.get(dataset["group"]))
+                if score is None:
+                    continue
+                dataset["root"]["apiScore"] = float(score)
+                maximum = dataset["root"].get("apiMaxScore")
+                dataset["root"]["apiRatio"] = (
+                    round(float(score) / float(maximum) * 100, 2)
+                    if maximum
+                    else None
+                )
+                dataset["root"]["scoreSource"] = "dvcqg-national-summary"
+            result["provinceAggregatedScore"] = float(row["totalScore"])
+            result["provinceAggregatedMaximum"] = 100.0
+            stale = _national_summary_is_stale(national_summary)
+            result["delivery"] = {
+                "result": "national-summary",
+                "capturedAt": national_summary.captured_at.isoformat(),
+                "detailsCapturedAt": snapshot.created_at.isoformat(),
+                "provisional": _is_provisional(snapshot),
+                "stale": stale,
+                "message": (
+                    "Bản tổng hợp toàn quốc đã quá 2 giờ; hệ thống đang chờ chu kỳ "
+                    "cập nhật an toàn tiếp theo."
+                    if stale
+                    else "Điểm tỉnh và xếp hạng lấy từ bản tổng hợp toàn quốc mới nhất; "
+                    "chi tiết chỉ tiêu dùng snapshot phân tích gần nhất."
+                ),
+            }
+    return result
 
 
 def dashboard_payload(
     snapshots: list[Snapshot],
     formality: Formality | None,
+    national_summaries: dict[
+        tuple[str, int, int | None], NationalSummarySnapshot
+    ] | None = None,
 ) -> dict[str, Any]:
     payload_snapshots: dict[str, dict[str, Any]] = {}
     for snapshot in snapshots:
         period_id = _period_id(snapshot)
-        payload_snapshots[f"{period_id}:{snapshot.scope}"] = snapshot_payload(snapshot)
+        summary = (national_summaries or {}).get(
+            (snapshot.period_type, snapshot.year, snapshot.period_value)
+        )
+        payload_snapshots[f"{period_id}:{snapshot.scope}"] = snapshot_payload(
+            snapshot, summary
+        )
 
     root = snapshots[0].root_department
     root_name = root.name or ""

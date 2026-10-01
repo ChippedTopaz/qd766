@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from qd766.national_summary import NationalSummaryCapture
+from qd766.periods import PeriodSelection
+
+from .models import NationalSummarySnapshot
+
+
+def store_national_summary(
+    session: Session, capture: NationalSummaryCapture
+) -> tuple[NationalSummarySnapshot, bool]:
+    period_value = capture.period.value
+    summary_key = ":".join(
+        [
+            capture.period.type,
+            str(capture.period.year),
+            str(period_value or 0),
+            capture.raw_sha256,
+        ]
+    )
+    existing = session.scalar(
+        select(NationalSummarySnapshot).where(
+            NationalSummarySnapshot.summary_key == summary_key
+        )
+    )
+    if existing is not None:
+        return existing, False
+    snapshot = NationalSummarySnapshot(
+        summary_key=summary_key,
+        period_type=capture.period.type,
+        year=capture.period.year,
+        period_value=period_value,
+        department_type="ADMINISTRATIVE_UNIT",
+        province_count=len(capture.response_data["evaluation"]),
+        raw_sha256=capture.raw_sha256,
+        request_payload=capture.request_payload,
+        response_data=capture.response_data,
+        captured_at=capture.captured_at,
+    )
+    try:
+        with session.begin_nested():
+            session.add(snapshot)
+            session.flush()
+    except IntegrityError:
+        existing = session.scalar(
+            select(NationalSummarySnapshot).where(
+                NationalSummarySnapshot.summary_key == summary_key
+            )
+        )
+        if existing is None:
+            raise
+        return existing, False
+    return snapshot, True
+
+
+def latest_national_summary(
+    session: Session, period: PeriodSelection
+) -> NationalSummarySnapshot | None:
+    statement = (
+        select(NationalSummarySnapshot)
+        .where(
+            NationalSummarySnapshot.period_type == period.type,
+            NationalSummarySnapshot.year == period.year,
+        )
+        .order_by(NationalSummarySnapshot.captured_at.desc())
+        .limit(1)
+    )
+    statement = (
+        statement.where(NationalSummarySnapshot.period_value.is_(None))
+        if period.value is None
+        else statement.where(NationalSummarySnapshot.period_value == period.value)
+    )
+    return session.scalar(statement)
+

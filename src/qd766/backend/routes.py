@@ -16,12 +16,19 @@ from qd766.province_catalog import (
     ProvinceCatalogFormatError,
     ProvinceCatalogUnavailable,
 )
+from qd766.periods import PeriodSelection
 from qd766.province_roots import load_province_roots, province_root
 
 from .batches import enqueue_next_batch_item, resume_batch
-from .dashboard import dashboard_payload, snapshot_payload
+from .dashboard import (
+    NATIONAL_GROUP_CODES,
+    NATIONAL_GROUP_MAXIMUMS,
+    dashboard_payload,
+    snapshot_payload,
+)
 from .database import get_session
 from .jobs import enqueue_job, request_idempotency_key
+from .national_summaries import latest_national_summary
 from .models import (
     CollectionBatch,
     CollectionBatchItem,
@@ -33,6 +40,7 @@ from .models import (
     Formality,
     FormalityDepartment,
     Metric,
+    NationalSummarySnapshot,
     ProvinceCollectionBatch,
     ProvinceCollectionBatchItem,
     Snapshot,
@@ -48,6 +56,7 @@ from .schemas import (
     FormalityBatchResponse,
     FormalityResponse,
     HealthResponse,
+    NationalSummaryResponse,
     ProvinceCollectionBatchItemResponse,
     ProvinceCollectionBatchResponse,
     SnapshotResponse,
@@ -55,6 +64,38 @@ from .schemas import (
 
 router = APIRouter(prefix="/api/v1")
 DbSession = Annotated[Session, Depends(get_session)]
+
+
+def _merge_national_rankings(
+    detailed: list[dict], summary: NationalSummarySnapshot
+) -> list[dict]:
+    by_root = {item["rootDepartmentId"]: item for item in detailed}
+    code_to_group = {code: group for group, code in NATIONAL_GROUP_CODES.items()}
+    for row in summary.response_data.get("evaluation", []):
+        root_id = str(row["departmentId"])
+        item = by_root.setdefault(
+            root_id,
+            {
+                "rootDepartmentId": root_id,
+                "provinceName": row["departmentName"],
+                "groups": {},
+            },
+        )
+        item["provinceName"] = row["departmentName"]
+        item["totalScore"] = float(row["totalScore"])
+        item["totalMaximum"] = 100.0
+        item["capturedAt"] = summary.captured_at.isoformat()
+        for code, score in row.get("groupScores", {}).items():
+            group = code_to_group.get(code)
+            if group is None:
+                continue
+            group_item = item["groups"].setdefault(
+                group,
+                {"parameters": {}, "metrics": {}},
+            )
+            group_item["score"] = float(score)
+            group_item["maximum"] = NATIONAL_GROUP_MAXIMUMS[group]
+    return sorted(by_root.values(), key=lambda item: item["provinceName"])
 
 
 def _collection_job_responses(
@@ -756,6 +797,48 @@ def dashboard_provinces(session: DbSession) -> list[dict]:
     ]
 
 
+@router.get(
+    "/national-summaries",
+    response_model=list[NationalSummaryResponse],
+    tags=["national-summaries"],
+)
+def list_national_summaries(
+    session: DbSession,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[NationalSummarySnapshot]:
+    return list(
+        session.scalars(
+            select(NationalSummarySnapshot)
+            .order_by(NationalSummarySnapshot.captured_at.desc())
+            .limit(limit)
+        )
+    )
+
+
+@router.get("/national-summaries/latest", tags=["national-summaries"])
+def get_latest_national_summary(
+    session: DbSession,
+    period_type: str = Query(pattern="^(month|quarter|year)$"),
+    year: int = Query(ge=2000, le=2200),
+    period_value: int | None = None,
+) -> dict:
+    summary = latest_national_summary(
+        session, PeriodSelection(period_type, year, period_value)
+    )
+    if summary is None:
+        raise HTTPException(status_code=404, detail="National summary not found")
+    return {
+        "id": str(summary.id),
+        "periodType": summary.period_type,
+        "year": summary.year,
+        "periodValue": summary.period_value,
+        "provinceCount": summary.province_count,
+        "rawSha256": summary.raw_sha256,
+        "capturedAt": summary.captured_at.isoformat(),
+        "data": summary.response_data,
+    }
+
+
 @router.get("/dashboard/province-rankings", tags=["dashboard"])
 def dashboard_province_rankings(
     session: DbSession,
@@ -857,7 +940,14 @@ def dashboard_province_rankings(
                 "capturedAt": item["capturedAt"],
             }
         )
-    return sorted(result, key=lambda item: item["provinceName"])
+    ordered = sorted(result, key=lambda item: item["provinceName"])
+    if scope == "all" and formality_id is None:
+        summary = latest_national_summary(
+            session, PeriodSelection(period_type, year, period_value)
+        )
+        if summary is not None:
+            return _merge_national_rankings(ordered, summary)
+    return ordered
 
 
 @router.get("/dashboard", tags=["dashboard"])
@@ -905,7 +995,14 @@ def dashboard(
             None,
         )
         formality = session.get(Formality, formality_id) if formality_id else None
-        return dashboard_payload(snapshots, formality)
+        summaries: dict[tuple[str, int, int | None], NationalSummarySnapshot] = {}
+        for key in {
+            (item.period_type, item.year, item.period_value) for item in snapshots
+        }:
+            summary = latest_national_summary(session, PeriodSelection(*key))
+            if summary is not None:
+                summaries[key] = summary
+        return dashboard_payload(snapshots, formality, summaries)
 
     payload, cache_result = request.app.state.dashboard_cache.get_or_load(
         cache_key,
@@ -981,7 +1078,11 @@ def dashboard_selection(
         selected = session.scalar(statement.limit(1))
         if selected is None:
             raise HTTPException(status_code=404, detail="Snapshot not found")
-        item = snapshot_payload(selected)
+        national_summary = latest_national_summary(
+            session,
+            PeriodSelection(period_type, year, period_value),
+        )
+        item = snapshot_payload(selected, national_summary)
         return {"metadata": item["delivery"], "snapshot": item}
 
     payload, cache_result = request.app.state.dashboard_cache.get_or_load(

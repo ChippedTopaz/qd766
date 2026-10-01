@@ -2,6 +2,7 @@ import copy
 import sys
 import unittest
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -29,6 +30,7 @@ from qd766.backend.jobs import (
     retry_or_fail_job,
     succeed_job,
 )
+from qd766.backend.national_summaries import store_national_summary
 from qd766.backend.models import (
     Base,
     CollectionControl,
@@ -45,6 +47,7 @@ from qd766.backend.models import (
 from qd766.backend.province_batches import create_province_batch, resume_province_batch
 from qd766.backend.worker import run_one_job
 from qd766.collection import SafetyStop
+from qd766.national_summary import NationalSummaryCapture
 from qd766.periods import PeriodSelection
 from qd766.province_roots import ProvinceRoot
 
@@ -302,6 +305,108 @@ class BackendTest(unittest.TestCase):
         with self.app.state.session_factory() as session:
             job = session.scalar(select(CollectionJob))
             self.assertEqual(job.request["rootDepartmentId"], TAY_NINH_ROOT_ID)
+
+    def test_national_summary_overlays_province_score_and_rankings(self):
+        with self.app.state.session_factory.begin() as session:
+            store_normalized_snapshot(session, snapshot_payload())
+            capture = NationalSummaryCapture(
+                period=PeriodSelection("month", 2026, 8),
+                request_payload={
+                    "timeType": "month",
+                    "year": 2026,
+                    "month": 8,
+                    "departmentType": "ADMINISTRATIVE_UNIT",
+                },
+                response_data={
+                    "overview": {
+                        "departmentName": "Cả nước",
+                        "totalScore": 61.51,
+                        "totalMaxScore": 100,
+                        "ratio": 61.51,
+                    },
+                    "evaluation": [
+                        {
+                            "departmentId": ROOT_ID,
+                            "departmentName": "UBND tỉnh Phú Thọ",
+                            "departmentCode": "H44",
+                            "totalScore": 61.86,
+                            "ratio": 61.86,
+                            "scoreDelta": 18.02,
+                            "groupScores": {
+                                "CKMB": 7.96,
+                                "TDGQ": 17.68,
+                                "CLGQ": 8.56,
+                                "TTTT": 6.67,
+                                "MDHL": 11.37,
+                                "MDSH": 9.62,
+                            },
+                        },
+                        {
+                            "departmentId": TAY_NINH_ROOT_ID,
+                            "departmentName": "UBND tỉnh Tây Ninh",
+                            "departmentCode": "H72",
+                            "totalScore": 60.0,
+                            "ratio": 60.0,
+                            "scoreDelta": 1.0,
+                            "groupScores": {
+                                "CKMB": 8.0,
+                                "TDGQ": 17.0,
+                                "CLGQ": 8.0,
+                                "TTTT": 6.0,
+                                "MDHL": 11.0,
+                                "MDSH": 10.0,
+                            },
+                        },
+                    ],
+                },
+                raw_sha256="a" * 64,
+                captured_at=datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc),
+            )
+            first, created = store_national_summary(session, capture)
+            self.assertTrue(created)
+            second, created = store_national_summary(session, capture)
+            self.assertFalse(created)
+            self.assertEqual(first.id, second.id)
+
+        selection = self.client.get(
+            "/api/v1/dashboard/selection",
+            params={
+                "period_type": "month",
+                "year": 2026,
+                "period_value": 8,
+                "scope": "all",
+                "root_department_id": ROOT_ID,
+            },
+        )
+        self.assertEqual(selection.status_code, 200)
+        body = selection.json()["snapshot"]
+        self.assertEqual(body["provinceAggregatedScore"], 61.86)
+        self.assertEqual(body["datasets"][0]["root"]["apiScore"], 7.96)
+        self.assertEqual(body["delivery"]["result"], "national-summary")
+
+        rankings = self.client.get(
+            "/api/v1/dashboard/province-rankings",
+            params={
+                "period_type": "month",
+                "year": 2026,
+                "period_value": 8,
+                "scope": "all",
+            },
+        )
+        by_id = {item["rootDepartmentId"]: item for item in rankings.json()}
+        self.assertEqual(len(by_id), 2)
+        self.assertEqual(by_id[ROOT_ID]["totalScore"], 61.86)
+        self.assertEqual(by_id[ROOT_ID]["groups"]["transparency"]["score"], 7.96)
+        latest = self.client.get(
+            "/api/v1/national-summaries/latest",
+            params={
+                "period_type": "month",
+                "year": 2026,
+                "period_value": 8,
+            },
+        )
+        self.assertEqual(latest.status_code, 200)
+        self.assertEqual(latest.json()["provinceCount"], 2)
 
     def test_new_province_can_enqueue_from_verified_root_catalog(self):
         response = self.client.post(

@@ -205,3 +205,15 @@ class ProvinceCollectionBatchItemResponse(ApiModel):
     error: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime
+
+
+class NationalSummaryResponse(ApiModel):
+    id: uuid.UUID
+    period_type: str
+    year: int
+    period_value: int | None
+    department_type: str
+    province_count: int
+    raw_sha256: str
+    captured_at: datetime
+    created_at: datetime
