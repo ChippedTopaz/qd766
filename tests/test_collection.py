@@ -15,6 +15,7 @@ from qd766 import (
     plan_evaluation_requests,
 )
 from qd766.collection import (
+    BrowserTransport,
     CollectionError,
     RateLimitStop,
     SafetyStop,
@@ -65,6 +66,31 @@ class FailingTransport:
         raise TransportFailure("offline")
 
 
+class FakeBrowserSocket:
+    def __init__(self, value):
+        self.value = value
+        self.sent = []
+        self.responses = []
+
+    def send(self, raw):
+        message = json.loads(raw)
+        self.sent.append(message)
+        self.responses.extend(
+            [
+                json.dumps({"method": "Network.requestWillBeSent"}),
+                json.dumps(
+                    {
+                        "id": message["id"],
+                        "result": {"result": {"value": self.value}},
+                    }
+                ),
+            ]
+        )
+
+    def recv(self, timeout):
+        return self.responses.pop(0)
+
+
 class CollectionTest(unittest.TestCase):
     runtime = ROOT / "tests/runtime-collection"
 
@@ -88,6 +114,25 @@ class CollectionTest(unittest.TestCase):
         )
         digitized = next(item for item in formality_plan if item.group == "dossier-digitized")
         self.assertEqual(digitized.payload["formalityID"], FORMALITY_ID)
+
+    def test_browser_transport_posts_json_through_same_origin_page(self):
+        expected = {
+            "status": 201,
+            "contentType": "application/json",
+            "body": '{"code":"OK"}',
+        }
+        socket = FakeBrowserSocket(expected)
+        transport = BrowserTransport(timeout_seconds=2)
+        transport._socket = socket
+        response = transport.post_json(
+            "https://dichvucong.gov.vn/api/v1/reporting/evaluation/service-results",
+            {"timeType": "year", "year": 2026},
+        )
+        self.assertEqual(response.status, 201)
+        self.assertEqual(response.body, b'{"code":"OK"}')
+        expression = socket.sent[0]["params"]["expression"]
+        self.assertIn("fetch(url", expression)
+        self.assertIn('"year": 2026', expression)
 
     def test_collection_is_sequential_checkpoints_raw_bytes_and_becomes_complete(self):
         period = PeriodSelection("year", 2026)

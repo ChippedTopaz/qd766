@@ -23,7 +23,7 @@ from qd766.backend.jobs import (
     release_collection_lease,
 )
 from qd766.backend.national_summaries import store_national_summary
-from qd766.collection import CollectionError, SafetyStop, UrllibTransport
+from qd766.collection import BrowserTransport, CollectionError, SafetyStop
 from qd766.national_summary import collect_national_summary
 from qd766.periods import PeriodSelection
 
@@ -77,23 +77,23 @@ def main() -> int:
             print(json.dumps({"state": lease_state}, ensure_ascii=False))
             return 0
         acquired = True
-        transport = UrllibTransport(timeout_seconds=45)
-        for index, period in enumerate(periods):
-            capture = collect_national_summary(period, transport)
-            with factory.begin() as session:
-                snapshot, created = store_national_summary(session, capture)
-            results.append(
-                {
-                    "periodType": period.type,
-                    "year": period.year,
-                    "periodValue": period.value,
-                    "provinceCount": snapshot.province_count,
-                    "capturedAt": snapshot.captured_at.isoformat(),
-                    "created": created,
-                }
-            )
-            if index < len(periods) - 1:
-                time.sleep(arguments.delay_seconds)
+        with BrowserTransport(timeout_seconds=45) as transport:
+            for index, period in enumerate(periods):
+                capture = collect_national_summary(period, transport)
+                with factory.begin() as session:
+                    snapshot, created = store_national_summary(session, capture)
+                results.append(
+                    {
+                        "periodType": period.type,
+                        "year": period.year,
+                        "periodValue": period.value,
+                        "provinceCount": snapshot.province_count,
+                        "capturedAt": snapshot.captured_at.isoformat(),
+                        "created": created,
+                    }
+                )
+                if index < len(periods) - 1:
+                    time.sleep(arguments.delay_seconds)
         with factory.begin() as session:
             release_collection_lease(session, worker_id)
         acquired = False

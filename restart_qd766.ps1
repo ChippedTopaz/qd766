@@ -42,6 +42,30 @@ if ($null -ne $workerTask) {
     Write-Host "WORKER_TASK=$workerState"
 }
 if ($null -ne $nationalSummaryTask) {
-    $nationalSummaryState = (Get-ScheduledTask -TaskName "QD766 National Summary").State
+    $summaryDeadline = (Get-Date).AddSeconds(60)
+    do {
+        $nationalSummaryState = (Get-ScheduledTask -TaskName "QD766 National Summary").State
+        if ($nationalSummaryState -ne "Running") {
+            break
+        }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $summaryDeadline)
     Write-Host "NATIONAL_SUMMARY_TASK=$nationalSummaryState"
+    $summaries = @(Invoke-RestMethod -Uri "http://127.0.0.1:8767/api/v1/national-summaries?limit=10")
+    Write-Host "NATIONAL_SUMMARY_COUNT=$($summaries.Count)"
+    try {
+        $currentYear = (Get-Date).Year
+        $yearSummary = Invoke-RestMethod -Uri "http://127.0.0.1:8767/api/v1/national-summaries/latest?period_type=year&year=$currentYear"
+        $provinceRows = @($yearSummary.data.evaluation)
+        $phuTho = $provinceRows | Where-Object { $_.departmentName -eq "UBND tỉnh Phú Thọ" } | Select-Object -First 1
+        if ($null -ne $phuTho) {
+            $phuThoRank = [Array]::IndexOf($provinceRows, $phuTho) + 1
+            Write-Host "PHU_THO_YEAR_SCORE=$($phuTho.totalScore)"
+            Write-Host "PHU_THO_YEAR_RANK=$phuThoRank/$($provinceRows.Count)"
+            Write-Host "NATIONAL_SUMMARY_CAPTURED_AT=$($yearSummary.capturedAt)"
+        }
+    }
+    catch {
+        Write-Host "NATIONAL_SUMMARY_YEAR=NOT_AVAILABLE"
+    }
 }

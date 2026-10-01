@@ -5,6 +5,10 @@ __pycache__/
 *.egg-info/
 /tests/runtime-collection/
 /tmp*/
+/.tmp-*/
+/.chrome-probe*/
+/.edge-probe*/
+/chrome-probe.log
 .env
 *.db
 /tests/runtime-backend/

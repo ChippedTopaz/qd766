@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
+import shutil
+import socket
+import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -87,6 +92,220 @@ class UrllibTransport:
             )
         except urllib.error.URLError as error:
             raise TransportFailure(f"Network transport failed: {error.reason}") from error
+
+
+class BrowserTransport:
+    """Same-origin transport for DVCQG hosts that reject non-browser TLS clients.
+
+    The browser is started once for a short sequential collection run and is
+    closed explicitly by the caller. It does not retry, rotate identities, or
+    bypass an HTTP/WAF rejection returned by the source.
+    """
+
+    SOURCE_URL = "https://dichvucong.gov.vn/danh-gia-chat-luong-phuc-vu"
+    WINDOWS_BROWSER_PATHS = (
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    )
+
+    def __init__(self, timeout_seconds: float = 45.0):
+        self.timeout_seconds = timeout_seconds
+        self._process = None
+        self._socket = None
+        self._profile_path = None
+        self._message_id = 0
+
+    def __enter__(self) -> "BrowserTransport":
+        try:
+            from websockets.sync.client import connect
+        except ImportError as error:
+            raise TransportFailure("WebSocket support is not installed") from error
+        executable_path = next(
+            (path for path in self.WINDOWS_BROWSER_PATHS if os.path.isfile(path)),
+            None,
+        )
+        if executable_path is None:
+            raise TransportFailure("Chrome or Edge is not installed")
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            self._profile_path = tempfile.mkdtemp(prefix="qd766-browser-")
+            self._process = subprocess.Popen(
+                [
+                    executable_path,
+                    "--headless=new",
+                    "--disable-gpu",
+                    "--disable-background-networking",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--remote-allow-origins=*",
+                    f"--remote-debugging-port={port}",
+                    f"--user-data-dir={self._profile_path}",
+                    "about:blank",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            targets_url = f"http://127.0.0.1:{port}/json/list"
+            deadline = time.monotonic() + min(self.timeout_seconds, 15)
+            targets = None
+            while time.monotonic() < deadline:
+                if self._process.poll() is not None:
+                    raise RuntimeError("browser exited during startup")
+                try:
+                    with urllib.request.urlopen(targets_url, timeout=1) as response:
+                        targets = json.loads(response.read())
+                    if targets:
+                        break
+                except (OSError, ValueError):
+                    time.sleep(0.2)
+            if not targets:
+                raise RuntimeError("browser debugging endpoint did not start")
+            websocket_url = next(
+                target["webSocketDebuggerUrl"]
+                for target in targets
+                if target.get("type") == "page"
+            )
+            self._socket = connect(
+                websocket_url,
+                open_timeout=min(self.timeout_seconds, 10),
+                close_timeout=2,
+                max_size=32 * 1024 * 1024,
+            )
+            self._command("Page.enable")
+            self._command("Page.navigate", {"url": self.SOURCE_URL})
+            deadline = time.monotonic() + self.timeout_seconds
+            while time.monotonic() < deadline:
+                state = self._evaluate(
+                    "({origin: location.origin, ready: document.readyState})"
+                )
+                if (
+                    state.get("origin") == "https://dichvucong.gov.vn"
+                    and state.get("ready") in {"interactive", "complete"}
+                ):
+                    time.sleep(1.5)
+                    break
+                time.sleep(0.25)
+            else:
+                raise RuntimeError("DVCQG page did not become ready")
+        except Exception as error:
+            self.close()
+            raise TransportFailure(f"Browser transport startup failed: {error}") from error
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._socket is not None:
+            try:
+                self._socket.close()
+            except Exception:
+                pass
+            self._socket = None
+        if self._process is not None:
+            try:
+                self._process.terminate()
+                self._process.wait(timeout=5)
+            except Exception:
+                try:
+                    self._process.kill()
+                except Exception:
+                    pass
+            self._process = None
+        if self._profile_path is not None:
+            shutil.rmtree(self._profile_path, ignore_errors=True)
+            self._profile_path = None
+
+    def _command(self, method: str, params: dict | None = None) -> dict:
+        if self._socket is None:
+            raise TransportFailure("Browser transport is not open")
+        self._message_id += 1
+        message_id = self._message_id
+        self._socket.send(
+            json.dumps({"id": message_id, "method": method, "params": params or {}})
+        )
+        while True:
+            message = json.loads(self._socket.recv(timeout=self.timeout_seconds))
+            if message.get("id") != message_id:
+                continue
+            if "error" in message:
+                raise TransportFailure(
+                    f"Browser command {method} failed: {message['error']}"
+                )
+            return message.get("result", {})
+
+    def _evaluate(self, expression: str) -> object:
+        result = self._command(
+            "Runtime.evaluate",
+            {
+                "expression": expression,
+                "awaitPromise": True,
+                "returnByValue": True,
+            },
+        )
+        if result.get("exceptionDetails"):
+            description = (
+                result.get("result", {}).get("description")
+                or result["exceptionDetails"].get("text")
+            )
+            raise TransportFailure(f"Browser script failed: {description}")
+        return result.get("result", {}).get("value")
+
+    def post_json(self, url: str, payload: dict[str, object]) -> TransportResponse:
+        if self._socket is None:
+            raise TransportFailure("Browser transport is not open")
+        try:
+            arguments = json.dumps(
+                {
+                    "url": url,
+                    "payload": payload,
+                    "timeoutMs": int(self.timeout_seconds * 1000),
+                },
+                ensure_ascii=False,
+            )
+            expression = """
+                (async ({url, payload, timeoutMs}) => {
+                  const controller = new AbortController();
+                  const timer = setTimeout(() => controller.abort(), timeoutMs);
+                  try {
+                    const response = await fetch(url, {
+                      method: 'POST',
+                      credentials: 'include',
+                      headers: {
+                        'Accept': 'application/json, text/plain, */*',
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify(payload),
+                      signal: controller.signal
+                    });
+                    return {
+                      status: response.status,
+                      contentType: response.headers.get('content-type'),
+                      body: await response.text()
+                    };
+                  } finally {
+                    clearTimeout(timer);
+                  }
+                })(__ARGS__)
+                """.replace("__ARGS__", arguments)
+            result = self._evaluate(expression)
+        except Exception as error:
+            if isinstance(error, TransportFailure):
+                raise
+            raise TransportFailure(f"Browser transport failed: {error}") from error
+        if not isinstance(result, dict):
+            raise TransportFailure("Browser transport returned an invalid result")
+        return TransportResponse(
+            status=int(result["status"]),
+            body=str(result["body"]).encode("utf-8"),
+            contentType=result.get("contentType"),
+        )
 
 
 def plan_evaluation_requests(
