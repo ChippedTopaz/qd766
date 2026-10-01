@@ -1,6 +1,7 @@
 import copy
 import sys
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,9 +29,22 @@ from qd766.backend.jobs import (
     retry_or_fail_job,
     succeed_job,
 )
-from qd766.backend.models import Base, CollectionControl, CollectionJob, Dataset, Entity, Metric, Snapshot
+from qd766.backend.models import (
+    Base,
+    CollectionControl,
+    CollectionJob,
+    Dataset,
+    Entity,
+    Metric,
+    ProvinceCollectionBatch,
+    ProvinceCollectionBatchItem,
+    Snapshot,
+)
+from qd766.backend.province_batches import create_province_batch, resume_province_batch
 from qd766.backend.worker import run_one_job
 from qd766.collection import SafetyStop
+from qd766.periods import PeriodSelection
+from qd766.province_roots import ProvinceRoot
 
 ROOT_ID = "019d2be3-6a88-732b-8b17-b68020c8553a"
 CHILD_ID = "019d2be3-6a88-732b-8b17-bb1e9a3f14ab"
@@ -452,6 +466,142 @@ class BackendTest(unittest.TestCase):
             stored = session.get(CollectionJob, job.id)
             self.assertEqual(stored.state, "succeeded")
             self.assertEqual(session.scalar(select(func.count()).select_from(Snapshot)), 1)
+
+    def test_province_batch_skips_available_and_chains_one_job_at_a_time(self):
+        roots = [
+            ProvinceRoot("25", "Phú Thọ", uuid.UUID(ROOT_ID), "UBND tỉnh Phú Thọ", "H44", "fixture"),
+            ProvinceRoot("80", "Tây Ninh", uuid.UUID(TAY_NINH_ROOT_ID), "UBND tỉnh Tây Ninh", "H70", "fixture"),
+            ProvinceRoot("01", "Hà Nội", uuid.UUID(HA_NOI_ROOT_ID), "UBND Thành phố Hà Nội", "H26", "fixture"),
+        ]
+        with self.app.state.session_factory.begin() as session:
+            store_normalized_snapshot(session, snapshot_payload())
+            batch, created = create_province_batch(
+                session,
+                roots,
+                PeriodSelection("month", 2026, 8),
+                catalog_version="fixture:v1",
+            )
+            self.assertTrue(created)
+            duplicate, created = create_province_batch(
+                session,
+                roots,
+                PeriodSelection("month", 2026, 8),
+                catalog_version="fixture:v1",
+            )
+            self.assertFalse(created)
+            self.assertEqual(duplicate.id, batch.id)
+
+        with self.app.state.session_factory() as session:
+            stored = session.get(ProvinceCollectionBatch, batch.id)
+            states = list(
+                session.scalars(
+                    select(ProvinceCollectionBatchItem.state)
+                    .where(ProvinceCollectionBatchItem.batch_id == batch.id)
+                    .order_by(ProvinceCollectionBatchItem.position)
+                )
+            )
+            self.assertEqual(stored.total_items, 3)
+            self.assertEqual(stored.available_items, 1)
+            self.assertEqual(states.count("skipped"), 1)
+            self.assertEqual(states.count("queued"), 1)
+            self.assertEqual(states.count("pending"), 1)
+            self.assertEqual(session.scalar(select(func.count()).select_from(CollectionJob)), 1)
+
+        def collect(job_id, request):
+            root_id = request["rootDepartmentId"]
+            root_name = next(
+                item.department_name for item in roots if str(item.root_department_id) == root_id
+            )
+            return snapshot_payload(root_id=root_id, root_name=root_name)
+
+        first = run_one_job(
+            self.app.state.session_factory,
+            collect,
+            worker_id="province-worker",
+        )
+        self.assertEqual(first.state, "succeeded")
+        with self.app.state.session_factory() as session:
+            stored = session.get(ProvinceCollectionBatch, batch.id)
+            self.assertEqual(stored.completed_items, 1)
+            self.assertEqual(stored.state, "running")
+            self.assertEqual(session.scalar(select(func.count()).select_from(CollectionJob)), 2)
+
+        second = run_one_job(
+            self.app.state.session_factory,
+            collect,
+            worker_id="province-worker",
+        )
+        self.assertEqual(second.state, "succeeded")
+        with self.app.state.session_factory() as session:
+            stored = session.get(ProvinceCollectionBatch, batch.id)
+            self.assertEqual(stored.completed_items, 2)
+            self.assertEqual(stored.available_items, 1)
+            self.assertEqual(stored.state, "succeeded")
+        response = self.client.get(f"/api/v1/province-batches/{batch.id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["state"], "succeeded")
+        items = self.client.get(f"/api/v1/province-batches/{batch.id}/items")
+        self.assertEqual(items.status_code, 200)
+        self.assertEqual(len(items.json()), 3)
+        self.assertEqual(
+            sorted(item["state"] for item in items.json()),
+            ["skipped", "succeeded", "succeeded"],
+        )
+
+    def test_province_batch_halts_with_circuit_and_resumes_from_checkpoint(self):
+        root = ProvinceRoot(
+            "80",
+            "Tây Ninh",
+            uuid.UUID(TAY_NINH_ROOT_ID),
+            "UBND tỉnh Tây Ninh",
+            "H70",
+            "fixture",
+        )
+        with self.app.state.session_factory.begin() as session:
+            batch, _ = create_province_batch(
+                session,
+                [root],
+                PeriodSelection("month", 2026, 8),
+                catalog_version="fixture:v1",
+            )
+
+        def rejected(job_id, request):
+            raise SafetyStop("Request Rejected")
+
+        halted = run_one_job(
+            self.app.state.session_factory,
+            rejected,
+            worker_id="province-worker",
+        )
+        self.assertEqual(halted.state, "halted")
+        with self.app.state.session_factory.begin() as session:
+            stored = session.get(ProvinceCollectionBatch, batch.id)
+            item = session.scalar(
+                select(ProvinceCollectionBatchItem).where(
+                    ProvinceCollectionBatchItem.batch_id == batch.id
+                )
+            )
+            control = session.get(CollectionControl, "dvcqg")
+            self.assertEqual(stored.state, "halted")
+            self.assertEqual(item.state, "halted")
+            self.assertEqual(control.circuit_state, "open")
+            close_collection_circuit(session)
+            resume_province_batch(session, stored)
+
+        resumed = run_one_job(
+            self.app.state.session_factory,
+            lambda job_id, request: snapshot_payload(
+                root_id=request["rootDepartmentId"],
+                root_name=root.department_name,
+            ),
+            worker_id="province-worker",
+        )
+        self.assertEqual(resumed.state, "succeeded")
+        with self.app.state.session_factory() as session:
+            stored = session.get(ProvinceCollectionBatch, batch.id)
+            self.assertEqual(stored.state, "succeeded")
+            self.assertEqual(stored.failed_items, 0)
+            self.assertEqual(stored.completed_items, 1)
 
     def test_worker_halts_on_upstream_safety_signal(self):
         with self.app.state.session_factory.begin() as session:

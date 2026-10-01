@@ -125,6 +125,7 @@ def resume_batch(session: Session, batch: CollectionBatch) -> CollectionJob | No
         batch.failed_items = max(0, batch.failed_items - 1)
     batch.state = "queued"
     batch.error = None
+    session.flush()
     return enqueue_next_batch_item(session, batch)
 
 

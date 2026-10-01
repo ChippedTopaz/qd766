@@ -33,6 +33,10 @@ from .jobs import (
     succeed_job,
 )
 from .models import CollectionJob
+from .province_batches import (
+    finish_province_batch_job,
+    mark_province_batch_job_running,
+)
 
 SnapshotProcessor = Callable[[uuid.UUID, dict[str, Any]], dict[str, Any]]
 
@@ -110,6 +114,7 @@ def run_one_job(
             release_collection_lease(session, worker_id)
             return None
         mark_batch_job_running(session, claimed)
+        mark_province_batch_job_running(session, claimed)
         job_id = claimed.id
         request = copy.deepcopy(claimed.request)
 
@@ -120,6 +125,7 @@ def run_one_job(
             store_normalized_snapshot(session, snapshot)
             succeed_job(session, job, worker_id)
             finish_batch_job(session, job, "succeeded")
+            finish_province_batch_job(session, job, "succeeded")
             release_collection_lease(session, worker_id)
         return WorkerResult(job_id, "succeeded")
     except SafetyStop as error:
@@ -192,6 +198,7 @@ def _halt(
         job = _locked_job(session, job_id)
         halt_job(session, job, worker_id, detail)
         finish_batch_job(session, job, "halted", detail)
+        finish_province_batch_job(session, job, "halted", detail)
         if open_circuit:
             open_collection_circuit(session, reason=kind, detail=detail)
         else:
@@ -220,5 +227,6 @@ def _retry_or_fail(
         )
         if job.state == "failed":
             finish_batch_job(session, job, "failed", job.error)
+            finish_province_batch_job(session, job, "failed", job.error)
         release_collection_lease(session, worker_id)
         return job.state

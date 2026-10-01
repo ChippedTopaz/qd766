@@ -33,6 +33,8 @@ from .models import (
     Formality,
     FormalityDepartment,
     Metric,
+    ProvinceCollectionBatch,
+    ProvinceCollectionBatchItem,
     Snapshot,
 )
 from .schemas import (
@@ -46,6 +48,8 @@ from .schemas import (
     FormalityBatchResponse,
     FormalityResponse,
     HealthResponse,
+    ProvinceCollectionBatchItemResponse,
+    ProvinceCollectionBatchResponse,
     SnapshotResponse,
 )
 
@@ -506,6 +510,60 @@ def resume_formality_batch(batch_id: uuid.UUID, session: DbSession) -> Collectio
     resume_batch(session, batch)
     session.commit()
     return batch
+
+
+@router.get(
+    "/province-batches",
+    response_model=list[ProvinceCollectionBatchResponse],
+    tags=["collection-batches"],
+)
+def list_province_batches(
+    session: DbSession,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[ProvinceCollectionBatch]:
+    """Expose read-only progress; national batch creation remains operator-only."""
+    return list(
+        session.scalars(
+            select(ProvinceCollectionBatch)
+            .order_by(ProvinceCollectionBatch.created_at.desc())
+            .limit(limit)
+        )
+    )
+
+
+@router.get(
+    "/province-batches/{batch_id}",
+    response_model=ProvinceCollectionBatchResponse,
+    tags=["collection-batches"],
+)
+def get_province_batch(
+    batch_id: uuid.UUID,
+    session: DbSession,
+) -> ProvinceCollectionBatch:
+    batch = session.get(ProvinceCollectionBatch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Province collection batch not found")
+    return batch
+
+
+@router.get(
+    "/province-batches/{batch_id}/items",
+    response_model=list[ProvinceCollectionBatchItemResponse],
+    tags=["collection-batches"],
+)
+def list_province_batch_items(
+    batch_id: uuid.UUID,
+    session: DbSession,
+) -> list[ProvinceCollectionBatchItem]:
+    if session.get(ProvinceCollectionBatch, batch_id) is None:
+        raise HTTPException(status_code=404, detail="Province collection batch not found")
+    return list(
+        session.scalars(
+            select(ProvinceCollectionBatchItem)
+            .where(ProvinceCollectionBatchItem.batch_id == batch_id)
+            .order_by(ProvinceCollectionBatchItem.position)
+        )
+    )
 
 
 @router.get(

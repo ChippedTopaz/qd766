@@ -117,6 +117,9 @@ GET /api/v1/system-status
 GET /api/v1/collection-jobs
 GET /api/v1/collection-jobs/{jobId}
 GET /api/v1/collection-control
+GET /api/v1/province-batches
+GET /api/v1/province-batches/{batchId}
+GET /api/v1/province-batches/{batchId}/items
 GET /api/v1/dashboard
 GET /api/v1/dashboard/selection
 POST /api/v1/dashboard/requests
@@ -282,3 +285,27 @@ Khi DVCQG thay đổi cơ cấu hoặc định danh đơn vị, chạy lại
 `tools/bootstrap_catalog_api.py` sau khi kiểm tra kết nối. Script chỉ gửi một
 yêu cầu, lưu bằng chứng tách biệt và từ chối kết quả nếu không đủ 34 tỉnh; không
 được tự suy đoán hoặc sửa tay UUID.
+
+### Batch tổng hợp liên tỉnh
+
+Batch toàn quốc là thao tác quản trị, không có API công khai để tạo hoặc tiếp
+tục. Công cụ đọc danh mục 34 `rootDepartmentId` đã xác minh, bỏ qua snapshot
+đã có và chỉ xếp job cho tỉnh còn thiếu đầu tiên. Worker hoàn tất một tỉnh mới
+tạo job kế tiếp; vì vậy hàng đợi không chứa đồng thời 34 job và upstream vẫn có
+concurrency bằng 1.
+
+```powershell
+.venv\Scripts\python.exe tools\manage_province_batch.py create --period-type year --year 2026
+.venv\Scripts\python.exe tools\manage_province_batch.py status
+```
+
+Khi batch dừng do safety stop, phải kiểm tra probe và đóng circuit theo runbook
+trước. Sau đó tiếp tục đúng checkpoint bằng:
+
+```powershell
+.venv\Scripts\python.exe tools\manage_province_batch.py resume --batch-id <UUID> --confirm-reviewed
+```
+
+Hai endpoint `province-batches` chỉ đọc tiến độ. Việc tạo/resume không mở cho
+frontend nhằm tránh người dùng phổ thông vô tình kích hoạt lượt thu thập toàn
+quốc.

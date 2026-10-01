@@ -309,6 +309,82 @@ class CollectionBatchItem(Base):
     )
 
 
+class ProvinceCollectionBatch(Base):
+    __tablename__ = "province_collection_batches"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('queued', 'running', 'succeeded', 'failed', 'halted')",
+            name="ck_province_collection_batch_state",
+        ),
+        CheckConstraint(
+            "period_type IN ('month', 'quarter', 'year')",
+            name="ck_province_collection_batch_period",
+        ),
+        CheckConstraint(
+            "(period_type = 'month' AND period_value BETWEEN 1 AND 12) OR "
+            "(period_type = 'quarter' AND period_value BETWEEN 1 AND 4) OR "
+            "(period_type = 'year' AND period_value IS NULL)",
+            name="ck_province_collection_batch_period_value",
+        ),
+        Index("ix_province_collection_batch_state_created", "state", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    idempotency_key: Mapped[str] = mapped_column(String(240), unique=True)
+    state: Mapped[str] = mapped_column(String(16), default="queued")
+    period_type: Mapped[str] = mapped_column(String(16))
+    year: Mapped[int] = mapped_column(Integer)
+    period_value: Mapped[int | None] = mapped_column(Integer)
+    catalog_version: Mapped[str] = mapped_column(String(160))
+    total_items: Mapped[int] = mapped_column(Integer)
+    available_items: Mapped[int] = mapped_column(Integer, default=0)
+    completed_items: Mapped[int] = mapped_column(Integer, default=0)
+    failed_items: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[dict[str, Any] | None] = mapped_column(JsonDocument)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ProvinceCollectionBatchItem(Base):
+    __tablename__ = "province_collection_batch_items"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('pending', 'queued', 'running', 'succeeded', 'failed', 'halted', 'skipped')",
+            name="ck_province_collection_batch_item_state",
+        ),
+        UniqueConstraint(
+            "batch_id", "root_department_id", name="uq_province_batch_item_root"
+        ),
+        Index("ix_province_batch_item_next", "batch_id", "state", "position"),
+    )
+
+    id: Mapped[int] = mapped_column(RecordId, primary_key=True, autoincrement=True)
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("province_collection_batches.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    province_code: Mapped[str] = mapped_column(String(2))
+    province_name: Mapped[str] = mapped_column(Text)
+    root_department_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("departments.id", ondelete="RESTRICT"), index=True
+    )
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("collection_jobs.id", ondelete="SET NULL"), index=True
+    )
+    error: Mapped[dict[str, Any] | None] = mapped_column(JsonDocument)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class CollectionControl(Base):
     __tablename__ = "collection_controls"
     __table_args__ = (

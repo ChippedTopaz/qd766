@@ -172,3 +172,33 @@ class FormalityBatchResponse(ApiModel):
     failed_items: int
     created_at: datetime
     updated_at: datetime
+
+
+class ProvinceCollectionBatchResponse(ApiModel):
+    id: uuid.UUID
+    state: str
+    period_type: str
+    year: int
+    period_value: int | None
+    catalog_version: str
+    total_items: int
+    available_items: int
+    completed_items: int
+    failed_items: int
+    error: dict[str, Any] | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProvinceCollectionBatchItemResponse(ApiModel):
+    id: int
+    batch_id: uuid.UUID
+    position: int
+    province_code: str
+    province_name: str
+    root_department_id: uuid.UUID
+    state: str
+    job_id: uuid.UUID | None
+    error: dict[str, Any] | None
+    created_at: datetime
+    updated_at: datetime
