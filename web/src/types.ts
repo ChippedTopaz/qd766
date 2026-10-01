@@ -94,7 +94,7 @@ export interface UnitOption {
 export interface AppData {
   schemaVersion: number;
   source: string;
-  province: { id: string; name: string };
+  province: { id: string; name: string; code?: string | null };
   formality: { id: string; code: string; name: string };
   metricCatalog: Array<{
     stt: number;

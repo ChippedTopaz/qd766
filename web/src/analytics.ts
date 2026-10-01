@@ -1,3 +1,4 @@
+import { analyzeOnlineScore } from "./online-scoring.js";
 import type {
   AppData,
   Dataset,
@@ -189,6 +190,7 @@ const ACTIONS: Partial<Record<GroupId, string>> = {
   transparency: "Rà soát hồ sơ đồng bộ và danh mục TTHC phải công bố, ưu tiên các bản ghi có cảnh báo chất lượng.",
   "dvc-progress-tree": "Kiểm tra các hồ sơ sắp quá hạn và phân công xử lý theo thời hạn còn lại.",
   "dossier-digitized": "Ưu tiên số hóa kết quả và tái sử dụng dữ liệu ở các TTHC có khối lượng hồ sơ lớn.",
+  "provide-online-tree": "Ưu tiên các dịch vụ công trực tuyến chưa phát sinh hồ sơ; đây thường là phần làm mất điểm lớn nhất.",
   "handling-satisfaction": "Kiểm tra phản ánh kiến nghị và quy trình tiếp nhận, trả kết quả tại Bộ phận Một cửa.",
   "formality-online-payment-tree": "Rà soát TTHC có nghĩa vụ tài chính nhưng chưa phát sinh thanh toán trực tuyến thành công.",
 };
@@ -238,15 +240,21 @@ export function buildSuggestions(unit: UnitView): Suggestion[] {
         });
       }
     }
+    if (group.id === "provide-online-tree") {
+      const analysis = analyzeOnlineScore(group.entity);
+      const priority = analysis ? [...analysis.components].sort((a, b) => b.missingScore - a.missingScore)[0] : undefined;
+      if (analysis && priority && priority.missingScore > 0.005) {
+        suggestions.push({
+          id: "online-component-gap", severity: "warning", category: "gap", groupId: group.id,
+          finding: `${priority.name} là phần mất điểm lớn nhất`,
+          evidence: `${priority.ratio.toFixed(1)}%; đạt ${priority.score.toFixed(2)}/${priority.maxScore.toFixed(2)} điểm.`,
+          impact: `Còn thiếu ${priority.missingScore.toFixed(2)} điểm ở riêng chỉ tiêu này.`,
+          action: ACTIONS[group.id]!,
+          confidence: analysis.matchesApi ? "Cao" : "Trung bình", deepLink: "overview",
+        });
+      }
+    }
   }
-  suggestions.push({
-    id: "online-formula", severity: "info", category: "formula", groupId: "provide-online-tree",
-    finding: "Công thức Dịch vụ công trực tuyến đang chờ chuẩn hóa",
-    evidence: "Hệ thống nguồn đã công bố điểm và số liệu thành phần nhưng chưa đủ căn cứ xác định trọng số chi tiết.",
-    impact: "Không thể ước lượng điểm tăng thêm từ từng parameter một cách đáng tin cậy.",
-    action: "Dùng điểm đã công bố làm chuẩn; chỉ phân tích hướng tăng hoặc giảm của các số liệu thành phần.",
-    confidence: "Thấp", deepLink: "quality",
-  });
   const order = { critical: 0, warning: 1, positive: 2, info: 3 } as const;
   return suggestions.sort((a, b) => order[a.severity] - order[b.severity]);
 }

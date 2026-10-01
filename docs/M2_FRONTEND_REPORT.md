@@ -29,7 +29,7 @@ biểu diễn bằng trạng thái nguồn không hỗ trợ.
 | TTHC `2.000815` ở 5 nhóm | Dữ liệu thật | Giữ nguyên metrics/parameters từ API |
 | Hài lòng theo TTHC | Nguồn không hỗ trợ | Card giải thích, không thay bằng 0 |
 | Delta kỳ trước, chuỗi 6/12/24 kỳ, streak, volatility | Thiếu lịch sử đồng nhất | Empty state “Chưa đủ dữ liệu lịch sử” |
-| Công thức chi tiết DVC trực tuyến | Chưa xác minh | Điểm API được dùng; mô phỏng bị khóa |
+| Công thức chi tiết DVC trực tuyến | Đã khớp 6 fixture M0 trong sai số 0,015 | Điểm API vẫn là giá trị chính thức; công thức chỉ dùng để giải thích |
 | Tiêu chí không áp dụng cấp xã | Danh mục có dữ liệu, mapping response chưa đủ | Chưa gắn nhãn vào điểm cụ thể để tránh kết luận sai |
 | Impact–Effort | Có bố cục; effort chưa có dữ liệu | Gắn nhãn giả định cần phê duyệt |
 | CSV/Excel export | Pipeline chưa triển khai | Trung tâm xuất hiển thị trạng thái chờ |

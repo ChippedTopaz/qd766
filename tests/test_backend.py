@@ -34,6 +34,8 @@ from qd766.collection import SafetyStop
 
 ROOT_ID = "019d2be3-6a88-732b-8b17-b68020c8553a"
 CHILD_ID = "019d2be3-6a88-732b-8b17-bb1e9a3f14ab"
+TAY_NINH_ROOT_ID = "019d2be3-6a88-732b-8b23-f5575505c632"
+TAY_NINH_CHILD_ID = "019d2be3-6a88-732b-8b23-f5575505c633"
 
 
 def entity(department_id, name, score):
@@ -66,7 +68,12 @@ def entity(department_id, name, score):
     }
 
 
-def snapshot_payload():
+def snapshot_payload(
+    root_id=ROOT_ID,
+    root_name="UBND tỉnh Phú Thọ",
+    child_id=CHILD_ID,
+    child_name="Văn phòng UBND",
+):
     return {
         "schemaVersion": 1,
         "period": {"type": "month", "year": 2026, "month": 8},
@@ -91,8 +98,8 @@ def snapshot_payload():
                 "period": {"type": "month", "year": 2026, "month": 8},
                 "scope": "all",
                 "formalityId": None,
-                "root": entity(ROOT_ID, "UBND tỉnh Phú Thọ", 5),
-                "children": [entity(CHILD_ID, "Văn phòng UBND", 4)],
+                "root": entity(root_id, root_name, 5),
+                "children": [entity(child_id, child_name, 4)],
                 "details": {"source": "fixture"},
                 "raw": {"path": "transparency/month-all.json", "sha256": "a" * 64},
             }
@@ -210,6 +217,48 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(system_status["snapshotCount"], 1)
         self.assertEqual(system_status["dashboardCache"]["entries"], 2)
 
+    def test_dashboard_can_list_and_switch_provinces(self):
+        with self.app.state.session_factory.begin() as session:
+            store_normalized_snapshot(session, snapshot_payload())
+            store_normalized_snapshot(
+                session,
+                snapshot_payload(
+                    root_id=TAY_NINH_ROOT_ID,
+                    root_name="UBND tỉnh Tây Ninh",
+                    child_id=TAY_NINH_CHILD_ID,
+                    child_name="Văn phòng UBND tỉnh Tây Ninh",
+                ),
+            )
+
+        provinces = self.client.get("/api/v1/dashboard/provinces")
+        self.assertEqual(provinces.status_code, 200)
+        by_id = {item["id"]: item for item in provinces.json()}
+        self.assertEqual(by_id[ROOT_ID]["provinceCode"], "25")
+        self.assertEqual(by_id[TAY_NINH_ROOT_ID]["provinceCode"], "80")
+
+        tay_ninh = self.client.get(
+            "/api/v1/dashboard",
+            params={"root_department_id": TAY_NINH_ROOT_ID},
+        )
+        self.assertEqual(tay_ninh.status_code, 200)
+        self.assertEqual(tay_ninh.json()["province"]["code"], "80")
+        self.assertEqual(tay_ninh.json()["defaultUnitId"], TAY_NINH_ROOT_ID)
+
+        queued = self.client.post(
+            "/api/v1/dashboard/requests",
+            json={
+                "periodType": "quarter",
+                "year": 2026,
+                "periodValue": 2,
+                "scope": "all",
+                "provinceCode": "80",
+            },
+        )
+        self.assertEqual(queued.status_code, 202)
+        with self.app.state.session_factory() as session:
+            job = session.scalar(select(CollectionJob))
+            self.assertEqual(job.request["rootDepartmentId"], TAY_NINH_ROOT_ID)
+
     def test_conflicting_snapshot_is_rejected(self):
         with self.app.state.session_factory.begin() as session:
             store_normalized_snapshot(session, snapshot_payload())
@@ -312,7 +361,7 @@ class BackendTest(unittest.TestCase):
 
         future = self.client.post(
             "/api/v1/dashboard/requests",
-            json={**request, "periodValue": 10},
+            json={**request, "year": 9999, "periodValue": 1},
         )
         self.assertEqual(future.status_code, 422)
 

@@ -44,9 +44,9 @@ tháng 8/2026 và quý 3/2026 hợp lệ, còn tháng 9 và quý 4/2026 chưa h�
 - 21/21 unit test: PASS.
 - M0 fixture/contract validator: PASS trên 37 fixture.
 - M1 normalization/completeness validator: PASS trên fixture đã khóa.
-- Scoring analysis: **INCOMPLETE**. Dịch vụ công trực tuyến vẫn giữ toàn bộ
-  parameters nhưng không áp dụng công thức; giả thuyết thành phần trước đây
-  không ổn định trên fixture tháng 8.
+- Scoring analysis: **PASS** trên fixture M0. Dịch vụ công trực tuyến dùng
+  profile `qd766-online-v1`, khớp 6/6 response parent trong sai số 0,015 điểm;
+  điểm API vẫn là giá trị chính thức.
 
 Các PASS chỉ áp dụng cho fixture Phú Thọ và pipeline hiện có. Chưa kiểm chứng
-các tỉnh khác, dữ liệu rỗng/lỗi, hoặc công thức Dịch vụ công trực tuyến.
+các tỉnh khác, dữ liệu rỗng/lỗi, hoặc thay đổi công thức từ hệ thống nguồn.

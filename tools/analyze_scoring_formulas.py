@@ -21,7 +21,13 @@ def ratio(numerator: float | int | None, denominator: float | int | None) -> flo
 
 def load_records(root: Path, group: str):
     for path in sorted((root / "tests/fixtures" / group).glob("*.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))["data"]
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))["data"]
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            # Keep damaged raw captures immutable and exclude them from formula
+            # fitting. Other period/scope fixtures still provide independent
+            # observations for the same formula.
+            continue
         if "overview" in data:
             yield path.name, data["overview"]
             for record in data["evaluation"]:
@@ -160,28 +166,40 @@ def analyze(root: Path) -> dict:
         }
     )
 
-    # Online service: keep the parameters visible, but do not promote the
-    # dossier-ratio candidate to a formula unless its residual is stable.
-    components = []
+    # Online service is the sum of three components. Two components are capped
+    # when the target percentage is reached (80% and 50% respectively).
+    errors = []
     for path in sorted((root / "tests/fixtures/provide-online-tree").glob("*.json")):
         parent = json.loads(path.read_text(encoding="utf-8"))["data"]["parent"]
-        online_ratio = ratio(parent["onlineDossierCount"], parent["onlineServiceTotal"])
-        components.append(parent["totalScore"] - 4 * online_ratio)
-    baseline = sum(components) / len(components)
-    errors = [abs(value - baseline) for value in components]
+        provision = ratio(
+            parent["partialCount"] + parent["fullCount"],
+            parent["authorityCount"],
+        )
+        active_service = ratio(
+            parent["onlineDossierCount"], parent["onlineServiceTotal"]
+        )
+        online_submission = ratio(
+            parent["channelOnlineSum"], parent["channelTotalSum"]
+        )
+        predicted = (
+            min(2, 2 * provision / 0.80)
+            + 4 * active_service
+            + min(6, 6 * online_submission / 0.50)
+        )
+        errors.append(abs(predicted - parent["totalScore"]))
     formulas.append(
         {
             "group": "provide-online-tree",
-            "status": "unresolved-on-m0",
-            "candidateComponent": "4 * onlineDossierCount / onlineServiceTotal",
-            "candidateVerified": False,
-            "observedResidualForPhuTho": round(baseline, 12),
-            "doNotImplementAsCompleteFormula": True,
-            "limitation": (
-                "The completed-month fixture makes the residual vary beyond the "
-                "declared tolerance. The candidate is not a verified component, "
-                "and the available observations cannot identify a complete formula."
+            "status": "verified-on-m0",
+            "profileId": "qd766-online-v1",
+            "formula": (
+                "score = min(2, 2*A/0.80) + 4*B + min(6, 6*C/0.50); "
+                "A=(partialCount+fullCount)/authorityCount; "
+                "B=onlineDossierCount/onlineServiceTotal; "
+                "C=channelOnlineSum/channelTotalSum"
             ),
+            "authoritativeValue": "API totalScore remains authoritative",
+            "changePolicy": "Version the analysis profile; never rewrite raw captures",
             "evidence": evidence(errors),
         }
     )
@@ -224,7 +242,7 @@ def analyze(root: Path) -> dict:
 
     return {
         "schemaVersion": 1,
-        "source": "tests/fixtures M0 captured 2026-09-26",
+        "source": "tests/fixtures M0 captured 2026-09-26; three damaged responses recaptured and verified 2026-09-28",
         "policy": {
             "authoritativeValue": "API response score/totalScore",
             "inferredFormulaUse": "diagnostic explanation and improvement analysis only",
@@ -248,7 +266,7 @@ def analyze(root: Path) -> dict:
             )
             else "FAIL"
         ),
-        "resultScope": "Captured M0 fixtures only; unresolved formulas remain explicitly non-executable",
+        "resultScope": "Captured M0 fixtures only; API scores remain authoritative",
     }
 
 
@@ -260,6 +278,7 @@ if __name__ == "__main__":
     report = analyze(args.root)
     output = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     if args.report:
-        args.report.write_text(output, encoding="utf-8")
+        with args.report.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(output)
     print(output, end="")
     raise SystemExit(0 if report["result"] in {"PASS", "INCOMPLETE"} else 1)

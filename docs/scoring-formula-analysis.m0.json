@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "source": "tests/fixtures M0 captured 2026-09-26",
+  "source": "tests/fixtures M0 captured 2026-09-26; three damaged responses recaptured and verified 2026-09-28",
   "policy": {
     "authoritativeValue": "API response score/totalScore",
     "inferredFormulaUse": "diagnostic explanation and improvement analysis only",
@@ -39,7 +39,7 @@
       "evidence": {
         "observations": 492,
         "maxAbsoluteError": 0.005,
-        "meanAbsoluteError": 0.00089825226,
+        "meanAbsoluteError": 0.000850222392,
         "tolerance": 0.015,
         "withinTolerance": 492,
         "result": "PASS"
@@ -82,7 +82,7 @@
       "evidence": {
         "observations": 935,
         "maxAbsoluteError": 0.005,
-        "meanAbsoluteError": 0.002374331551,
+        "meanAbsoluteError": 0.002370481283,
         "tolerance": 0.015,
         "withinTolerance": 935,
         "result": "PASS"
@@ -127,7 +127,7 @@
       "evidence": {
         "observations": 935,
         "maxAbsoluteError": 0.0052,
-        "meanAbsoluteError": 0.002463957219,
+        "meanAbsoluteError": 0.002476791444,
         "tolerance": 0.015,
         "withinTolerance": 935,
         "result": "PASS"
@@ -142,7 +142,7 @@
       "evidence": {
         "observations": 935,
         "maxAbsoluteError": 0.005,
-        "meanAbsoluteError": 0.00236657754,
+        "meanAbsoluteError": 0.002368716578,
         "tolerance": 0.015,
         "withinTolerance": 935,
         "result": "PASS"
@@ -157,7 +157,7 @@
       "evidence": {
         "observations": 935,
         "maxAbsoluteError": 0.0048,
-        "meanAbsoluteError": 0.002024385027,
+        "meanAbsoluteError": 0.002039358289,
         "tolerance": 0.015,
         "withinTolerance": 935,
         "result": "PASS"
@@ -195,19 +195,18 @@
     },
     {
       "group": "provide-online-tree",
-      "status": "unresolved-on-m0",
-      "candidateComponent": "4 * onlineDossierCount / onlineServiceTotal",
-      "candidateVerified": false,
-      "observedResidualForPhuTho": 7.640994079368,
-      "doNotImplementAsCompleteFormula": true,
-      "limitation": "The completed-month fixture makes the residual vary beyond the declared tolerance. The candidate is not a verified component, and the available observations cannot identify a complete formula.",
+      "status": "verified-on-m0",
+      "profileId": "qd766-online-v1",
+      "formula": "score = min(2, 2*A/0.80) + 4*B + min(6, 6*C/0.50); A=(partialCount+fullCount)/authorityCount; B=onlineDossierCount/onlineServiceTotal; C=channelOnlineSum/channelTotalSum",
+      "authoritativeValue": "API totalScore remains authoritative",
+      "changePolicy": "Version the analysis profile; never rewrite raw captures",
       "evidence": {
         "observations": 6,
-        "maxAbsoluteError": 0.3638026686,
-        "meanAbsoluteError": 0.240936196411,
+        "maxAbsoluteError": 0.004796747967,
+        "meanAbsoluteError": 0.002315755298,
         "tolerance": 0.015,
-        "withinTolerance": 0,
-        "result": "FAIL"
+        "withinTolerance": 6,
+        "result": "PASS"
       }
     },
     {
@@ -225,6 +224,6 @@
       }
     }
   ],
-  "result": "INCOMPLETE",
-  "resultScope": "Captured M0 fixtures only; unresolved formulas remain explicitly non-executable"
+  "result": "PASS",
+  "resultScope": "Captured M0 fixtures only; API scores remain authoritative"
 }

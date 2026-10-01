@@ -27,6 +27,7 @@ from .models import (
     CollectionControl,
     CollectionJob,
     Dataset,
+    Department,
     Entity,
     Formality,
     FormalityDepartment,
@@ -48,6 +49,44 @@ from .schemas import (
 
 router = APIRouter(prefix="/api/v1")
 DbSession = Annotated[Session, Depends(get_session)]
+
+
+def _province_code_for_name(department_name: str | None) -> str | None:
+    normalized = (department_name or "").casefold()
+    return next(
+        (code for code, (name, _) in PROVINCES.items() if name.casefold() in normalized),
+        None,
+    )
+
+
+def _root_department_for_province(
+    session: Session, province_code: str | None
+) -> uuid.UUID | None:
+    if province_code is None:
+        return session.scalar(
+            select(Snapshot.root_department_id)
+            .where(Snapshot.state == "complete")
+            .order_by(Snapshot.created_at.desc())
+            .limit(1)
+        )
+    province = PROVINCES.get(province_code)
+    if province is None:
+        return None
+    province_name = province[0].casefold()
+    candidates = session.execute(
+        select(Snapshot.root_department_id, Department.name)
+        .join(Department, Department.id == Snapshot.root_department_id)
+        .where(Snapshot.state == "complete")
+        .order_by(Snapshot.created_at.desc())
+    )
+    return next(
+        (
+            root_id
+            for root_id, department_name in candidates
+            if province_name in (department_name or "").casefold()
+        ),
+        None,
+    )
 
 
 @router.get("/province-catalog", tags=["formalities"])
@@ -170,12 +209,7 @@ def preview_province_catalog(
     except ProvinceCatalogError as error:
         raise HTTPException(status_code=502, detail="Province catalog source is invalid") from error
 
-    root_department_id = session.scalar(
-        select(Snapshot.root_department_id)
-        .where(Snapshot.state == "complete")
-        .order_by(Snapshot.created_at.desc())
-        .limit(1)
-    )
+    root_department_id = _root_department_for_province(session, normalized_code)
     available_statement = select(Snapshot.formality_id).where(
         Snapshot.state == "complete",
         Snapshot.scope == "formality",
@@ -265,14 +299,9 @@ def create_formality_batch(
 ) -> CollectionBatch:
     if payload.province_code not in PROVINCES:
         raise HTTPException(status_code=404, detail="Province catalog not found")
-    root_department_id = session.scalar(
-        select(Snapshot.root_department_id)
-        .where(Snapshot.state == "complete")
-        .order_by(Snapshot.created_at.desc())
-        .limit(1)
-    )
+    root_department_id = _root_department_for_province(session, payload.province_code)
     if root_department_id is None:
-        raise HTTPException(status_code=409, detail="No root department is available")
+        raise HTTPException(status_code=409, detail="No root department is available for province")
 
     cache_key = f"{payload.province_code}:internal={str(payload.include_internal).lower()}"
     try:
@@ -540,6 +569,34 @@ def system_status(request: Request, session: DbSession) -> dict:
     }
 
 
+@router.get("/dashboard/provinces", tags=["dashboard"])
+def dashboard_provinces(session: DbSession) -> list[dict]:
+    rows = session.execute(
+        select(
+            Snapshot.root_department_id,
+            Department.name,
+            Department.code,
+            func.count(Snapshot.id),
+            func.max(Snapshot.created_at),
+        )
+        .join(Department, Department.id == Snapshot.root_department_id)
+        .where(Snapshot.state == "complete")
+        .group_by(Snapshot.root_department_id, Department.name, Department.code)
+        .order_by(Department.name)
+    )
+    return [
+        {
+            "id": str(root_id),
+            "name": name,
+            "departmentCode": department_code,
+            "provinceCode": _province_code_for_name(name),
+            "snapshotCount": snapshot_count,
+            "latestSnapshotAt": latest_snapshot_at,
+        }
+        for root_id, name, department_code, snapshot_count, latest_snapshot_at in rows
+    ]
+
+
 @router.get("/dashboard", tags=["dashboard"])
 def dashboard(
     request: Request,
@@ -683,14 +740,9 @@ def request_dashboard_collection(
     request: Request,
     session: DbSession,
 ) -> DashboardCollectionResponse:
-    root_department_id = session.scalar(
-        select(Snapshot.root_department_id)
-        .where(Snapshot.state == "complete")
-        .order_by(Snapshot.created_at.desc())
-        .limit(1)
-    )
+    root_department_id = _root_department_for_province(session, payload.province_code)
     if root_department_id is None:
-        raise HTTPException(status_code=409, detail="No root department is available")
+        raise HTTPException(status_code=409, detail="No root department is available for province")
     if payload.formality_id is not None and session.get(Formality, payload.formality_id) is None:
         if payload.province_code is None or payload.formality_code is None:
             raise HTTPException(status_code=404, detail="Formality not found")

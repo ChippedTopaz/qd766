@@ -7,7 +7,8 @@ và hiển thị. Công thức trong tài liệu này chỉ phục vụ giải t
 điểm tăng hoặc giảm, kiểm tra dữ liệu bất thường và chuẩn bị cho phần phân tích.
 Không dùng kết quả tính lại để ghi đè điểm API.
 
-Kết quả được kiểm chứng offline trên fixture Phú Thọ thu ngày 2026-09-26. Trạng
+Kết quả được kiểm chứng offline trên fixture Phú Thọ thu ngày 2026-09-26; ba
+response tháng bị thiếu byte đã được thu lại và xác minh ngày 2026-09-28. Trạng
 thái `verified-on-m0` chỉ có nghĩa là công thức tái tạo mọi quan sát M0 trong sai
 số `0,015` điểm; không khẳng định đây là công thức pháp lý chính thức hoặc đã
 đúng cho mọi tỉnh, mọi kỳ.
@@ -104,18 +105,41 @@ Công thức tái tạo 984 parent/child là:
 Khi mẫu số bằng 0, tỷ lệ tương ứng bằng 0 trong các quan sát M0. Sai số lớn
 nhất là 0,0138 điểm do response chỉ công bố điểm đến hai chữ số thập phân.
 
-## Công thức chưa xác định
+### Dịch vụ công trực tuyến
 
-Với Dịch vụ công trực tuyến, từng có giả thuyết về thành phần:
+Đặt:
 
 ```text
-4 × onlineDossierCount / onlineServiceTotal
+A = (partialCount + fullCount) / authorityCount
+B = onlineDossierCount / onlineServiceTotal
+C = channelOnlineSum / channelTotalSum
 ```
 
-Fixture tháng 8 đã kết thúc làm phần dư biến thiên vượt sai số cho phép, nên
-giả thuyết này **không được coi là thành phần đã xác nhận**. Toàn bộ parameters
-vẫn được lưu và hiển thị chi tiết, nhưng không dùng để tính lại điểm. Cần công
-thức do người dùng cung cấp hoặc thêm bằng chứng độc lập trước khi triển khai.
+Công thức phiên bản `qd766-online-v1` là:
+
+```text
+điểm = min(2, 2 × A / 0,80) + 4 × B + min(6, 6 × C / 0,50)
+```
+
+Ba thành phần tương ứng với tỷ lệ TTHC cung cấp DVCTT (tối đa 2 điểm), tỷ lệ
+DVCTT có phát sinh hồ sơ (tối đa 4 điểm) và tỷ lệ hồ sơ nộp trực tuyến (tối đa
+6 điểm). Công thức khớp cả 6 fixture parent tháng/quý/năm, phạm vi tất cả/TTHC,
+trong sai số `0,015` điểm.
+
+Danh mục nghiệp vụ đã được người dùng xác nhận gồm 6 chỉ tiêu: 4 chỉ tiêu chỉ
+áp dụng cấp tỉnh và 2 chỉ tiêu áp dụng cả tỉnh, xã. Bản METRICS đang lưu mới có
+5 dòng và còn thiếu “Tỷ lệ cung cấp DVCTT toàn trình trên tổng số TTHC đủ điều
+kiện”. Trong 5 dòng hiện có, chỉ dòng “Tỷ lệ hồ sơ DVCTT toàn trình trên tổng
+số hồ sơ đủ điều kiện cung cấp toàn trình” có `maxScore = 12`; bốn dòng còn lại
+chưa khai báo điểm tối đa riêng. Vì vậy không coi 6 chỉ tiêu là 6 khoản điểm
+độc lập, và cũng không dùng cột phạm vi `Tỉnh`/`Tỉnh, xã` để suy ra chỉ tiêu nào
+được chấm điểm. Giao diện hiển thị riêng danh mục 6 chỉ tiêu và phần công thức
+2+4+6 đã tái tạo từ response.
+
+`onlineOnTimeSum` và `onlineOverdueSum` là số liệu phân tích chuyên sâu, không
+tham gia tổng 12 điểm của nhóm này. Điểm `totalScore` do API trả về vẫn là giá
+trị chính thức. Nếu cách tính của nguồn thay đổi, tạo phiên bản cấu hình mới và
+đối chiếu lại fixture; không sửa hoặc tính lại raw response đã lưu.
 
 ## Kỳ báo cáo của Mức độ hài lòng
 

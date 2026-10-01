@@ -34,7 +34,7 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(len(data["snapshots"]), 6)
         month = data["snapshots"]["month-2026-08:all"]
         selected = data["snapshots"]["month-2026-08:formality"]
-        self.assertEqual(month["provinceAggregatedScore"], 59.91)
+        self.assertEqual(month["provinceAggregatedScore"], 59.92)
         self.assertEqual(month["provinceAggregatedMaximum"], 100)
         self.assertEqual(selected["provinceAggregatedScore"], 50.94)
         self.assertEqual(selected["provinceAggregatedMaximum"], 80)
@@ -51,7 +51,7 @@ class WebDataTest(unittest.TestCase):
         )
         self.assertEqual(online["scorePolicy"], "api-authoritative")
         self.assertTrue(online["root"]["parameters"])
-        self.assertNotIn("parameters", online["children"][0])
+        self.assertEqual(online["children"][0]["parameters"], {"scoreDelta": None})
 
 
 if __name__ == "__main__":

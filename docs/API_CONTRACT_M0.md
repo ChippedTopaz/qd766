@@ -3,7 +3,9 @@
 ## Phạm vi đã khóa
 
 Bộ fixture M0 được thu ngày 2026-09-26 từ trang công khai
-`https://dichvucong.gov.vn/danh-gia-chat-luong-phuc-vu` cho UBND tỉnh Phú Thọ:
+`https://dichvucong.gov.vn/danh-gia-chat-luong-phuc-vu` cho UBND tỉnh Phú Thọ.
+Ba response tháng bị thiếu byte trong bản lưu ban đầu đã được worker thu lại,
+kiểm tra schema/root/hash và thay thế ngày 2026-09-28:
 
 - `rootDepartmentId`: `019d2be3-6a88-732b-8b17-b68020c8553a`
 - năm: 2026
@@ -115,9 +117,10 @@ Các STT 7, 8, 9, 10 và 18 chưa có `maxScore`; không suy diễn thành 0. C�
 Cột “Công thức tính” là mô tả hiển thị. Điểm API trả về là
 giá trị chính; không tính lại rồi ghi đè. Phân tích ngược từ cột này và
 fixture được lưu trong `docs/SCORING_ANALYSIS_M0.md` và
-`docs/scoring-formula-analysis.m0.json`. Tiến độ giải quyết đã khóa được
-công thức trên M0; Dịch vụ công trực tuyến chưa xác định được công thức hoặc
-thành phần đủ ổn định để triển khai.
+`docs/scoring-formula-analysis.m0.json`. Tiến độ giải quyết và Dịch vụ công
+trực tuyến đã khóa được công thức giải thích trên M0. Riêng Dịch vụ công trực
+tuyến dùng profile có phiên bản `qd766-online-v1`; điểm API vẫn là giá trị
+chính thức và hệ thống phải cảnh báo nếu điểm tính lại vượt sai số cho phép.
 
 ## Kiểm tra và giới hạn
 

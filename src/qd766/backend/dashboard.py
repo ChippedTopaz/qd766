@@ -4,6 +4,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from qd766.province_catalog import PROVINCES
+
 from .models import Dataset, Entity, Formality, Snapshot
 
 
@@ -187,6 +189,15 @@ def dashboard_payload(
         payload_snapshots[f"{period_id}:{snapshot.scope}"] = snapshot_payload(snapshot)
 
     root = snapshots[0].root_department
+    root_name = root.name or ""
+    province_code = next(
+        (
+            code
+            for code, (name, _) in PROVINCES.items()
+            if name.casefold() in root_name.casefold()
+        ),
+        None,
+    )
     ordered_periods = _available_periods(snapshots)
     units: dict[str, dict[str, Any]] = {
         str(root.id): {
@@ -215,7 +226,7 @@ def dashboard_payload(
     return {
         "schemaVersion": 1,
         "source": "PostgreSQL snapshots; API scores are authoritative",
-        "province": {"id": str(root.id), "name": root.name},
+        "province": {"id": str(root.id), "name": root.name, "code": province_code},
         "formality": {
             "id": str(formality.id) if formality else None,
             "code": formality.code if formality else "",

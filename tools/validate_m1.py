@@ -45,10 +45,9 @@ def validate(root: Path) -> dict:
             "against captured M0 fixtures only"
         ),
         "scoreAuthority": "DVCQG response score/totalScore",
-        "unknownFormulaPolicy": "retain and display parameters; do not recalculate",
+        "formulaPolicy": "API scores are authoritative; explanatory formulas are versioned and checked",
         "snapshots": snapshots,
         "remainingGaps": [
-            "Dịch vụ công trực tuyến chưa có công thức điểm đầy đủ",
             "METRICS maxScore còn trống tại STT 7, 8, 9, 10, 18",
             "Chưa kiểm chứng crawler production và các tỉnh ngoài Phú Thọ",
         ],
@@ -63,6 +62,7 @@ if __name__ == "__main__":
     report = validate(args.root)
     output = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     if args.report:
-        args.report.write_text(output, encoding="utf-8")
-    print(output, end="")
+        with args.report.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(output)
+    print(json.dumps(report, ensure_ascii=True, indent=2))
     raise SystemExit(0 if report["result"] == "PASS" else 1)

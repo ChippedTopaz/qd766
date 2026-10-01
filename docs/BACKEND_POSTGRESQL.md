@@ -257,3 +257,17 @@ Chưa hoàn thành hoặc đang bị chặn:
 Thứ tự tiếp theo: giữ circuit mở, chạy probe một GET duy nhất; chỉ khi người vận
 hành xác nhận kết quả an toàn mới đóng circuit để worker xử lý lần lượt các job
 đang chờ.
+
+## Cập nhật tại máy cơ quan ngày 01/10/2026
+
+- circuit đã được kiểm tra và đang `closed`; worker đã hoàn tất các job theo
+  hàng đợi tuần tự;
+- PostgreSQL có 24 snapshot hoàn chỉnh: 23 snapshot Phú Thọ và một snapshot
+  tổng hợp Tây Ninh năm 2026;
+- bốn migration Alembic đã được áp dụng, gồm control và batch/checkpoint;
+- ba fixture tháng bị thiếu byte đã được phục hồi từ raw response do worker
+  thu lại ngày 28/09, đối chiếu manifest và SHA-256;
+- frontend đã có bộ chọn tỉnh/thành phố và đã kiểm tra chuyển hai chiều giữa
+  Phú Thọ và Tây Ninh;
+- bản workspace mới cần được backup, triển khai lại vào `D:\QD766\app` và tạo
+  checkpoint Git trước khi mở rộng thêm tỉnh.

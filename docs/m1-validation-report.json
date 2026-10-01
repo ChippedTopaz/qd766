@@ -2,7 +2,7 @@
   "result": "PASS",
   "scope": "Offline M1 normalization, completeness and API-score aggregation against captured M0 fixtures only",
   "scoreAuthority": "DVCQG response score/totalScore",
-  "unknownFormulaPolicy": "retain and display parameters; do not recalculate",
+  "formulaPolicy": "API scores are authoritative; explanatory formulas are versioned and checked",
   "snapshots": [
     {
       "period": {
@@ -21,7 +21,7 @@
         "formality-online-payment-tree"
       ],
       "unsupportedGroups": [],
-      "provinceAggregatedScore": 59.91,
+      "provinceAggregatedScore": 59.92,
       "provinceAggregatedMaximum": 100,
       "rootEntities": 6,
       "childEntities": 978,
@@ -184,7 +184,6 @@
     }
   ],
   "remainingGaps": [
-    "Dịch vụ công trực tuyến chưa có công thức điểm đầy đủ",
     "METRICS maxScore còn trống tại STT 7, 8, 9, 10, 18",
     "Chưa kiểm chứng crawler production và các tỉnh ngoài Phú Thọ"
   ]
