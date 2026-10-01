@@ -267,6 +267,10 @@ class BackendTest(unittest.TestCase):
             ranking_by_id[ROOT_ID]["groups"]["transparency"]["score"],
             5.0,
         )
+        self.assertEqual(
+            ranking_by_id[ROOT_ID]["groups"]["transparency"]["metrics"]["EXAMPLE"]["score"],
+            5.0,
+        )
 
         queued = self.client.post(
             "/api/v1/dashboard/requests",

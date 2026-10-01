@@ -32,6 +32,7 @@ from .models import (
     Entity,
     Formality,
     FormalityDepartment,
+    Metric,
     Snapshot,
 )
 from .schemas import (
@@ -652,8 +653,10 @@ def dashboard_province_rankings(
             Department.name,
             Snapshot.created_at,
             Dataset.group_name,
+            Entity.id,
             Entity.api_score,
             Entity.api_max_score,
+            Entity.parameters,
         )
         .join(Department, Department.id == Snapshot.root_department_id)
         .join(Dataset, Dataset.snapshot_id == Snapshot.id)
@@ -679,7 +682,8 @@ def dashboard_province_rankings(
     )
     latest_by_root: dict[uuid.UUID, dict] = {}
     rows = session.execute(statement)
-    for snapshot_id, root_id, name, created_at, group_name, score, maximum in rows:
+    entity_groups: dict[int, dict] = {}
+    for snapshot_id, root_id, name, created_at, group_name, entity_id, score, maximum, parameters in rows:
         item = latest_by_root.setdefault(
             root_id,
             {
@@ -695,7 +699,28 @@ def dashboard_province_rankings(
         item["groups"][group_name] = {
             "score": float(score) if score is not None else None,
             "maximum": float(maximum) if maximum is not None else None,
+            "parameters": parameters,
+            "metrics": {},
         }
+        entity_groups[entity_id] = item["groups"][group_name]
+    if entity_groups:
+        metric_rows = session.execute(
+            select(
+                Metric.entity_id,
+                Metric.code,
+                Metric.name,
+                Metric.ratio,
+                Metric.api_score,
+                Metric.api_max_score,
+            ).where(Metric.entity_id.in_(entity_groups))
+        )
+        for entity_id, code, name, ratio, score, maximum in metric_rows:
+            entity_groups[entity_id]["metrics"][code] = {
+                "name": name,
+                "ratio": float(ratio) if ratio is not None else None,
+                "score": float(score) if score is not None else None,
+                "maximum": float(maximum) if maximum is not None else None,
+            }
     result: list[dict] = []
     for item in latest_by_root.values():
         groups = item["groups"]
