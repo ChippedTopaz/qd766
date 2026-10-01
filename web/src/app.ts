@@ -1,6 +1,9 @@
 import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerStats, similarVolumePeers, snapshotFor, snapshotKey } from "./analytics.js";
 import { analyzeOnlineScore, ONLINE_SCORING_PROFILE } from "./online-scoring.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
+import type TomSelectControl from "tom-select";
+
+declare const TomSelect: typeof TomSelectControl;
 
 type DemoState = "normal" | "ready" | "loading" | "queued" | "blocked" | "empty" | "error" | "insufficient";
 interface State { screen: ScreenId; periodId: string; scope: Scope; unitId: string; peerDimension: "total" | GroupId; selectedGroup: GroupId; search: string; demo: DemoState; modal: "none" | "brief" | "export" }
@@ -20,6 +23,7 @@ let selectionRequest=0;
 let pendingMessage="";
 let completionMessage="";
 let pendingProvinceId="";
+let searchableSelects:TomSelectControl[]=[];
 interface OperationJob {id:string;state:string;attempts:number;createdAt:string;updatedAt:string;lockedBy:string|null;request:{period?:{type?:string;year?:number;month?:number;quarter?:number};scope?:string;formalityId?:string}}
 interface OperationData {loading:boolean;error:string|null;circuitState:string;circuitReason:string|null;snapshotCount:number;latestSnapshotAt:string|null;jobs:OperationJob[];batches:BatchResult[]}
 let operationData:OperationData={loading:false,error:null,circuitState:"unknown",circuitReason:null,snapshotCount:0,latestSnapshotAt:null,jobs:[],batches:[]};
@@ -82,13 +86,16 @@ const level = (ratio: number | null) => ratio === null ? ["Không có dữ liệ
 const title = (name: string, description: string, note = "") => `<header class="page-head"><div><p class="eyebrow">${esc(data.province.name)} · ${esc(period().label)}</p><h1>${esc(name)}</h1><p>${esc(description)}</p></div>${note ? `<div class="head-note muted">${note}</div>` : ""}</header>`;
 const rankText = (view: UnitView | UnitGroupView) => view.peer ? `Hạng ${view.peer.rank}/${view.peer.total}${view.peer.tiedCount > 1 ? ` · đồng hạng ${view.peer.tiedCount}` : ""}` : "Chưa xếp hạng";
 
+const alphabet=new Intl.Collator("vi",{sensitivity:"base",numeric:true});
+const displayProvinceName=(value:string)=>value.replace(/^UBND\s+(tỉnh|thành phố)\s+/i,"");
+const byName=<T extends {departmentName:string}>(left:T,right:T)=>alphabet.compare(left.departmentName,right.departmentName);
 const unitOptions = () => {
   const groups = [
-    ["PROVINCE_TOTAL", "Kết quả chung toàn tỉnh"],
-    ["PROVINCE", "Sở, ban, ngành"],
-    ["COMMUNE", "Xã, phường"],
-  ] as const;
-  return groups.map(([level,label])=>`<optgroup label="${label}">${data.units.filter(item=>item.departmentLevel===level).map(item=>`<option value="${esc(item.departmentId)}" ${item.departmentId===state.unitId?"selected":""}>${esc(item.departmentName)}</option>`).join("")}</optgroup>`).join("");
+    {label:"Kết quả chung toàn tỉnh",items:data.units.filter(item=>item.departmentId===data.province.id)},
+    {label:"Sở, ban, ngành",items:data.units.filter(item=>item.departmentId!==data.province.id&&item.departmentLevel==="PROVINCE")},
+    {label:"Xã, phường",items:data.units.filter(item=>item.departmentLevel==="COMMUNE")},
+  ];
+  return groups.map(group=>`<optgroup label="${group.label}">${group.items.sort(byName).map(item=>`<option value="${esc(item.departmentId)}" ${item.departmentId===state.unitId?"selected":""}>${esc(item.departmentName)}</option>`).join("")}</optgroup>`).join("");
 };
 const parameterLabels: Record<string,string> = {
   averageScore:"Điểm đánh giá trung bình", avgProcessingDays:"Số ngày xử lý trung bình",
@@ -113,7 +120,7 @@ function context(): string {
   const formalityScopeLabel=catalogPreview.mode==="single"&&catalogPreview.selectedId?`${data.formality.code} · ${data.formality.name}`:catalogPreview.mode==="filtered"&&catalogPreview.selected?`${int(catalogPreview.selected)} TTHC sau lọc`:"Theo thủ tục hành chính";
   const canSubmit=state.scope==="formality"&&state.demo==="ready"&&(catalogPreview.mode==="filtered"?catalogPreview.selected>0:Boolean(catalogPreview.selectedId));
   const selectedProvinceId=pendingProvinceId||data.province.id;
-  const provinceItems=(provinceOptions.length?provinceOptions:[{id:data.province.id,name:data.province.name,departmentCode:null,provinceCode:data.province.code??null,snapshotCount:0,latestSnapshotAt:null,available:true}]).map(item=>`<option value="${esc(item.id)}" ${item.id===selectedProvinceId?"selected":""}>${esc(item.name.replace(/^UBND\s+(tỉnh|thành phố)\s+/i,""))}${item.available?"":" · chưa có dữ liệu"}</option>`).join("");
+  const provinceItems=(provinceOptions.length?provinceOptions:[{id:data.province.id,name:data.province.name,departmentCode:null,provinceCode:data.province.code??null,snapshotCount:0,latestSnapshotAt:null,available:true}]).slice().sort((left,right)=>alphabet.compare(displayProvinceName(left.name),displayProvinceName(right.name))).map(item=>`<option value="${esc(item.id)}" ${item.id===selectedProvinceId?"selected":""}>${esc(displayProvinceName(item.name))}${item.available?"":" · chưa có dữ liệu"}</option>`).join("");
   return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type==="month"?"selected":""}>Tháng</option><option value="quarter" ${selectedPeriod.type==="quarter"?"selected":""}>Quý</option><option value="year" ${selectedPeriod.type==="year"?"selected":""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item=>`<option value="${item.id}" ${item.id===state.periodId?"selected":""}>${item.type==="month"?`Tháng ${item.value}`:item.type==="quarter"?`Quý ${item.value}`:"Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year=>`<option value="${year}" ${year===selectedPeriod.year?"selected":""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope==="all"?"selected":""}>Tất cả thủ tục hành chính</option><option value="formality" ${state.scope==="formality"?"selected":""}>${esc(formalityScopeLabel)}</option></select></label></div><div class="context-actions">${canSubmit?`<button class="btn primary" data-action="submit-statistics">Thống kê</button>`:""}<button class="btn" data-action="open-quality">● Dữ liệu đầy đủ</button><button class="btn" data-action="export">Xuất</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></header>`;
 }
 
@@ -123,8 +130,30 @@ function shell(content: string): void {
   const periodNotice=state.demo==="normal"&&state.screen!=="operations"&&loaded&&period().provisional?`<div class="period-notice" role="status"><strong>Số liệu tạm thời</strong><span>Kỳ báo cáo này chưa kết thúc. Kết quả có thể thay đổi khi hệ thống nguồn cập nhật dữ liệu.</span></div>`:"";
   const staleNotice=loaded?.delivery?.stale?`<div class="period-notice stale" role="status"><strong>Chưa cập nhật được</strong><span>${esc(loaded.delivery.message??"Đang sử dụng bản dữ liệu hoàn chỉnh gần nhất.")}</span></div>`:"";
   const completedNotice=completionMessage?`<div class="period-notice success" role="status"><strong>Thống kê hoàn tất</strong><span>${esc(completionMessage)}</span><button class="btn small" data-action="dismiss-completion">Đóng</button></div>`:"";
+  searchableSelects.forEach(control=>control.destroy());
+  searchableSelects=[];
   root.innerHTML = `<div class="app-shell">${nav()}<div class="workspace">${context()}<main class="content">${formalityNotice}${completedNotice}${staleNotice}${periodNotice}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : ""}</div>`;
   bind();
+}
+
+function initSearchableSelects():void{
+  const settings=[
+    {selector:"#province-select",placeholder:"Nhập tên tỉnh/thành phố…"},
+    {selector:"#unit-select",placeholder:"Nhập tên cơ quan, đơn vị…"},
+  ];
+  for(const item of settings){
+    const element=document.querySelector<HTMLSelectElement>(item.selector);
+    if(!element)continue;
+    searchableSelects.push(new TomSelect(element,{
+      create:false,
+      maxItems:1,
+      maxOptions:null,
+      placeholder:item.placeholder,
+      searchField:["text"],
+      sortField:[{field:"$score",direction:"desc"},{field:"$order",direction:"asc"}],
+      render:{no_results:()=>'<div class="no-results">Không tìm thấy kết quả phù hợp</div>'},
+    }));
+  }
 }
 
 function unavailable(kind: DemoState): string {
@@ -327,6 +356,7 @@ function bind(): void {
   document.querySelectorAll<HTMLElement>("[data-resume-batch]").forEach(el=>el.addEventListener("click",async()=>{const id=el.dataset.resumeBatch;if(!id)return;el.setAttribute("disabled","");try{const response=await fetch(`/api/v1/formality-batches/${encodeURIComponent(id)}/resume`,{method:"POST"});if(!response.ok)throw new Error(`HTTP ${response.status}`);await loadOperations()}catch(error){operationData.error=error instanceof Error?error.message:String(error);render()}}));
   document.querySelector<HTMLElement>("[data-action=catalog-prev]")?.addEventListener("click",()=>{catalogPreview.offset=Math.max(0,catalogPreview.offset-100);void loadCatalogPreview()});
   document.querySelector<HTMLElement>("[data-action=catalog-next]")?.addEventListener("click",()=>{catalogPreview.offset+=100;void loadCatalogPreview()});
+  initSearchableSelects();
 }
 
 function mergeUnits(snapshot: Snapshot): void {

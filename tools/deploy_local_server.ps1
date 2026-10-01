@@ -24,7 +24,7 @@ New-Item -ItemType Directory -Force -Path $resolvedTarget | Out-Null
 # Copy application sources without development/runtime state. Existing files are
 # updated, but files that exist only in the deployment directory are not deleted.
 & robocopy $resolvedSource $resolvedTarget /E /R:2 /W:1 `
-    /XD ".git" ".venv" "__pycache__" "tmp-pip" "tests\runtime-backend" "tests\runtime-collection" `
+    /XD ".git" ".venv" "node_modules" ".npm-cache" "__pycache__" "tmp-pip" "tests\runtime-backend" "tests\runtime-collection" `
     /XF ".env" "*.pyc" "*.db" | Out-Null
 $robocopyExitCode = $LASTEXITCODE
 if ($robocopyExitCode -gt 7) {
