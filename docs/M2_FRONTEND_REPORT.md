@@ -32,7 +32,8 @@ biểu diễn bằng trạng thái nguồn không hỗ trợ.
 | Công thức chi tiết DVC trực tuyến | Đã khớp 6 fixture M0 trong sai số 0,015 | Điểm API vẫn là giá trị chính thức; công thức chỉ dùng để giải thích |
 | Tiêu chí không áp dụng cấp xã | Danh mục có dữ liệu, mapping response chưa đủ | Chưa gắn nhãn vào điểm cụ thể để tránh kết luận sai |
 | Impact–Effort | Có bố cục; effort chưa có dữ liệu | Gắn nhãn giả định cần phê duyệt |
-| CSV/Excel export | Pipeline chưa triển khai | Trung tâm xuất hiển thị trạng thái chờ |
+| CSV export | Đã triển khai | Bảng điểm 6 nhóm và số liệu thành phần của cơ quan đang chọn; kèm kỳ, độ mới và thời điểm cập nhật; mở bằng Excel |
+| Excel XLSX export | Chưa triển khai | Dùng CSV để đối chiếu trước |
 | Báo cáo lãnh đạo một trang | Hoạt động | Modal A4, có In/PDF |
 
 Không có dữ liệu mô phỏng trộn vào dữ liệu thật.

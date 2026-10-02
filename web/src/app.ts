@@ -1,6 +1,7 @@
 import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerStats, similarVolumePeers, snapshotFor, snapshotKey } from "./analytics.js";
 import { analyzeOnlineScore, ONLINE_SCORING_PROFILE } from "./online-scoring.js";
 import { analyzeProgressScore } from "./progress-scoring.js";
+import { buildAnalysisCsv } from "./csv-export.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 import type TomSelectControl from "tom-select";
 
@@ -509,7 +510,23 @@ function briefModal(): string {
 }
 
 function exportModal(): string {
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Trung tâm xuất báo cáo"><div class="modal"><div class="modal-top"><strong>Xuất dữ liệu và báo cáo</strong><button class="btn small" data-action="close-modal">Đóng</button></div><div class="brief"><p class="eyebrow">${esc(unit().name)} · ${esc(period().label)}</p><h1>Chọn định dạng</h1><p class="muted">Một số định dạng đang được hoàn thiện trước khi cung cấp cho người dùng.</p><div class="quality-grid" style="margin-top:18px"><article class="quality-card"><h3>Dữ liệu dạng bảng</h3><strong>CSV</strong><p>Điểm, thứ hạng, số liệu so sánh và trạng thái dữ liệu.</p><button class="btn small" disabled>Đang hoàn thiện</button></article><article class="quality-card"><h3>Bảng làm việc</h3><strong>Excel</strong><p>Gồm tổng quan, sáu nhóm chỉ tiêu và bảng so sánh.</p><button class="btn small" disabled>Đang hoàn thiện</button></article><article class="quality-card"><h3>Báo cáo lãnh đạo</h3><strong>PDF</strong><p>Mở báo cáo một trang, sau đó chọn In / PDF.</p><button class="btn small primary" data-action="brief">Mở báo cáo</button></article></div></div></div></div>`;
+  const available=state.demo==="normal"&&Boolean(data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]);
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Trung tâm xuất báo cáo"><div class="modal"><div class="modal-top"><strong>Xuất dữ liệu và báo cáo</strong><button class="btn small" data-action="close-modal">Đóng</button></div><div class="brief"><p class="eyebrow">${esc(data.units.find(item=>item.departmentId===state.unitId)?.departmentName??data.province.name)} · ${esc(period().label)}</p><h1>Xuất dữ liệu đang xem</h1><p class="muted">CSV mở được bằng Excel, giữ nguyên số 0 và để trống giá trị chưa có. Tệp có kèm kỳ và thời điểm cập nhật.${available?"":" Cần có dữ liệu của lựa chọn hiện tại trước khi xuất."}</p><div class="quality-grid" style="margin-top:18px"><article class="quality-card"><h3>Điểm 6 nhóm chỉ tiêu</h3><strong>CSV</strong><p>Điểm nguồn, thứ hạng, trung vị và trạng thái dữ liệu của cơ quan đang chọn.</p><button class="btn small primary" data-export-csv="scores" ${available?"":"disabled"}>Tải bảng điểm</button></article><article class="quality-card"><h3>Số liệu thành phần</h3><strong>CSV</strong><p>Chỉ tiêu và tham số gốc của 6 nhóm. Chỉ xuất dữ liệu nguồn đã cung cấp.</p><button class="btn small" data-export-csv="details" ${available?"":"disabled"}>Tải số liệu chi tiết</button></article><article class="quality-card"><h3>Báo cáo lãnh đạo</h3><strong>PDF</strong><p>Mở báo cáo một trang, sau đó chọn In / PDF.</p><button class="btn small primary" data-action="brief" ${available?"":"disabled"}>Mở báo cáo</button></article></div></div></div></div>`;
+}
+
+function downloadAnalysisCsv(kind:"scores"|"details"):void{
+  const snapshot=data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)];
+  if(!snapshot||state.demo!=="normal")return;
+  const view=unit();
+  const rankedView={...view,peer:rankFor(view,state.periodId,null),groups:view.groups.map(group=>({...group,peer:rankFor(group,state.periodId,group.id)}))};
+  const scopeLabel=state.scope==="all"?"Tất cả TTHC":`${data.formality.code} · ${data.formality.name}`;
+  const content=buildAnalysisCsv(rankedView,snapshot,period(),data.province.name,scopeLabel,kind);
+  const url=URL.createObjectURL(new Blob([content],{type:"text/csv;charset=utf-8"}));
+  const link=document.createElement("a");
+  link.href=url;
+  link.download=`qd766-${state.periodId}-${state.unitId}-${state.scope}-${kind}.csv`;
+  document.body.append(link);link.click();link.remove();
+  window.setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
 function bind(): void {
@@ -534,6 +551,7 @@ function bind(): void {
   document.querySelector<HTMLInputElement>("#peer-search")?.addEventListener("input",e=>{state.search=(e.target as HTMLInputElement).value;render()});
   document.querySelectorAll<HTMLElement>("[data-action=brief]").forEach(el=>el.addEventListener("click",()=>{state.modal="brief";render()}));
   document.querySelector<HTMLElement>("[data-action=export]")?.addEventListener("click",()=>{state.modal="export";render()});
+  document.querySelectorAll<HTMLElement>("[data-export-csv]").forEach(el=>el.addEventListener("click",()=>{downloadAnalysisCsv(el.dataset.exportCsv as "scores"|"details")}));
   document.querySelector<HTMLElement>("[data-action=close-modal]")?.addEventListener("click",()=>{state.modal="none";render()});
   document.querySelector<HTMLElement>("[data-action=print]")?.addEventListener("click",()=>window.print());
   document.querySelector<HTMLElement>("[data-action=open-quality]")?.addEventListener("click",()=>{state.screen="quality";render()});

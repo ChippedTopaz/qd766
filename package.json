@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run data && tsc",
     "test:progress": "npm run build && node web/tests/progress-scoring.test.mjs",
+    "test:csv": "npm run build && node web/tests/csv-export.test.mjs",
     "serve": "python tools/serve_app.py",
     "serve:static": "python tools/serve_web.py"
   },
