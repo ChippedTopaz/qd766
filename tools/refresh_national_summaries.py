@@ -9,7 +9,7 @@ import os
 import socket
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +44,16 @@ def _scheduled_period(now: datetime, *, year_available: bool) -> PeriodSelection
     return PeriodSelection("quarter", now.year, (now.month - 1) // 3 + 1)
 
 
+def _missing_closed_periods(session, year: int, now: datetime) -> list[PeriodSelection]:
+    if year > now.year:
+        raise ValueError("Cannot backfill a future year")
+    month_count = 12 if year < now.year else now.month - 1
+    quarter_count = 4 if year < now.year else (now.month - 1) // 3
+    candidates = [PeriodSelection("month", year, value) for value in range(1, month_count + 1)]
+    candidates += [PeriodSelection("quarter", year, value) for value in range(1, quarter_count + 1)]
+    return [period for period in candidates if latest_national_summary(session, period) is None]
+
+
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -52,11 +62,18 @@ def main() -> int:
     parser.add_argument("--year", type=int)
     parser.add_argument("--period-value", type=int)
     parser.add_argument("--all-current", action="store_true")
+    parser.add_argument("--backfill-missing-year", type=int)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--max-periods", type=int, default=12)
     parser.add_argument("--delay-seconds", type=float, default=5.0)
     arguments = parser.parse_args()
     if arguments.delay_seconds < 0:
         parser.error("--delay-seconds must be non-negative")
-    now = datetime.now()
+    if not 1 <= arguments.max_periods <= 12:
+        parser.error("--max-periods must be between 1 and 12")
+    if arguments.backfill_missing_year is not None and (arguments.period_type or arguments.all_current or arguments.year is not None or arguments.period_value is not None):
+        parser.error("--backfill-missing-year cannot be combined with another period selector")
+    now = datetime.now(timezone(timedelta(hours=7)))
     if arguments.period_type:
         if arguments.year is None:
             parser.error("--year is required with --period-type")
@@ -77,12 +94,21 @@ def main() -> int:
     load_environment_file(ROOT / ".env")
     engine = create_database_engine(Settings.from_env())
     factory = create_session_factory(engine)
-    if periods is None:
+    if arguments.backfill_missing_year is not None:
         with factory() as session:
-            year_available = latest_national_summary(
-                session, PeriodSelection("year", now.year)
-            ) is not None
-        periods = [_scheduled_period(now, year_available=year_available)]
+            periods = _missing_closed_periods(session, arguments.backfill_missing_year, now)[:arguments.max_periods]
+        # Conservative spacing for manual historical batches; no retries.
+        arguments.delay_seconds = max(arguments.delay_seconds, 30.0)
+    elif periods is None:
+        # Hourly task: checking only one rotating period left month/quarter
+        # unobserved for four hours despite a two-hour freshness policy.
+        periods = _current_periods(now)
+    if arguments.dry_run or not periods:
+        print(json.dumps({"state": "planned" if periods else "nothing-missing", "periods": [
+            {"periodType": period.type, "year": period.year, "periodValue": period.value}
+            for period in periods], "delaySeconds": arguments.delay_seconds}, ensure_ascii=False))
+        engine.dispose()
+        return 0
     worker_id = f"national-summary:{socket.gethostname()}:{os.getpid()}"
     acquired = False
     results: list[dict] = []
@@ -97,6 +123,12 @@ def main() -> int:
         acquired = True
         with BrowserTransport(timeout_seconds=45) as transport:
             for index, period in enumerate(periods):
+                # Re-check circuit and refresh the shared lease before each call.
+                with factory.begin() as session:
+                    lease_state = acquire_collection_lease(session, worker_id, lease_seconds=1800)
+                if lease_state != "acquired":
+                    print(json.dumps({"state": lease_state, "summaries": results}, ensure_ascii=False))
+                    return 0
                 capture = collect_national_summary(period, transport)
                 with factory.begin() as session:
                     snapshot, created = store_national_summary(session, capture)
@@ -112,6 +144,7 @@ def main() -> int:
                         "created": created,
                     }
                 )
+                print(json.dumps({"state": "period-saved", **results[-1]}, ensure_ascii=False), flush=True)
                 if index < len(periods) - 1:
                     time.sleep(arguments.delay_seconds)
         with factory.begin() as session:

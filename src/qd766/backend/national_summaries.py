@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timezone
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -8,6 +10,18 @@ from qd766.national_summary import GROUP_CODES, GROUP_COUNT, NationalSummaryCapt
 from qd766.periods import PeriodSelection
 
 from .models import NationalSummarySnapshot
+
+
+def _record_recapture(session: Session, existing: NationalSummarySnapshot, capture: NationalSummaryCapture) -> None:
+    previous = existing.captured_at
+    previous = previous if previous.tzinfo else previous.replace(tzinfo=timezone.utc)
+    current = capture.captured_at
+    current = current if current.tzinfo else current.replace(tzinfo=timezone.utc)
+    if current > previous:
+        # Same content is still a successful new observation. Keep created_at
+        # and the content hash/version; never fabricate a time without a capture.
+        existing.captured_at = current
+        session.flush()
 
 
 def store_national_summary(
@@ -28,6 +42,7 @@ def store_national_summary(
         )
     )
     if existing is not None:
+        _record_recapture(session, existing, capture)
         return existing, False
     snapshot = NationalSummarySnapshot(
         summary_key=summary_key,
@@ -56,6 +71,7 @@ def store_national_summary(
         )
         if existing is None:
             raise
+        _record_recapture(session, existing, capture)
         return existing, False
     return snapshot, True
 

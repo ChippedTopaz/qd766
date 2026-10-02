@@ -334,6 +334,18 @@ Không truyền tham số thì mỗi lần chạy công cụ chỉ gửi **một
 năm nếu chưa có dữ liệu, sau đó luân phiên năm, tháng và quý theo giờ. Cách này
 giữ năm hiện tại cập nhật khoảng hai giờ/lần và tránh ba request sát nhau. Chỉ
 dùng `--all-current` khi quản trị viên chủ động cần cập nhật tuần tự cả ba kỳ.
+
+Cập nhật 02/10/2026: lịch mặc định giờ cũng kiểm tra tuần tự cả tháng/quý/năm
+(tối đa 3 API tổng hợp mỗi lượt, cách nhau 5 giây), vì vòng quay 4 giờ không
+phù hợp chính sách quá hạn 2 giờ. Response giống bản cũ vẫn cập nhật captured_at
+bằng thời điểm lấy thành công mới, giữ nguyên phiên bản nội dung và created_at.
+Không thay timestamp chỉ dựa trên lịch chạy hoặc khi request thất bại.
+
+Bổ sung lịch sử thiếu: `tools/refresh_national_summaries.py --backfill-missing-year 2026`.
+Dùng `--dry-run` để xem kế hoạch mà không gọi nguồn; mỗi lượt tối đa 12 kỳ,
+chỉ chọn tháng/quý đã kết thúc, bỏ qua kỳ đã lưu, cách nhau tối thiểu 30 giây.
+Lưu thành công từng kỳ là checkpoint; chạy lại chỉ bổ sung kỳ còn thiếu.
+Mọi request dùng shared lease/circuit, không retry hay tự đóng circuit.
 Công cụ dùng chung PostgreSQL collection lease với worker; nếu worker đang gọi
 nguồn hoặc circuit đang mở thì không gửi request. HTTP 403, 429 và phản hồi
 HTML/rejection tiếp tục mở circuit theo quy tắc an toàn.
