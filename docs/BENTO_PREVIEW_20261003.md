@@ -1,5 +1,13 @@
 # Tổng quan Bento — bản chờ duyệt
 
+## Điều chỉnh sau phản hồi
+
+- Xu hướng có đúng sáu đường của sáu nhóm; nhấn nút tên nhóm để bật/tắt. Lựa chọn giữ trong phiên đang mở, không gửi yêu cầu thu thập. Tỷ lệ đạt điểm tối đa dùng chung trục %, tooltip có điểm gốc. Không thêm đường tổng điểm thứ bảy.
+- Header bỏ nhãn Tổng quan QĐ766; tên cơ quan và kỳ/phạm vi nằm cùng hàng trên desktop, tự xuống dòng khi điện thoại không đủ rộng.
+- Điện thoại: các dòng bảng tổng hợp/chi tiết thành khối có nhãn lấy từ tiêu đề cột hiện có. Giữ cấu trúc DOM bảng và hành vi chọn dòng; desktop vẫn là bảng. Các số liệu không bị ẩn.
+- Đồng hồ phân đoạn theo thang 100: dưới 50 Kém/đỏ; 50 đến dưới 70 Trung bình/cam; 70 đến 85 Tốt/xanh da trời; trên 85 Xuất sắc/xanh lá. Đây là ngưỡng hiển thị theo yêu cầu, không phải thay đổi công thức hoặc tuyên bố xếp loại chính thức từ nguồn. Với phạm vi TTHC có thang tối đa khác 100, cung tròn dùng tỷ lệ điểm tối đa và nhãn thang điểm gốc giữ nguyên.
+- Kiểm thử biên 50/70/85, đúng sáu đường, bật/tắt, dữ liệu thiếu và render đều PASS. Trình duyệt thật xác nhận bật/tắt Công khai minh bạch, phần chi tiết Tiến độ trên viewport nhỏ không tràn ngang.
+
 ## Sao lưu và phạm vi
 
 - Bản chuẩn: `e4307bd`, tag `backup/pre-bento-20261002`.

@@ -4,7 +4,7 @@ import { analyzeProgressScore } from "./progress-scoring.js";
 import { analysisExcelFilename, buildAnalysisWorkbook } from "./excel-export.js";
 import { buildLeadershipReport, buildLeadershipWorkbook, leadershipColors, leadershipUpdatedLabel } from "./leadership-report.js";
 import { parameterLabels } from "./parameter-labels.js";
-import { composition, gauge, groupColors, groupIcon, icon, trendChart } from "./bento.js";
+import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 import type TomSelectControl from "tom-select";
 
@@ -34,6 +34,7 @@ let pendingMessage="";
 let completionMessage="";
 let pendingProvinceId="";
 let searchableSelects:TomSelectControl[]=[];
+const hiddenTrendGroups=new Set<GroupId>();
 interface OperationJob {id:string;state:string;attempts:number;createdAt:string;updatedAt:string;lockedBy:string|null;provinceName:string|null;formalityCode:string|null;formalityName:string|null;request:{period?:{type?:string;year?:number;month?:number;quarter?:number};scope?:string;formalityId?:string}}
 interface OperationData {loading:boolean;error:string|null;circuitState:string;circuitReason:string|null;snapshotCount:number;latestSnapshotAt:string|null;jobs:OperationJob[];batches:BatchResult[];provinceBatches:BatchResult[]}
 let operationData:OperationData={loading:false,error:null,circuitState:"unknown",circuitReason:null,snapshotCount:0,latestSnapshotAt:null,jobs:[],batches:[],provinceBatches:[]};
@@ -222,13 +223,13 @@ function overview(): string {
   const strengths=suggestions.filter(item=>item.severity==="positive").slice(0,3);
   const points=data.periods.filter(p=>p.type===period().type&&periodOrder(p)<=periodOrder(period())&&Boolean(data.snapshots[snapshotKey(p.id,state.scope,data.formality.id)]))
     .sort((a,b)=>periodOrder(a)-periodOrder(b)).slice(-12).map(p=>({label:p.label,order:periodOrder(p),view:buildUnitView(data,p.id,state.scope,state.unitId)}));
-  return `<header class="bento-heading"><div><span class="bento-kicker">TỔNG QUAN QĐ766</span><h1>${esc(view.name)}</h1><p>${esc(period().label)} <span>·</span> ${state.scope==="all"?"Tất cả thủ tục hành chính":esc(data.formality.code+" · "+data.formality.name)}</p></div></header>
+  return `<header class="bento-heading"><h1>${esc(view.name)}</h1><p>${esc(period().label)} <span>·</span> ${state.scope==="all"?"Tất cả thủ tục hành chính":esc(data.formality.code+" · "+data.formality.name)}</p></header>
   ${overviewStatus()}
-  <section class="bento-top" aria-label="Tổng điểm và sáu nhóm chỉ tiêu"><article class="bento-card hero-card"><div class="bento-card-head"><div><h2>Điểm tổng hợp 766</h2><p>Bộ chỉ số phục vụ người dân, doanh nghiệp</p></div><span class="badge ${level(view.ratio)[1]}">${level(view.ratio)[0]}</span></div>${gauge(view.totalScore,view.totalMaximum)}
+  <section class="bento-top" aria-label="Tổng điểm và sáu nhóm chỉ tiêu"><article class="bento-card hero-card"><div class="bento-card-head"><div><h2>Điểm tổng hợp 766</h2><p>Bộ chỉ số phục vụ người dân, doanh nghiệp</p></div><span class="badge ${gaugeLevel(view.totalMaximum===100?view.totalScore:view.ratio).tone}">${gaugeLevel(view.totalMaximum===100?view.totalScore:view.ratio).label}</span></div>${gauge(view.totalScore,view.totalMaximum)}
   <div class="hero-comparison"><div><span>Thứ hạng cùng cấp</span><strong>${currentRank?`${currentRank.rank}/${currentRank.total}`:"Chưa xếp hạng"}</strong><small>${currentRank?`Phân vị P${Math.round(currentRank.percentile)}${currentRank.tiedCount>1?" · đồng hạng":""}`:"Cùng kỳ, cùng phạm vi"}</small></div><div><span>So với kỳ trước</span><strong class="${scoreChange===null?"":scoreChange>=0?"positive":"negative"}">${scoreChange===null?"Chưa đủ kỳ":`${scoreChange>=0?"+":""}${n(scoreChange)} điểm`}</strong><small>${previousPeriod?esc(previousPeriod.label):"Cần kỳ liền trước cùng loại"}</small></div></div>
   <div class="hero-footer">${rankChange===null?"Chưa đủ dữ liệu biến động thứ hạng":rankChange===0?"Thứ hạng không đổi":`Thứ hạng ${rankChange>0?"tăng":"giảm"} ${Math.abs(rankChange)} bậc`}<span>${view.groups.filter(g=>g.score.value!==null).length}/6 nhóm có điểm</span></div></article>
   <div class="bento-pillars">${view.groups.map(groupPanel).join("")}</div></section>
-  <section class="bento-charts"><article class="bento-card trend-card"><div class="bento-card-head"><div><h2>Xu hướng điểm</h2><p>Lịch sử của cơ quan đang chọn · ${period().type==="month"?"Theo tháng":period().type==="quarter"?"Theo quý":"Theo năm"}</p></div><span class="bento-icon">${icon("chart")}</span></div>${trendChart(points,["dvc-progress-tree","handling-satisfaction"])}</article><article class="bento-card composition-card"><div class="bento-card-head"><div><h2>Cơ cấu điểm 766</h2><p>Đóng góp của sáu nhóm chỉ tiêu</p></div></div>${composition(view)}</article></section>
+  <section class="bento-charts"><article class="bento-card trend-card"><div class="bento-card-head"><div><h2>Xu hướng điểm</h2><p>Lịch sử của cơ quan đang chọn · ${period().type==="month"?"Theo tháng":period().type==="quarter"?"Theo quý":"Theo năm"}</p></div><span class="bento-icon">${icon("chart")}</span></div>${trendChart(points,data.groupOrder,hiddenTrendGroups)}</article><article class="bento-card composition-card"><div class="bento-card-head"><div><h2>Cơ cấu điểm 766</h2><p>Đóng góp của sáu nhóm chỉ tiêu</p></div></div>${composition(view)}</article></section>
   ${overviewGroupDetail(view)}
   <section class="split bento-insights"><article class="panel insight-warning"><div class="panel-head"><div><h2><span class="bento-icon">${icon("warning")}</span>Vấn đề cần ưu tiên</h2><p>Dựa trên khoảng cách với trung vị và cảnh báo dữ liệu</p></div><span class="badge warn">${priority.length} phát hiện</span></div><div class="panel-body ticket-list">${priority.length?priority.map(item=>miniTicket(item,false)).join(""):`<div class="bento-empty">${icon("shield")}<strong>Chưa có cảnh báo ưu tiên</strong><span>Chưa phát hiện cảnh báo ưu tiên nào trong kỳ này.</span></div>`}</div></article><article class="panel insight-strength"><div class="panel-head"><div><h2><span class="bento-icon">${icon("star")}</span>Kết quả tốt cần duy trì</h2><p>Nhóm thuộc phân vị cao hoặc gần bão hòa điểm</p></div><span class="badge good">Điểm mạnh</span></div><div class="panel-body ticket-list">${strengths.length?strengths.map(item=>miniTicket(item,true)).join(""):`<div class="bento-empty">${icon("star")}<strong>Chưa xác định điểm mạnh nổi bật</strong><span>Kết quả hiện tại chưa nằm trong nhóm dẫn đầu.</span></div>`}</div></article></section>`;
 }
@@ -582,6 +583,26 @@ async function downloadAnalysisExcel(kind:"scores"|"details"):Promise<void>{
 }
 
 function bind(): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-trend-toggle]").forEach(button=>button.addEventListener("click",()=>{
+    const id=button.dataset.trendToggle as GroupId;
+    if(hiddenTrendGroups.has(id))hiddenTrendGroups.delete(id);else hiddenTrendGroups.add(id);
+    button.setAttribute("aria-pressed",String(!hiddenTrendGroups.has(id)));
+    document.querySelectorAll<SVGElement>("[data-trend-series]").forEach(series=>{
+      if(series.dataset.trendSeries===id){
+        if(hiddenTrendGroups.has(id))series.setAttribute("hidden","");else series.removeAttribute("hidden");
+      }
+    });
+  }));
+  document.querySelectorAll<HTMLTableElement>(".bento-mode #group-detail table").forEach(table=>{
+    const labels=Array.from(table.querySelectorAll("thead th")).map(th=>th.textContent?.trim()??"");
+    table.querySelectorAll<HTMLTableRowElement>("tbody tr,tfoot tr").forEach(row=>{
+      let column=0;
+      Array.from(row.cells).forEach(cell=>{
+        cell.dataset.mobileLabel=labels[column]??"";
+        column+=cell.colSpan;
+      });
+    });
+  });
   document.querySelector<HTMLElement>("[data-action=logout]")?.addEventListener("click",async()=>{
     if(!signedInUser)return;
     const response=await fetch("/api/v1/auth/logout",{method:"POST",headers:{"X-QD766-CSRF":signedInUser.csrfToken}});

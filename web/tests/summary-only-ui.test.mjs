@@ -20,10 +20,12 @@ const appRoot={innerHTML:""};
 const button=(nav)=>({dataset:{nav},handlers:{},addEventListener(kind,callback){this.handlers[kind]=callback;}});
 const navs=[button("overview"),button("time"),button("quality")];
 const exportButton=button("");
+const trendButtons=data.groupOrder.map(id=>({...button(""),dataset:{trendToggle:id},attrs:{},setAttribute(key,value){this.attrs[key]=value;}}));
+const trendSeries=data.groupOrder.map(id=>({dataset:{trendSeries:id},attrs:{},setAttribute(key,value){this.attrs[key]=value;},removeAttribute(key){delete this.attrs[key];}}));
 globalThis.document={
   title:"",
   querySelector(selector){return selector==="#app"?appRoot:selector==="[data-action=export]"?exportButton:null;},
-  querySelectorAll(selector){return selector==="[data-nav]"?navs:[];},
+  querySelectorAll(selector){return selector==="[data-nav]"?navs:selector==="[data-trend-toggle]"?trendButtons:selector==="[data-trend-series]"?trendSeries:[];},
 };
 globalThis.window={setTimeout};
 globalThis.scrollTo=()=>{};
@@ -46,6 +48,13 @@ await import("../dist/app.js");
 for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
 assert.match(appRoot.innerHTML,/Chỉ có điểm tổng hợp tỉnh/);
 assert.match(appRoot.innerHTML,/Chi tiết: Chưa xác định/);
+assert.equal((appRoot.innerHTML.match(/data-trend-toggle=/g)||[]).length,6);
+trendButtons[0].handlers.click();
+assert.equal(trendButtons[0].attrs['aria-pressed'],'false');
+assert.equal(trendSeries[0].attrs.hidden,'');
+trendButtons[0].handlers.click();
+assert.equal(trendButtons[0].attrs['aria-pressed'],'true');
+assert(!('hidden' in trendSeries[0].attrs));
 navs.find(n=>n.dataset.nav==="time").handlers.click();
 assert.match(appRoot.innerHTML,/Chuỗi điểm cùng loại kỳ/);
 assert.match(appRoot.innerHTML,/Tháng 9\/2026/);

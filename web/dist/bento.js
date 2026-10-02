@@ -14,19 +14,29 @@ const paths = {
 const icons = { transparency: 'shield', 'dvc-progress-tree': 'clock', 'provide-online-tree': 'monitor', 'dossier-digitized': 'document', 'handling-satisfaction': 'star', 'formality-online-payment-tree': 'card' };
 export function icon(name) { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] ?? paths.chart}</svg>`; }
 export function groupIcon(id) { return icon(icons[id]); }
-export function gauge(score, maximum) {
-    const ratio = score !== null && maximum ? Math.max(0, Math.min(1, score / maximum)) : 0;
-    return `<div class="hero-gauge"><svg viewBox="0 0 300 250" role="img" aria-label="${score === null ? 'Chưa có tổng điểm' : `Tổng điểm ${number(score)} trên ${number(maximum)}`}" class="radial-gauge"><defs><linearGradient id="hero-spectrum" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#34d399"/><stop offset=".32" stop-color="#22d3ee"/><stop offset=".68" stop-color="#4f46e5"/><stop offset="1" stop-color="#c026d3"/></linearGradient></defs><path d="M65 213a112 112 0 1 1 170 0" fill="none" stroke="#edf0fc" stroke-width="19" stroke-linecap="round"/><path d="M65 213a112 112 0 1 1 170 0" fill="none" stroke="url(#hero-spectrum)" stroke-width="19" stroke-linecap="round" pathLength="100" stroke-dasharray="${ratio * 100} 100"${ratio === 0 ? ' opacity="0"' : ''}/></svg><div class="gauge-number"><strong>${number(score)}</strong><span>trên ${number(maximum)} điểm</span></div></div>`;
+export function gaugeLevel(score) {
+    if (score === null)
+        return { label: 'Chưa có điểm', color: '#94a3b8', tone: 'neutral' };
+    return score < 50 ? { label: 'Kém', color: '#dc2626', tone: 'bad' } : score < 70 ? { label: 'Trung bình', color: '#ea580c', tone: 'warn' } : score <= 85 ? { label: 'Tốt', color: '#38bdf8', tone: 'info' } : { label: 'Xuất sắc', color: '#16a34a', tone: 'good' };
 }
-export function trendChart(points, groupIds) {
-    const series = [{ name: 'Tổng điểm', color: '#2563eb', values: points.map(p => p.view.totalScore) }, ...groupIds.map(id => ({ name: points.at(-1)?.view.groups.find(g => g.id === id)?.label ?? id, color: groupColors[id], values: points.map(p => { const g = p.view.groups.find(g => g.id === id); return g && g.score.value !== null && g.maximum ? g.score.value / g.maximum * 100 : null; }) }))];
-    if (points.filter(p => p.view.totalScore !== null).length < 2)
-        return '<div class="bento-empty">' + icon('chart') + '<strong>Chưa đủ lịch sử cùng loại kỳ</strong><span>Cần ít nhất hai kỳ có dữ liệu của cơ quan đang chọn.</span></div>';
+export function gauge(score, maximum) {
+    const ratio = score !== null && maximum ? Math.max(0, Math.min(100, score / maximum * 100)) : 0;
+    const bands = [{ start: 0, end: 50, color: '#dc2626' }, { start: 50, end: 70, color: '#f97316' }, { start: 70, end: 85, color: '#38bdf8' }, { start: 85, end: 100, color: '#16a34a' }];
+    const path = 'M65 213a112 112 0 1 1 170 0';
+    const segment = (start, end, color, opacity) => end > start ? `<path d="${path}" fill="none" stroke="${color}" stroke-width="19" pathLength="100" stroke-dasharray="${end - start} ${100 - (end - start)}" stroke-dashoffset="${-start}" opacity="${opacity}"/>` : '';
+    return `<div class="hero-gauge"><svg viewBox="0 0 300 250" role="img" aria-label="${score === null ? 'Chưa có tổng điểm' : `Tổng điểm ${number(score)} trên ${number(maximum)}`}" class="radial-gauge"><path d="${path}" fill="none" stroke="#edf0fc" stroke-width="19" stroke-linecap="round"/>${bands.map(b => segment(b.start, b.end, b.color, .13)).join('')}${bands.map(b => segment(b.start, Math.min(ratio, b.end), b.color, 1)).join('')}</svg><div class="gauge-number"><strong>${number(score)}</strong><span>trên ${number(maximum)} điểm</span></div></div><div class="gauge-legend" aria-label="Ngưỡng phân loại hiển thị"><span><i style="background:#dc2626"></i>Kém &lt;50</span><span><i style="background:#f97316"></i>Trung bình 50–&lt;70</span><span><i style="background:#38bdf8"></i>Tốt 70–85</span><span><i style="background:#16a34a"></i>Xuất sắc &gt;85</span></div>`;
+}
+export function trendChart(points, groupIds, hidden = new Set()) {
+    const series = groupIds.map(id => ({ id, name: points.at(-1)?.view.groups.find(g => g.id === id)?.label ?? id, color: groupColors[id], values: points.map(p => { const g = p.view.groups.find(g => g.id === id); return g && g.score.value !== null && g.maximum ? g.score.value / g.maximum * 100 : null; }) }));
+    const legend = `<div class="chart-legend" aria-label="Bật tắt đường nhóm chỉ tiêu">${series.map(s => `<button type="button" data-trend-toggle="${s.id}" aria-pressed="${!hidden.has(s.id)}" title="Bật/tắt ${esc(s.name)}"><i style="background:${s.color}"></i>${esc(s.name)}</button>`).join('')}</div>`;
+    if (!series.some(s => s.values.filter(v => v !== null).length >= 2))
+        return legend + '<div class="bento-empty">' + icon('chart') + '<strong>Chưa đủ lịch sử cùng loại kỳ</strong><span>Cần ít nhất hai kỳ có dữ liệu của cơ quan đang chọn.</span></div>';
     const x = (i) => 50 + i * 590 / Math.max(1, points.length - 1), y = (v) => 210 - Math.max(0, Math.min(100, v)) * 1.8;
-    let svg = '<svg class="trend-svg" viewBox="0 0 670 255" role="img" aria-label="Xu hướng điểm theo các kỳ cùng loại. Tổng điểm trên 100; nhóm chỉ tiêu quy đổi phần trăm điểm tối đa.">';
+    let svg = '<svg class="trend-svg" viewBox="0 0 670 255" role="img" aria-label="Xu hướng sáu nhóm: tỷ lệ phần trăm điểm tối đa, không phải tỷ lệ hồ sơ. Bấm tên nhóm để bật tắt.">';
     for (const v of [0, 25, 50, 75, 100])
-        svg += `<line x1="50" x2="640" y1="${y(v)}" y2="${y(v)}" stroke="#edf0f8"/><text x="35" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
-    series.forEach((s, k) => {
+        svg += `<line x1="50" x2="640" y1="${y(v)}" y2="${y(v)}" stroke="#edf0f8"/><text x="35" y="${y(v) + 4}" text-anchor="end">${v}%</text>`;
+    series.forEach(s => {
+        svg += `<g data-trend-series="${s.id}"${hidden.has(s.id) ? ' hidden' : ''}>`;
         const segments = [];
         let segment = [];
         s.values.forEach((v, i) => { if (v === null || (i > 0 && points[i].order - points[i - 1].order !== 1)) {
@@ -37,15 +47,14 @@ export function trendChart(points, groupIds) {
             segment.push([x(i), y(v)]); });
         if (segment.length)
             segments.push(segment);
-        svg += `<defs><linearGradient id="trend-fill-${k}" x1="0" y1="0" x2="0" y2="1"><stop stop-color="${s.color}" stop-opacity=".15"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient></defs>`;
-        segments.forEach(seg => { const d = seg.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join(' '); if (k === 0 && seg.length > 1)
-            svg += `<path d="${d} L${seg.at(-1)[0]},210 L${seg[0][0]},210 Z" fill="url(#trend-fill-${k})"/>`; svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round"/>`; });
+        segments.forEach(seg => { const d = seg.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join(' '); svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round"/>`; });
         s.values.forEach((v, i) => { if (v !== null)
-            svg += `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="${s.color}" stroke="white" stroke-width="1.5"><title>${esc(points[i].label)} · ${esc(s.name)}: ${number(v)}${k ? '%' : ' điểm'}</title></circle>`; });
+            svg += `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="${s.color}" stroke="white" stroke-width="1.5"><title>${esc(points[i].label)} · ${esc(s.name)}: ${number(points[i].view.groups.find(g => g.id === s.id)?.score.value ?? null)} điểm · ${number(v)}% điểm tối đa</title></circle>`; });
+        svg += '</g>';
     });
     points.forEach((p, i) => { if (points.length <= 6 || i % Math.ceil(points.length / 6) === 0 || i === points.length - 1)
         svg += `<text x="${x(i)}" y="238" text-anchor="middle">${esc(p.label.replace(/\/\d{4}/, ''))}</text>`; });
-    return `<div class="chart-legend">${series.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('')}</div>${svg}</svg><p class="bento-footnote">Tổng điểm: thang 100. Hai nhóm: % điểm tối đa, không phải tỷ lệ hồ sơ. Kỳ thiếu dữ liệu không nối đường.</p>`;
+    return legend + svg + '</svg><p class="bento-footnote">Sáu nhóm dùng % điểm tối đa để so sánh cùng thang, không phải tỷ lệ hồ sơ. Bấm tên nhóm để bật/tắt. Kỳ thiếu dữ liệu không nối đường.</p>';
 }
 export function composition(view) {
     const complete = view.groups.length === 6 && view.groups.every(g => g.score.value !== null);

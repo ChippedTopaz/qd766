@@ -21,3 +21,26 @@
 /* Keep the unchanged detail tables scrolling inside their own container. */
 .bento-mode .detail-columns>*{min-width:0}
 @media(max-width:900px){.bento-mode .detail-columns{grid-template-columns:minmax(0,1fr)}}
+.bento-heading{display:flex;align-items:center;justify-content:space-between;gap:10px 24px;flex-wrap:wrap;margin-bottom:12px}.bento-heading h1{margin:0;flex:1;min-width:200px}.bento-heading p{margin:0;text-align:right;max-width:48%;line-height:1.5}
+.gauge-legend{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 12px;font-size:9px;color:#64748b;margin:0 0 13px}.gauge-legend span{display:flex;align-items:center;gap:4px}.gauge-legend i{width:6px;height:6px;border-radius:50%}
+.hero-card .badge.info{background:#f0f9ff;border-color:#bae6fd;color:#0369a1}
+.chart-legend{justify-content:flex-start;gap:6px;margin-top:16px}.chart-legend button{display:flex;align-items:center;gap:5px;border:1px solid #e8edf8;background:#fff;color:#475569;border-radius:999px;padding:6px 9px;font-size:10px;text-align:left}.chart-legend button[aria-pressed="false"]{opacity:.55;background:#f1f5f9;text-decoration:line-through}.chart-legend button:focus-visible{outline:2px solid #6366f1;outline-offset:2px}.trend-svg [hidden]{display:none}
+@media(max-width:600px){
+ .bento-heading{gap:6px}.bento-heading h1{font-size:20px}.bento-heading p{max-width:100%;flex-basis:100%;font-size:11px}
+ .bento-mode #group-detail .panel-head{flex-wrap:wrap;gap:10px;padding:14px}.bento-mode #group-detail .detail-summary{display:flex;align-items:center;flex-wrap:wrap;gap:5px 10px;width:100%;text-align:left}.bento-mode #group-detail .detail-summary strong{font-size:19px}.bento-mode #group-detail .detail-summary .text-button{margin:0}.bento-mode #group-detail .detail-summary span{margin:0}
+ .bento-mode #group-detail .detail-columns{padding:10px;gap:12px}.bento-mode #group-detail .detail-metrics-card,.bento-mode #group-detail .comparison-card{padding:10px}.bento-mode #group-detail .table-wrap{border:0;overflow:visible;background:transparent}
+ .bento-mode #group-detail table{display:block;min-width:0;width:100%;font-variant-numeric:tabular-nums}
+ .bento-mode #group-detail thead{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+ .bento-mode #group-detail tbody,.bento-mode #group-detail tfoot{display:grid;gap:10px;width:100%}
+ .bento-mode #group-detail tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 12px;padding:12px;background:#fff;border:1px solid #e2e8f0;border-radius:12px}
+ .bento-mode #group-detail td{display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding:0!important;border:0!important;min-width:0;max-width:none!important;font-size:12px;white-space:normal;overflow-wrap:anywhere;text-align:right;background:transparent!important}
+ .bento-mode #group-detail td::before{content:attr(data-mobile-label);font-size:9px;line-height:1.4;letter-spacing:.02em;color:#64748b;font-weight:500;text-align:right}
+ .bento-mode #group-detail td:first-child{grid-column:1/-1;align-items:flex-start;text-align:left;font-weight:650;line-height:1.5;padding-bottom:6px!important;border-bottom:1px solid #edf0f8!important}
+ .bento-mode #group-detail td:first-child::before{display:none}.bento-mode #group-detail td[colspan]:not(:first-child){grid-column:1/-1}
+ .bento-mode #group-detail tr.selected{border-color:#a5b4fc;background:#f5f7ff}.bento-mode #group-detail .row-link{font-size:12px;line-height:1.5}.bento-mode #group-detail .metric-note{font-size:10px;line-height:1.5}
+ .bento-mode #group-detail tfoot{margin-top:10px}.bento-mode #group-detail tfoot tr{background:#eef2ff;border-color:#c7d2fe}
+ .bento-mode #group-detail .progress-kpis{gap:7px}.bento-mode #group-detail .progress-kpis article{padding:10px;min-width:0}.bento-mode #group-detail .progress-kpis strong{font-size:16px}
+ .chart-legend button{font-size:9px;min-height:32px}.trend-svg{min-height:180px}.hero-card .hero-gauge{grid-row:auto}.hero-card .gauge-legend{grid-column:1/-1}
+}
+@media(min-width:601px) and (max-width:1000px){.hero-card .hero-gauge{grid-row:2/5}.hero-card .gauge-legend{grid-column:2;margin:0}.hero-card .hero-comparison{grid-column:2}}
+@media(max-width:600px){.bento-mode #group-detail .progress-table tbody td:nth-child(4){grid-column:1/-1;align-items:flex-start;text-align:left}.bento-mode #group-detail .progress-table tbody td:nth-child(4)::before{text-align:left}}
