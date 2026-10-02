@@ -9,7 +9,7 @@ import os
 import socket
 import sys
 import time
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,18 +22,26 @@ from qd766.backend.jobs import (
     open_collection_circuit,
     release_collection_lease,
 )
-from qd766.backend.national_summaries import store_national_summary
+from qd766.backend.national_summaries import latest_national_summary, store_national_summary
 from qd766.collection import BrowserTransport, CollectionError, SafetyStop
 from qd766.national_summary import collect_national_summary
 from qd766.periods import PeriodSelection
 
 
-def _current_periods(today: date) -> list[PeriodSelection]:
+def _current_periods(now: datetime) -> list[PeriodSelection]:
     return [
-        PeriodSelection("month", today.year, today.month),
-        PeriodSelection("quarter", today.year, (today.month - 1) // 3 + 1),
-        PeriodSelection("year", today.year),
+        PeriodSelection("month", now.year, now.month),
+        PeriodSelection("quarter", now.year, (now.month - 1) // 3 + 1),
+        PeriodSelection("year", now.year),
     ]
+
+
+def _scheduled_period(now: datetime, *, year_available: bool) -> PeriodSelection:
+    if not year_available or now.hour % 2 == 0:
+        return PeriodSelection("year", now.year)
+    if now.hour % 4 == 1:
+        return PeriodSelection("month", now.year, now.month)
+    return PeriodSelection("quarter", now.year, (now.month - 1) // 3 + 1)
 
 
 def main() -> int:
@@ -43,10 +51,12 @@ def main() -> int:
     parser.add_argument("--period-type", choices=("month", "quarter", "year"))
     parser.add_argument("--year", type=int)
     parser.add_argument("--period-value", type=int)
+    parser.add_argument("--all-current", action="store_true")
     parser.add_argument("--delay-seconds", type=float, default=5.0)
     arguments = parser.parse_args()
     if arguments.delay_seconds < 0:
         parser.error("--delay-seconds must be non-negative")
+    now = datetime.now()
     if arguments.period_type:
         if arguments.year is None:
             parser.error("--year is required with --period-type")
@@ -59,12 +69,20 @@ def main() -> int:
         ]
     elif arguments.year is not None or arguments.period_value is not None:
         parser.error("period arguments require --period-type")
+    elif arguments.all_current:
+        periods = _current_periods(now)
     else:
-        periods = _current_periods(date.today())
+        periods = None
 
     load_environment_file(ROOT / ".env")
     engine = create_database_engine(Settings.from_env())
     factory = create_session_factory(engine)
+    if periods is None:
+        with factory() as session:
+            year_available = latest_national_summary(
+                session, PeriodSelection("year", now.year)
+            ) is not None
+        periods = [_scheduled_period(now, year_available=year_available)]
     worker_id = f"national-summary:{socket.gethostname()}:{os.getpid()}"
     acquired = False
     results: list[dict] = []

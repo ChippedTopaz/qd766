@@ -51,7 +51,8 @@ if ($null -ne $nationalSummaryTask) {
         Start-Sleep -Seconds 2
     } while ((Get-Date) -lt $summaryDeadline)
     Write-Host "NATIONAL_SUMMARY_TASK=$nationalSummaryState"
-    $summaries = @(Invoke-RestMethod -Uri "http://127.0.0.1:8767/api/v1/national-summaries?limit=10")
+    $summaryResponse = Invoke-RestMethod -Uri "http://127.0.0.1:8767/api/v1/national-summaries?limit=10"
+    $summaries = @($summaryResponse | Where-Object { $null -ne $_ })
     Write-Host "NATIONAL_SUMMARY_COUNT=$($summaries.Count)"
     try {
         $currentYear = (Get-Date).Year

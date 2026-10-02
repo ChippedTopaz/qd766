@@ -2,11 +2,12 @@ import json
 import sys
 import unittest
 import uuid
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tools"))
 
 from qd766.collection import RateLimitStop, TransportResponse
 from qd766.national_summary import (
@@ -15,6 +16,7 @@ from qd766.national_summary import (
     collect_national_summary,
 )
 from qd766.periods import PeriodSelection
+from refresh_national_summaries import _scheduled_period
 
 
 def response_body():
@@ -63,6 +65,27 @@ class FakeTransport:
 
 
 class NationalSummaryTest(unittest.TestCase):
+    def test_scheduled_refresh_prioritizes_missing_year_then_rotates(self):
+        at_one = datetime(2026, 10, 2, 1, 0)
+        at_two = datetime(2026, 10, 2, 2, 0)
+        at_three = datetime(2026, 10, 2, 3, 0)
+        self.assertEqual(
+            _scheduled_period(at_one, year_available=False),
+            PeriodSelection("year", 2026),
+        )
+        self.assertEqual(
+            _scheduled_period(at_one, year_available=True),
+            PeriodSelection("month", 2026, 10),
+        )
+        self.assertEqual(
+            _scheduled_period(at_two, year_available=True),
+            PeriodSelection("year", 2026),
+        )
+        self.assertEqual(
+            _scheduled_period(at_three, year_available=True),
+            PeriodSelection("quarter", 2026, 4),
+        )
+
     def test_period_payloads(self):
         self.assertEqual(
             build_national_summary_payload(PeriodSelection("month", 2026, 9)),

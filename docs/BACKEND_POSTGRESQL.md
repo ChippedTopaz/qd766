@@ -321,7 +321,10 @@ SHA-256.
 .\.venv\Scripts\python.exe .\tools\refresh_national_summaries.py
 ```
 
-Không truyền tham số thì công cụ cập nhật tuần tự tháng, quý và năm hiện tại.
+Không truyền tham số thì mỗi lần chạy công cụ chỉ gửi **một request**: ưu tiên
+năm nếu chưa có dữ liệu, sau đó luân phiên năm, tháng và quý theo giờ. Cách này
+giữ năm hiện tại cập nhật khoảng hai giờ/lần và tránh ba request sát nhau. Chỉ
+dùng `--all-current` khi quản trị viên chủ động cần cập nhật tuần tự cả ba kỳ.
 Công cụ dùng chung PostgreSQL collection lease với worker; nếu worker đang gọi
 nguồn hoặc circuit đang mở thì không gửi request. HTTP 403, 429 và phản hồi
 HTML/rejection tiếp tục mở circuit theo quy tắc an toàn.
