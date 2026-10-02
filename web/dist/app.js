@@ -17,7 +17,7 @@ let pendingMessage = "";
 let completionMessage = "";
 let pendingProvinceId = "";
 let searchableSelects = [];
-let operationData = { loading: false, error: null, circuitState: "unknown", circuitReason: null, snapshotCount: 0, latestSnapshotAt: null, jobs: [], batches: [] };
+let operationData = { loading: false, error: null, circuitState: "unknown", circuitReason: null, snapshotCount: 0, latestSnapshotAt: null, jobs: [], batches: [], provinceBatches: [] };
 let provinceOptions = [];
 let provinceBenchmarks = {};
 const benchmarkLoading = new Set();
@@ -488,11 +488,16 @@ function operations() {
         const finished = batch.availableItems + batch.completedItems;
         return `<tr><td class="num">${esc(batch.id.slice(0, 8))}</td><td>${esc(batch.periodType)} ${batch.periodValue ?? ""}/${batch.year}</td><td class="num">${int(finished)}/${int(batch.totalItems)}</td><td class="num">${int(batch.availableItems)}</td><td><span class="badge ${batch.state === "succeeded" ? "good" : batch.state === "running" ? "info" : batch.state === "queued" ? "warn" : "bad"}">${esc(batch.state)}</span></td><td>${batch.state === "failed" || batch.state === "halted" ? `<button class="btn small" data-resume-batch="${esc(batch.id)}">Tiếp tục</button>` : "—"}</td></tr>`;
     }).join("");
+    const provinceBatchRows = operationData.provinceBatches.map(batch => {
+        const finished = batch.availableItems + batch.completedItems;
+        const failed = batch.failedItems ? ` · ${int(batch.failedItems)} lỗi` : "";
+        return `<tr><td class="num">${esc(batch.id.slice(0, 8))}</td><td>${esc(batchPeriod(batch))}</td><td class="num">${int(finished)}/${int(batch.totalItems)}</td><td class="num">${int(batch.availableItems)}</td><td class="num">${int(batch.completedItems)}${failed}</td><td><span class="badge ${batch.state === "succeeded" ? "good" : batch.state === "running" ? "info" : batch.state === "queued" ? "warn" : "bad"}">${esc(batch.state)}</span></td></tr>`;
+    }).join("");
     const content = operationData.loading
         ? `<div class="boot-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>`
         : operationData.error
             ? `<div class="banner bad"><span>!</span><div><strong>Không đọc được trạng thái vận hành</strong><p>${esc(operationData.error)}</p></div></div>`
-            : `<section class="quality-grid"><article class="quality-card"><h3>Kết nối DVCQG</h3><strong class="status-text ${circuitOpen ? "negative" : "positive"}">${circuitOpen ? "Đang tạm dừng" : "Sẵn sàng"}</strong><p>${circuitOpen ? "Worker không được phép gọi nguồn cho tới khi quản trị viên kiểm tra và chủ động mở lại." : "Circuit đang đóng; worker chỉ xử lý tuần tự theo giới hạn an toàn."}</p></article><article class="quality-card"><h3>Job đang chờ</h3><strong class="num">${queued}</strong><p>${running} đang chạy · ${stopped} đã dừng hoặc thất bại.</p></article><article class="quality-card"><h3>Snapshot hoàn chỉnh</h3><strong class="num">${operationData.snapshotCount}</strong><p>Cập nhật gần nhất: ${esc(dateTime(operationData.latestSnapshotAt))}.</p></article></section><div class="banner ${circuitOpen ? "warn" : ""}" style="margin-top:12px"><span>${circuitOpen ? "!" : "i"}</span><div><strong>${circuitOpen ? "Cần kiểm tra kết nối trước khi chạy" : "Luồng thu thập đang được bảo vệ"}</strong><p>${esc(operationData.circuitReason ?? (circuitOpen ? "Chưa có mô tả nguyên nhân." : "Không có cảnh báo circuit."))} Mỗi batch chỉ mở một job con tại một thời điểm.</p></div></div><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Batch thống kê theo TTHC</h2><p>Tiến độ được lưu trong PostgreSQL và có thể tiếp tục từ checkpoint.</p></div><button class="btn small" data-action="refresh-operations">Làm mới</button></div><div class="table-wrap"><table><thead><tr><th>Mã batch</th><th>Kỳ</th><th>Tiến độ</th><th>Dùng lại</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${batchRows || `<tr><td colspan="6">Chưa có batch thống kê nào.</td></tr>`}</tbody></table></div></section><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Hàng đợi cập nhật dữ liệu</h2><p>Các yêu cầu được chống trùng và xử lý ngoài vòng đời request giao diện.</p></div></div><div class="table-wrap"><table><thead><tr><th>Mã job</th><th>Kỳ</th><th>Tỉnh/Thành phố</th><th>Phạm vi</th><th>Trạng thái</th><th>Số lần thử</th><th>Thời điểm tạo</th></tr></thead><tbody>${rows || `<tr><td colspan="7">Chưa có yêu cầu nào trong hàng đợi.</td></tr>`}</tbody></table></div></section>`;
+            : `<section class="quality-grid"><article class="quality-card"><h3>Kết nối DVCQG</h3><strong class="status-text ${circuitOpen ? "negative" : "positive"}">${circuitOpen ? "Đang tạm dừng" : "Sẵn sàng"}</strong><p>${circuitOpen ? "Worker không được phép gọi nguồn cho tới khi quản trị viên kiểm tra và chủ động mở lại." : "Circuit đang đóng; worker chỉ xử lý tuần tự theo giới hạn an toàn."}</p></article><article class="quality-card"><h3>Job đang chờ</h3><strong class="num">${queued}</strong><p>${running} đang chạy · ${stopped} đã dừng hoặc thất bại.</p></article><article class="quality-card"><h3>Snapshot hoàn chỉnh</h3><strong class="num">${operationData.snapshotCount}</strong><p>Cập nhật gần nhất: ${esc(dateTime(operationData.latestSnapshotAt))}.</p></article></section><div class="banner ${circuitOpen ? "warn" : ""}" style="margin-top:12px"><span>${circuitOpen ? "!" : "i"}</span><div><strong>${circuitOpen ? "Cần kiểm tra kết nối trước khi chạy" : "Luồng thu thập đang được bảo vệ"}</strong><p>${esc(operationData.circuitReason ?? (circuitOpen ? "Chưa có mô tả nguyên nhân." : "Không có cảnh báo circuit."))} Mỗi batch chỉ mở một job con tại một thời điểm.</p></div></div><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Làm mới chi tiết 34 tỉnh/thành phố</h2><p>Kỳ đang diễn ra được làm mới luân phiên; snapshot đã có dưới 72 giờ sẽ được dùng lại.</p></div><button class="btn small" data-action="refresh-operations">Làm mới</button></div><div class="table-wrap"><table><thead><tr><th>Mã batch</th><th>Kỳ</th><th>Tiến độ</th><th>Dùng lại</th><th>Thu thập mới</th><th>Trạng thái</th></tr></thead><tbody>${provinceBatchRows || `<tr><td colspan="6">Chưa có batch làm mới chi tiết. Lịch đầu tiên chạy lúc 02:15.</td></tr>`}</tbody></table></div></section><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Batch thống kê theo TTHC</h2><p>Tiến độ được lưu trong PostgreSQL và có thể tiếp tục từ checkpoint.</p></div></div><div class="table-wrap"><table><thead><tr><th>Mã batch</th><th>Kỳ</th><th>Tiến độ</th><th>Dùng lại</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${batchRows || `<tr><td colspan="6">Chưa có batch thống kê nào.</td></tr>`}</tbody></table></div></section><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h2>Hàng đợi cập nhật dữ liệu</h2><p>Các yêu cầu được chống trùng và xử lý ngoài vòng đời request giao diện.</p></div></div><div class="table-wrap"><table><thead><tr><th>Mã job</th><th>Kỳ</th><th>Tỉnh/Thành phố</th><th>Phạm vi</th><th>Trạng thái</th><th>Số lần thử</th><th>Thời điểm tạo</th></tr></thead><tbody>${rows || `<tr><td colspan="7">Chưa có yêu cầu nào trong hàng đợi.</td></tr>`}</tbody></table></div></section>`;
     return `${title("Trạng thái vận hành", "Theo dõi kết nối nguồn, snapshot và hàng đợi cập nhật dữ liệu.", "Chỉ hiển thị thông tin an toàn; việc mở circuit vẫn thực hiện theo runbook quản trị.")}${content}`;
 }
 async function loadOperations() {
@@ -500,11 +505,11 @@ async function loadOperations() {
     operationData.error = null;
     render();
     try {
-        const [statusResponse, jobsResponse, batchesResponse] = await Promise.all([fetch("/api/v1/system-status"), fetch("/api/v1/collection-jobs?limit=50"), fetch("/api/v1/formality-batches?limit=20")]);
-        if (!statusResponse.ok || !jobsResponse.ok || !batchesResponse.ok)
-            throw new Error(`HTTP ${statusResponse.status}/${jobsResponse.status}/${batchesResponse.status}`);
+        const [statusResponse, jobsResponse, batchesResponse, provinceBatchesResponse] = await Promise.all([fetch("/api/v1/system-status"), fetch("/api/v1/collection-jobs?limit=50"), fetch("/api/v1/formality-batches?limit=20"), fetch("/api/v1/province-batches?limit=20")]);
+        if (!statusResponse.ok || !jobsResponse.ok || !batchesResponse.ok || !provinceBatchesResponse.ok)
+            throw new Error(`HTTP ${statusResponse.status}/${jobsResponse.status}/${batchesResponse.status}/${provinceBatchesResponse.status}`);
         const status = await statusResponse.json();
-        operationData = { loading: false, error: null, circuitState: status.circuitState, circuitReason: status.circuitReason, snapshotCount: status.snapshotCount, latestSnapshotAt: status.latestSnapshotAt, jobs: await jobsResponse.json(), batches: await batchesResponse.json() };
+        operationData = { loading: false, error: null, circuitState: status.circuitState, circuitReason: status.circuitReason, snapshotCount: status.snapshotCount, latestSnapshotAt: status.latestSnapshotAt, jobs: await jobsResponse.json(), batches: await batchesResponse.json(), provinceBatches: await provinceBatchesResponse.json() };
     }
     catch (error) {
         operationData.loading = false;
@@ -751,6 +756,13 @@ async function submitStatistics() {
         state.demo = "error";
         render();
     }
+}
+function batchPeriod(batch) {
+    if (batch.periodType === "month")
+        return `Tháng ${batch.periodValue}/${batch.year}`;
+    if (batch.periodType === "quarter")
+        return `Quý ${batch.periodValue}/${batch.year}`;
+    return `Năm ${batch.year}`;
 }
 async function requestFilteredBatch() {
     const requestId = ++selectionRequest;

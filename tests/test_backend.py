@@ -2,7 +2,7 @@ import copy
 import sys
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 
 from qd766.backend import create_app
 from qd766.backend.config import Settings
+from qd766.backend.dashboard import _detail_snapshot_is_stale
 from qd766.backend.importer import (
     SnapshotImportError,
     store_formality_page,
@@ -86,6 +87,44 @@ def entity(department_id, name, score):
         "parameters": {},
         "metadata": {},
     }
+
+
+class DetailFreshnessTest(unittest.TestCase):
+    def snapshot(self, *, period_type, year, period_value, created_at):
+        return Snapshot(
+            snapshot_key=f"test:{period_type}:{year}:{period_value}",
+            schema_version=1,
+            root_department_id=uuid.uuid4(),
+            period_type=period_type,
+            year=year,
+            period_value=period_value,
+            scope="all",
+            formality_id=None,
+            state="complete",
+            policy={},
+            status_detail={},
+            created_at=created_at,
+        )
+
+    def test_open_period_detail_expires_after_72_hours(self):
+        now = datetime(2026, 10, 2, 3, 0, tzinfo=timezone.utc)
+        snapshot = self.snapshot(
+            period_type="month",
+            year=2026,
+            period_value=10,
+            created_at=now - timedelta(hours=73),
+        )
+        self.assertTrue(_detail_snapshot_is_stale(snapshot, now))
+
+    def test_closed_period_detail_never_expires(self):
+        now = datetime(2026, 10, 2, 3, 0, tzinfo=timezone.utc)
+        snapshot = self.snapshot(
+            period_type="month",
+            year=2026,
+            period_value=9,
+            created_at=now - timedelta(days=30),
+        )
+        self.assertFalse(_detail_snapshot_is_stale(snapshot, now))
 
 
 def snapshot_payload(

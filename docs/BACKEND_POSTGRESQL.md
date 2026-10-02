@@ -366,3 +366,10 @@ tháng, quý) được luân phiên theo thời điểm hoàn tất cũ nhất, 
 72 giờ. Worker tiếp tục xử lý từng tỉnh và sáu endpoint tuần tự; vì vậy không có
 hai luồng chi tiết gọi DVCQG đồng thời. Điểm tổng hợp 34 tỉnh vẫn được task
 National Summary cập nhật riêng mỗi giờ.
+
+Dashboard tách riêng độ mới của hai lớp dữ liệu: `summaryStale` cho điểm/xếp
+hạng toàn quốc (ngưỡng hai giờ) và `detailsStale` cho snapshot chi tiết sáu
+nhóm (ngưỡng 72 giờ). Chỉ kỳ đang diễn ra mới hết hạn; tháng, quý hoặc năm đã
+kết thúc được giữ nguyên. Màn hình **Vận hành** đọc API
+`GET /api/v1/province-batches` để hiển thị kỳ, tiến độ, số tỉnh dùng lại và số
+tỉnh phải thu thập mới; thao tác này không tạo job và không gọi DVCQG.

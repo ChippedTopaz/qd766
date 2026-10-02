@@ -90,6 +90,21 @@ def _national_summary_is_stale(
     return captured_at < current - timedelta(hours=2)
 
 
+def _detail_snapshot_is_stale(
+    snapshot: Snapshot,
+    now: datetime | None = None,
+    max_age: timedelta = timedelta(hours=72),
+) -> bool:
+    """Only open reporting periods expire; completed periods stay immutable."""
+    current = now or datetime.now(timezone.utc)
+    if not _is_provisional(snapshot, current.date()):
+        return False
+    captured_at = snapshot.created_at
+    if captured_at.tzinfo is None:
+        captured_at = captured_at.replace(tzinfo=timezone.utc)
+    return captured_at < current - max_age
+
+
 def _available_periods(snapshots: list[Snapshot], today: date | None = None) -> list[dict[str, Any]]:
     current = today or date.today()
     periods: dict[str, dict[str, Any]] = {}
@@ -205,6 +220,7 @@ def snapshot_payload(
     snapshot: Snapshot,
     national_summary: NationalSummarySnapshot | None = None,
 ) -> dict[str, Any]:
+    details_stale = _detail_snapshot_is_stale(snapshot)
     result = {
         "scope": snapshot.scope,
         "formalityId": str(snapshot.formality_id) if snapshot.formality_id else None,
@@ -216,9 +232,17 @@ def snapshot_payload(
         "delivery": {
             "result": "database",
             "capturedAt": snapshot.created_at.isoformat(),
+            "detailsCapturedAt": snapshot.created_at.isoformat(),
             "provisional": _is_provisional(snapshot),
-            "stale": False,
-            "message": "Dữ liệu lấy từ PostgreSQL trên máy chủ QD766.",
+            "stale": details_stale,
+            "summaryStale": False,
+            "detailsStale": details_stale,
+            "message": (
+                "Dữ liệu chi tiết của kỳ đang diễn ra đã quá 72 giờ; hệ thống "
+                "đang chờ lượt làm mới an toàn tiếp theo."
+                if details_stale
+                else "Dữ liệu lấy từ PostgreSQL trên máy chủ QD766."
+            ),
         },
     }
     if national_summary is not None and snapshot.scope == "all":
@@ -246,20 +270,37 @@ def snapshot_payload(
                 dataset["root"]["scoreSource"] = "dvcqg-national-summary"
             result["provinceAggregatedScore"] = float(row["totalScore"])
             result["provinceAggregatedMaximum"] = 100.0
-            stale = _national_summary_is_stale(national_summary)
+            summary_stale = _national_summary_is_stale(national_summary)
+            stale = summary_stale or details_stale
+            if summary_stale and details_stale:
+                message = (
+                    "Bản tổng hợp toàn quốc đã quá 2 giờ và dữ liệu chi tiết đã "
+                    "quá 72 giờ; hệ thống đang chờ các lượt làm mới an toàn tiếp theo."
+                )
+            elif summary_stale:
+                message = (
+                    "Bản tổng hợp toàn quốc đã quá 2 giờ; hệ thống đang chờ chu kỳ "
+                    "cập nhật an toàn tiếp theo."
+                )
+            elif details_stale:
+                message = (
+                    "Điểm tỉnh và xếp hạng đã được cập nhật; dữ liệu chi tiết của "
+                    "kỳ đang diễn ra đã quá 72 giờ và đang chờ lượt làm mới tiếp theo."
+                )
+            else:
+                message = (
+                    "Điểm tỉnh và xếp hạng lấy từ bản tổng hợp toàn quốc mới nhất; "
+                    "chi tiết chỉ tiêu dùng snapshot phân tích gần nhất."
+                )
             result["delivery"] = {
                 "result": "national-summary",
                 "capturedAt": national_summary.captured_at.isoformat(),
                 "detailsCapturedAt": snapshot.created_at.isoformat(),
                 "provisional": _is_provisional(snapshot),
                 "stale": stale,
-                "message": (
-                    "Bản tổng hợp toàn quốc đã quá 2 giờ; hệ thống đang chờ chu kỳ "
-                    "cập nhật an toàn tiếp theo."
-                    if stale
-                    else "Điểm tỉnh và xếp hạng lấy từ bản tổng hợp toàn quốc mới nhất; "
-                    "chi tiết chỉ tiêu dùng snapshot phân tích gần nhất."
-                ),
+                "summaryStale": summary_stale,
+                "detailsStale": details_stale,
+                "message": message,
             }
     return result
 

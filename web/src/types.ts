@@ -78,8 +78,11 @@ export interface Snapshot {
   delivery?: {
     result?: string;
     capturedAt?: string;
+    detailsCapturedAt?: string;
     provisional?: boolean;
     stale?: boolean;
+    summaryStale?: boolean;
+    detailsStale?: boolean;
     message?: string;
   };
 }
