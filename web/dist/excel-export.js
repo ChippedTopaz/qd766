@@ -1,5 +1,6 @@
 import { buildAnalysisRows } from "./csv-export.js";
 import { parameterLabels } from "./parameter-labels.js";
+import { snapshotForUnit } from "./analytics.js";
 const vietnamDateParts = (value) => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime()))
@@ -32,6 +33,7 @@ function displayTimestamp(value) {
     return parts ? `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}` : "Chưa có thời điểm cập nhật";
 }
 export function buildAnalysisWorkbook(WorkbookClass, view, snapshot, period, province, scopeLabel, kind) {
+    snapshot = snapshotForUnit(snapshot, view.id);
     const data = buildAnalysisRows(view, snapshot, period, province, scopeLabel, kind);
     const workbook = new WorkbookClass();
     workbook.creator = "Phân tích QĐ766";

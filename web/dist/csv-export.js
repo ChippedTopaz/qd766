@@ -1,3 +1,4 @@
+import { snapshotForUnit } from "./analytics.js";
 import { parameterLabels } from "./parameter-labels.js";
 /** UTF-8 BOM and semicolons work with Vietnamese Excel regional settings. */
 export function encodeCsv(rows) {
@@ -12,6 +13,7 @@ export function encodeCsv(rows) {
     }).join(";")).join("\r\n") + "\r\n";
 }
 export function buildAnalysisRows(view, snapshot, period, province, scopeLabel, kind) {
+    snapshot = snapshotForUnit(snapshot, view.id);
     const context = [province, view.name, period.label, scopeLabel,
         snapshot.delivery?.capturedAt ?? "", snapshot.delivery?.detailsCapturedAt ?? "",
         snapshot.delivery?.stale ? "Đã quá hạn cập nhật" : "",

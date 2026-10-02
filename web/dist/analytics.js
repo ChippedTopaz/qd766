@@ -1,7 +1,22 @@
 import { analyzeOnlineScore } from "./online-scoring.js";
 const EPSILON = 0.005;
+const REQUIRED_GROUPS = ["transparency", "dvc-progress-tree", "provide-online-tree", "dossier-digitized", "handling-satisfaction", "formality-online-payment-tree"];
+export function previousAvailablePeriod(data, periodId, scope) {
+    const current = data.periods.find(item => item.id === periodId);
+    if (!current)
+        return null;
+    const order = (item) => item.type === "month" ? item.year * 12 + (item.value ?? 0) : item.type === "quarter" ? item.year * 4 + (item.value ?? 0) : item.year;
+    return data.periods.find(item => item.type === current.type && order(item) === order(current) - 1 && Boolean(data.snapshots[snapshotKey(item.id, scope, data.formality.id)])) ?? null;
+}
 export function snapshotKey(periodId, scope, formalityId) {
     return scope === "formality" ? `${periodId}:${scope}:${formalityId ?? "none"}` : `${periodId}:${scope}`;
+}
+export function snapshotForUnit(snapshot, unitId) {
+    if (snapshot.datasets.some(dataset => dataset.root.departmentId === unitId) || !snapshot.delivery)
+        return snapshot;
+    // Child agency scores come from detail snapshots, not the national summary.
+    return { ...snapshot, delivery: { ...snapshot.delivery, capturedAt: snapshot.delivery.detailsCapturedAt ?? "",
+            stale: snapshot.delivery.detailsStale ?? snapshot.delivery.stale ?? false } };
 }
 export function snapshotFor(data, periodId, scope) {
     const key = snapshotKey(periodId, scope, data.formality.id);
@@ -61,7 +76,10 @@ export function peerStats(values, current) {
     };
 }
 function unitTotal(snapshot, unitId) {
-    const entities = snapshot.datasets.map((dataset) => entityFor(dataset, unitId));
+    const entities = REQUIRED_GROUPS.map(group => {
+        const dataset = snapshot.datasets.find(item => item.group === group);
+        return dataset ? entityFor(dataset, unitId) : null;
+    });
     if (entities.some((entity) => entity === null || entity.apiScore === null || entity.apiMaxScore === null)) {
         return { score: null, maximum: null };
     }
@@ -133,6 +151,13 @@ export function buildUnitView(data, periodId, scope, unitId) {
         };
     });
     const total = unitTotal(snapshot, unitId);
+    // Published province total is authoritative; rounded group scores can differ.
+    if (scope === "all" && unitId === data.province.id && total.score !== null &&
+        snapshot.provinceAggregatedScore !== null && Number.isFinite(snapshot.provinceAggregatedScore)) {
+        total.score = snapshot.provinceAggregatedScore;
+        if (snapshot.provinceAggregatedMaximum !== null && Number.isFinite(snapshot.provinceAggregatedMaximum))
+            total.maximum = snapshot.provinceAggregatedMaximum;
+    }
     const totals = unit.departmentLevel === "PROVINCE_TOTAL" ? [] : allUnitTotals(snapshot, unit.departmentLevel ?? "COMMUNE");
     const currentTotal = totals.find((item) => item.id === unitId);
     const progress = groups.find((group) => group.id === "dvc-progress-tree")?.entity;

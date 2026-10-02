@@ -2,6 +2,7 @@ import type { Workbook } from "exceljs";
 import { buildAnalysisRows } from "./csv-export.js";
 import type { PeriodOption, Snapshot, UnitView } from "./types.js";
 import { parameterLabels } from "./parameter-labels.js";
+import { snapshotForUnit } from "./analytics.js";
 
 const vietnamDateParts = (value:string|Date) => {
   const date = new Date(value);
@@ -41,6 +42,7 @@ export function buildAnalysisWorkbook(
   view:UnitView, snapshot:Snapshot, period:PeriodOption,
   province:string, scopeLabel:string, kind:"scores"|"details",
 ):Workbook{
+  snapshot=snapshotForUnit(snapshot,view.id);
   const data = buildAnalysisRows(view,snapshot,period,province,scopeLabel,kind);
   const workbook = new WorkbookClass();
   workbook.creator = "Phân tích QĐ766";

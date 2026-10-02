@@ -1,4 +1,5 @@
 import type { PeriodOption, Snapshot, UnitView } from "./types.js";
+import { snapshotForUnit } from "./analytics.js";
 import { parameterLabels } from "./parameter-labels.js";
 
 type Cell = string | number | boolean | null | undefined;
@@ -18,6 +19,7 @@ export function buildAnalysisRows(
   view: UnitView, snapshot: Snapshot, period: PeriodOption,
   province: string, scopeLabel: string, kind: "scores" | "details",
 ): Cell[][] {
+  snapshot=snapshotForUnit(snapshot,view.id);
   const context: Cell[] = [province, view.name, period.label, scopeLabel,
     snapshot.delivery?.capturedAt ?? "", snapshot.delivery?.detailsCapturedAt ?? "",
     snapshot.delivery?.stale ? "Đã quá hạn cập nhật" : "",

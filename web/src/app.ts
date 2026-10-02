@@ -1,4 +1,4 @@
-import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerStats, similarVolumePeers, snapshotFor, snapshotKey } from "./analytics.js";
+import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerStats, previousAvailablePeriod, similarVolumePeers, snapshotFor, snapshotForUnit, snapshotKey } from "./analytics.js";
 import { analyzeOnlineScore, ONLINE_SCORING_PROFILE } from "./online-scoring.js";
 import { analyzeProgressScore } from "./progress-scoring.js";
 import { analysisExcelFilename, buildAnalysisWorkbook } from "./excel-export.js";
@@ -102,11 +102,7 @@ const rankText = (view: UnitView | UnitGroupView) => view.peer ? `Hạng ${view.
 
 const periodOrder=(item:AppData["periods"][number])=>item.type==="month"?item.year*12+(item.value??0):item.type==="quarter"?item.year*4+(item.value??0):item.year;
 function previousPeriodFor(periodId=state.periodId):AppData["periods"][number]|null{
-  const current=data.periods.find(item=>item.id===periodId);
-  if(!current)return null;
-  return data.periods
-    .filter(item=>item.type===current.type&&periodOrder(item)<periodOrder(current)&&Boolean(data.snapshots[snapshotKey(item.id,state.scope,data.formality.id)]))
-    .sort((left,right)=>periodOrder(right)-periodOrder(left))[0]??null;
+  return previousAvailablePeriod(data,periodId,state.scope);
 }
 const benchmarkCacheKey=(periodId:string)=>`${periodId}:${state.scope}:${state.scope==="formality"?data.formality.id:"all"}`;
 function benchmarkRank(periodId:string,groupId:GroupId|null,rootId=state.unitId){
@@ -158,7 +154,8 @@ function shell(content: string): void {
   const completedNotice=completionMessage?`<div class="period-notice success" role="status"><strong>Thống kê hoàn tất</strong><span>${esc(completionMessage)}</span><button class="btn small" data-action="dismiss-completion">Đóng</button></div>`:"";
   searchableSelects.forEach(control=>control.destroy());
   searchableSelects=[];
-  root.innerHTML = `<div class="app-shell">${nav()}<div class="workspace">${context()}<main class="content">${formalityNotice}${completedNotice}${staleNotice}${periodNotice}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : ""}</div>`;
+  const timingNotice=state.demo==="normal"&&loaded?.delivery?.result==="national-summary"&&loaded.delivery.capturedAt!==loaded.delivery.detailsCapturedAt?`<div class="period-notice" role="status"><strong>Hai thời điểm cập nhật</strong><span>Điểm tỉnh: ${esc(dateTime(loaded.delivery.capturedAt))}. Chi tiết chỉ tiêu và điểm cơ quan trực thuộc: ${esc(dateTime(loaded.delivery.detailsCapturedAt))}. Số liệu thành phần có thể chưa khớp điểm tỉnh mới nhất.</span></div>`:"";
+  root.innerHTML = `<div class="app-shell">${nav()}<div class="workspace">${context()}<main class="content">${formalityNotice}${completedNotice}${staleNotice}${periodNotice}${timingNotice}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : ""}</div>`;
   bind();
 }
 
@@ -222,7 +219,7 @@ function overview(): string {
   const strengths = suggestions.filter((item)=>item.severity==="positive").slice(0,3);
   const captures = snapshot().datasets.map((item)=>item.capture.capturedAt).filter(Boolean).sort();
   return `${title("Tổng quan cơ quan, đơn vị", `Toàn cảnh điểm số, vị thế và việc cần ưu tiên của ${view.name}.`, "Mặc định hiển thị năm hiện tại và tất cả thủ tục hành chính.")}
-  <section class="kpi-strip" aria-label="Tóm tắt điều hành"><article class="kpi"><div class="kpi-label">Tổng điểm <span class="badge ${level(view.ratio)[1]}">${level(view.ratio)[0]}</span></div><div class="kpi-value large num">${n(view.totalScore)} <small>/ ${n(view.totalMaximum)}</small></div><div class="progress"><i style="width:${Math.min(view.ratio??0,100)}%"></i></div></article><article class="kpi"><div class="kpi-label">Vị thế trong nhóm cùng cấp</div><div class="kpi-value num">${currentRank?`${currentRank.rank}/${currentRank.total}`:"Chưa xếp hạng"}</div><div class="kpi-sub">${currentRank?`Phân vị P${Math.round(currentRank.percentile)}${currentRank.tiedCount>1?` · ${currentRank.tiedCount} đơn vị đồng hạng`:""}`:"Chưa có đủ đơn vị cùng cấp trong kỳ"}</div></article><article class="kpi"><div class="kpi-label">So với kỳ trước</div><div class="kpi-value num ${scoreChange===null?"":scoreChange>=0?"positive":"negative"}">${scoreChange===null?"Chưa đủ kỳ":`${scoreChange>=0?"+":""}${n(scoreChange)} điểm`}</div><div class="kpi-sub">${previousPeriod?`${esc(previousPeriod.label)}${rankChange===null?"":` · thứ hạng ${rankChange>0?"tăng":rankChange<0?"giảm":"không đổi"} ${Math.abs(rankChange)}`}`:"Cần thêm kỳ cùng loại để tính biến động"}</div></article><article class="kpi"><div class="kpi-label">Trạng thái dữ liệu <span class="badge good">Đầy đủ</span></div><div class="kpi-value">6/6 nhóm</div><div class="kpi-sub">Cập nhật lúc ${esc(dateTime(captures.at(-1)))}</div></article></section>
+  <section class="kpi-strip" aria-label="Tóm tắt điều hành"><article class="kpi"><div class="kpi-label">Tổng điểm <span class="badge ${level(view.ratio)[1]}">${level(view.ratio)[0]}</span></div><div class="kpi-value large num">${n(view.totalScore)} <small>/ ${n(view.totalMaximum)}</small></div><div class="progress"><i style="width:${Math.min(view.ratio??0,100)}%"></i></div></article><article class="kpi"><div class="kpi-label">Vị thế trong nhóm cùng cấp</div><div class="kpi-value num">${currentRank?`${currentRank.rank}/${currentRank.total}`:"Chưa xếp hạng"}</div><div class="kpi-sub">${currentRank?`Phân vị P${Math.round(currentRank.percentile)}${currentRank.tiedCount>1?` · ${currentRank.tiedCount} đơn vị đồng hạng`:""}`:"Chưa có đủ đơn vị cùng cấp trong kỳ"}</div></article><article class="kpi"><div class="kpi-label">So với kỳ trước</div><div class="kpi-value num ${scoreChange===null?"":scoreChange>=0?"positive":"negative"}">${scoreChange===null?"Chưa đủ kỳ":`${scoreChange>=0?"+":""}${n(scoreChange)} điểm`}</div><div class="kpi-sub">${previousPeriod?`${esc(previousPeriod.label)}${rankChange===null?"":` · thứ hạng ${rankChange>0?"tăng":rankChange<0?"giảm":"không đổi"} ${Math.abs(rankChange)}`}`:"Cần thêm kỳ cùng loại để tính biến động"}</div></article><article class="kpi"><div class="kpi-label">Trạng thái dữ liệu <span class="badge ${view.groups.every(group=>group.score.value!==null)?"good":"warn"}">${view.groups.every(group=>group.score.value!==null)?"Đủ điểm nhóm":"Chưa đủ điểm"}</span></div><div class="kpi-value">${view.groups.filter(group=>group.score.value!==null).length}/${view.groups.length} nhóm</div><div class="kpi-sub">Điểm: ${esc(dateTime(state.unitId===data.province.id?snapshot().delivery?.capturedAt??captures.at(-1):snapshot().delivery?.detailsCapturedAt??captures.at(-1)))} · Chi tiết: ${esc(dateTime(snapshot().delivery?.detailsCapturedAt??captures.at(-1)))}</div></article></section>
   <section class="group-grid">${view.groups.map(groupPanel).join("")}</section>
   ${overviewGroupDetail(view)}
   <section class="split"><article class="panel"><div class="panel-head"><div><h2>Vấn đề cần ưu tiên</h2><p>Dựa trên khoảng cách với trung vị và cảnh báo dữ liệu</p></div><span class="badge warn">${priority.length} phát hiện</span></div><div class="panel-body ticket-list">${priority.length?priority.map((item)=>miniTicket(item,false)).join(""):`<div class="empty-state"><h2>Chưa có cảnh báo ưu tiên</h2></div>`}</div></article><article class="panel"><div class="panel-head"><div><h2>Kết quả tốt cần duy trì</h2><p>Nhóm thuộc phân vị cao hoặc gần bão hòa điểm</p></div><span class="badge good">Điểm mạnh</span></div><div class="panel-body ticket-list">${strengths.length?strengths.map((item)=>miniTicket(item,true)).join(""):`<div class="empty-state"><h2>Chưa xác định điểm mạnh nổi bật</h2><p>Kết quả hiện tại chưa nằm trong nhóm dẫn đầu.</p></div>`}</div></article></section>`;
@@ -544,7 +541,7 @@ async function downloadAnalysisExcel(kind:"scores"|"details"):Promise<void>{
   const rankedView={...view,peer:rankFor(view,state.periodId,null),groups:view.groups.map(group=>({...group,peer:rankFor(group,state.periodId,group.id)}))};
   const scopeLabel=state.scope==="all"?"Tất cả TTHC":`${data.formality.code} · ${data.formality.name}`;
   const workbook=buildAnalysisWorkbook(ExcelJS.Workbook,rankedView,snapshot,period(),data.province.name,scopeLabel,kind);
-  const filename=analysisExcelFilename(view.name,snapshot,kind);
+  const filename=analysisExcelFilename(view.name,snapshotForUnit(snapshot,view.id),kind);
   const content=await workbook.xlsx.writeBuffer();
   const bytes=new Uint8Array(content);
   const url=URL.createObjectURL(new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
