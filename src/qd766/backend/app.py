@@ -13,10 +13,12 @@ from .config import Settings
 from .database import create_database_engine, create_session_factory
 from .routes import router
 from .access_policy import enforce_public_read_only
+from .auth import enabled, validate_auth_settings, router as auth_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings.from_env()
+    validate_auth_settings(resolved)
     if resolved.public_read_only and "*" in resolved.cors_origins:
         raise ValueError("Public preview requires explicit CORS origins, not '*'")
     engine = create_database_engine(resolved)
@@ -29,7 +31,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/access-policy", tags=["health"])
     def access_policy() -> dict:
         return {"publicReadOnly": resolved.public_read_only,
-                "authenticated": False, "paidRequestsEnabled": False}
+                "loginRequired": resolved.require_login,
+                "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": False}
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
     app.state.dashboard_cache = SingleFlightTTLCache[str, dict](
@@ -52,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_methods=["GET", "POST"],
             allow_headers=["*"],
         )
+    app.include_router(auth_router)
     app.include_router(router)
     web_root = Path(__file__).resolve().parents[3] / "web"
     if web_root.is_dir():

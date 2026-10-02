@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sqlalchemy.engine import URL
@@ -56,6 +56,10 @@ def _database_url_from_env() -> str:
 @dataclass(frozen=True)
 class Settings:
     public_read_only: bool = False
+    require_login: bool = False
+    google_client_id: str = ""
+    google_client_secret: str = field(default="", repr=False)
+    google_redirect_uri: str = ""
     database_url: str = DEFAULT_DATABASE_URL
     cors_origins: tuple[str, ...] = ()
     sql_echo: bool = False
@@ -81,6 +85,10 @@ class Settings:
         )
         return cls(
             public_read_only=_as_bool(os.getenv("QD766_PUBLIC_READ_ONLY")),
+            require_login=_as_bool(os.getenv("QD766_REQUIRE_LOGIN")),
+            google_client_id=os.getenv("QD766_GOOGLE_CLIENT_ID", ""),
+            google_client_secret=os.getenv("QD766_GOOGLE_CLIENT_SECRET", ""),
+            google_redirect_uri=os.getenv("QD766_GOOGLE_REDIRECT_URI", ""),
             database_url=_database_url_from_env(),
             cors_origins=origins,
             sql_echo=_as_bool(os.getenv("QD766_SQL_ECHO")),

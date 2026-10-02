@@ -753,7 +753,8 @@ def system_status(request: Request, session: DbSession) -> dict:
 
 
 @router.get("/dashboard/provinces", tags=["dashboard"])
-def dashboard_provinces(session: DbSession) -> list[dict]:
+def dashboard_provinces(request: Request, session: DbSession) -> list[dict]:
+    authorized_root = getattr(request.state, "authorized_root_id", None)
     rows = list(
         session.execute(
             select(
@@ -799,6 +800,7 @@ def dashboard_provinces(session: DbSession) -> list[dict]:
                 "available": root.root_department_id in observed,
             }
             for root in sorted(roots.values(), key=lambda item: item.province_name)
+            if authorized_root is None or root.root_department_id == authorized_root
         ]
     return [
         {
@@ -811,6 +813,7 @@ def dashboard_provinces(session: DbSession) -> list[dict]:
             "available": True,
         }
         for root_id, name, department_code, snapshot_count, latest_snapshot_at in rows
+        if authorized_root is None or root_id == authorized_root
     ]
 
 
@@ -861,6 +864,7 @@ def get_latest_national_summary(
 
 @router.get("/dashboard/province-rankings", tags=["dashboard"])
 def dashboard_province_rankings(
+    request: Request,
     session: DbSession,
     period_type: str = Query(pattern="^(month|quarter|year)$"),
     year: int = Query(ge=2000, le=2200),
@@ -966,7 +970,14 @@ def dashboard_province_rankings(
             session, PeriodSelection(period_type, year, period_value)
         )
         if summary is not None:
-            return _merge_national_rankings(ordered, summary)
+            ordered = _merge_national_rankings(ordered, summary)
+    authorized_root = getattr(request.state, "authorized_root_id", None)
+    if authorized_root is not None:
+        for province in ordered:
+            if province["rootDepartmentId"] != str(authorized_root):
+                for group in province["groups"].values():
+                    group["parameters"] = {}
+                    group["metrics"] = {}
     return ordered
 
 
@@ -978,6 +989,7 @@ def dashboard(
     root_department_id: uuid.UUID | None = None,
 ) -> dict:
     public_read_only = request.app.state.settings.public_read_only
+    root_department_id = getattr(request.state, "authorized_root_id", None) or root_department_id
     cache_key = ("public:" if public_read_only else "office:") + (str(root_department_id) if root_department_id else "latest")
 
     def load_dashboard() -> dict:
@@ -1055,6 +1067,7 @@ def dashboard_selection(
     formality_id: uuid.UUID | None = None,
     root_department_id: uuid.UUID | None = None,
 ) -> dict:
+    root_department_id = getattr(request.state, "authorized_root_id", None) or root_department_id
     cache_key = ":".join(
         [
             "selection",

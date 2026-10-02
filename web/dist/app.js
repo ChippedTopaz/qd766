@@ -14,6 +14,9 @@ const screens = [
     { id: "operations", label: "Vận hành", icon: "⚙" },
 ];
 let publicReadOnly = false;
+let loginRequired = false;
+let googleLoginEnabled = false;
+let signedInUser = null;
 let data;
 let state;
 let selectionRequest = 0;
@@ -129,7 +132,7 @@ function context() {
     const canSubmit = state.scope === "formality" && state.demo === "ready" && (catalogPreview.mode === "filtered" ? catalogPreview.selected > 0 : Boolean(catalogPreview.selectedId));
     const selectedProvinceId = pendingProvinceId || data.province.id;
     const provinceItems = (provinceOptions.length ? provinceOptions : [{ id: data.province.id, name: data.province.name, departmentCode: null, provinceCode: data.province.code ?? null, snapshotCount: 0, latestSnapshotAt: null, available: true }]).slice().sort((left, right) => alphabet.compare(displayProvinceName(left.name), displayProvinceName(right.name))).map(item => `<option value="${esc(item.id)}" ${item.id === selectedProvinceId ? "selected" : ""}>${esc(displayProvinceName(item.name))}${item.available ? "" : " · chưa có dữ liệu"}</option>`).join("");
-    return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type === "month" ? "selected" : ""}>Tháng</option><option value="quarter" ${selectedPeriod.type === "quarter" ? "selected" : ""}>Quý</option><option value="year" ${selectedPeriod.type === "year" ? "selected" : ""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item => `<option value="${item.id}" ${item.id === state.periodId ? "selected" : ""}>${item.type === "month" ? `Tháng ${item.value}` : item.type === "quarter" ? `Quý ${item.value}` : "Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year => `<option value="${year}" ${year === selectedPeriod.year ? "selected" : ""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope === "all" ? "selected" : ""}>Tất cả thủ tục hành chính</option>${publicReadOnly ? "" : `<option value="formality" ${state.scope === "formality" ? "selected" : ""}>${esc(formalityScopeLabel)}</option>`}</select></label></div><div class="context-actions">${canSubmit ? `<button class="btn primary" data-action="submit-statistics">Thống kê</button>` : ""}<button class="btn" data-action="open-quality">● Dữ liệu đầy đủ</button><button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></header>`;
+    return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type === "month" ? "selected" : ""}>Tháng</option><option value="quarter" ${selectedPeriod.type === "quarter" ? "selected" : ""}>Quý</option><option value="year" ${selectedPeriod.type === "year" ? "selected" : ""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item => `<option value="${item.id}" ${item.id === state.periodId ? "selected" : ""}>${item.type === "month" ? `Tháng ${item.value}` : item.type === "quarter" ? `Quý ${item.value}` : "Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year => `<option value="${year}" ${year === selectedPeriod.year ? "selected" : ""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope === "all" ? "selected" : ""}>Tất cả thủ tục hành chính</option>${publicReadOnly ? "" : `<option value="formality" ${state.scope === "formality" ? "selected" : ""}>${esc(formalityScopeLabel)}</option>`}</select></label></div><div class="context-actions">${signedInUser ? `<span class="muted">${esc(signedInUser.name)}</span><button class="btn" data-action="logout">Đăng xuất</button>` : googleLoginEnabled ? `<a class="btn" href="/api/v1/auth/google/start">Đăng nhập Google</a>` : ""}${canSubmit ? `<button class="btn primary" data-action="submit-statistics">Thống kê</button>` : ""}<button class="btn" data-action="open-quality">● Dữ liệu đầy đủ</button><button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></header>`;
 }
 function shell(content) {
     const loaded = data.snapshots[snapshotKey(state.periodId, state.scope, data.formality.id)];
@@ -581,6 +584,15 @@ async function downloadAnalysisExcel(kind) {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function bind() {
+    document.querySelector("[data-action=logout]")?.addEventListener("click", async () => {
+        if (!signedInUser)
+            return;
+        const response = await fetch("/api/v1/auth/logout", { method: "POST", headers: { "X-QD766-CSRF": signedInUser.csrfToken } });
+        if (response.ok)
+            window.location.assign("/");
+        else
+            window.alert("Chưa đăng xuất được. Vui lòng thử lại.");
+    });
     document.querySelectorAll("[data-nav]").forEach(el => el.addEventListener("click", () => { const destination = el.dataset.nav; state.screen = destination; if (destination === "operations") {
         state.demo = "normal";
         render();
@@ -1081,8 +1093,24 @@ async function switchProvince(rootDepartmentId) {
 async function start() {
     try {
         const policyResponse = await fetch("/api/v1/access-policy");
-        if (policyResponse.ok)
-            publicReadOnly = Boolean((await policyResponse.json()).publicReadOnly);
+        if (policyResponse.ok) {
+            const policy = await policyResponse.json();
+            publicReadOnly = Boolean(policy.publicReadOnly);
+            loginRequired = Boolean(policy.loginRequired);
+            googleLoginEnabled = Boolean(policy.googleLoginEnabled);
+        }
+        if (googleLoginEnabled || loginRequired) {
+            const meResponse = await fetch("/api/v1/auth/me");
+            if (meResponse.ok)
+                signedInUser = await meResponse.json();
+            else if (meResponse.status !== 401)
+                throw new Error("Chưa kiểm tra được phiên đăng nhập. Vui lòng thử lại.");
+            if (loginRequired && (!signedInUser || !signedInUser.provinceId)) {
+                root.innerHTML = `<main class="content"><div class="empty-state"><h2>${signedInUser ? "Tài khoản đang chờ duyệt" : "Đăng nhập QĐ766"}</h2><p>${signedInUser ? "Quản trị viên cần gán tỉnh/cơ quan cho tài khoản trước khi tra cứu." : "Đăng nhập Google để xem dữ liệu của tỉnh/cơ quan được phân quyền."}</p>${!signedInUser && googleLoginEnabled ? `<a class="btn primary" href="/api/v1/auth/google/start">Đăng nhập Google</a>` : ""}${signedInUser ? `<button class="btn" data-action="logout">Đăng xuất</button>` : ""}${new URLSearchParams(location.search).get("login") === "failed" ? `<p>Đăng nhập không thành công hoặc phiên xác nhận đã hết hạn. Vui lòng thử lại.</p>` : ""}</div></main>`;
+                bind();
+                return;
+            }
+        }
         const [apiResponse, provincesResponse] = await Promise.all([fetch("/api/v1/dashboard"), fetch("/api/v1/dashboard/provinces")]);
         if (provincesResponse.ok)
             provinceOptions = await provincesResponse.json();

@@ -29,9 +29,13 @@ Không public server mặc định `false`; không coi CORS là xác thực.
 
 ## Thứ tự tiếp theo
 
+Đã được người dùng duyệt đăng nhập Google. Lõi và giao diện đăng nhập đã triển khai;
+xem [GOOGLE_LOGIN.md](GOOGLE_LOGIN.md) để cấu hình, gán tỉnh và nghiệm thu.
+Chưa bật đăng nhập, chưa có OAuth client/domain, chưa áp dụng migration trên DB thật.
+
 1. Chốt nhà cung cấp đăng nhập và domain/HTTPS. Khuyến nghị đăng nhập Google;
    tài khoản, tỉnh/cơ quan, vai trò và credit vẫn do QD766 quản lý phía server.
-   Cần người dùng duyệt nhà cung cấp và cung cấp cấu hình OAuth trước khi triển khai.
+   Người dùng đã duyệt Google; cần cấu hình OAuth/domain trước khi kích hoạt.
 2. Server ánh xạ phiên đăng nhập sang tài khoản; phân quyền theo tỉnh/cơ quan.
    Tài khoản thử nghiệm mặc định thường, không tự cấp admin hay quyền khai thác TTHC.
 3. Kết nối luồng TTHC vào account/ledger đã có; cấp credit thủ công có sổ giao dịch.

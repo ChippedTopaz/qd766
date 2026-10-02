@@ -31,7 +31,7 @@ Set-Location -LiteralPath $RepositoryRoot
 # stderr into error records, so a global Stop preference would kill a healthy
 # server immediately. Keep the process alive and check its real exit code.
 $ErrorActionPreference = "Continue"
-& $Python -m uvicorn qd766.backend.main:app --host 127.0.0.1 --port 8767 *>> $LogFile
+& $Python -m uvicorn qd766.backend.main:app --host 127.0.0.1 --port 8767 --no-access-log *>> $LogFile
 $backendExitCode = $LASTEXITCODE
 $ErrorActionPreference = "Stop"
 if ($backendExitCode -ne 0) {

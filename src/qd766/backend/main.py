@@ -8,7 +8,7 @@ app = create_app()
 
 
 def run() -> None:
-    uvicorn.run("qd766.backend.main:app", host="127.0.0.1", port=8767, reload=False)
+    uvicorn.run("qd766.backend.main:app", host="127.0.0.1", port=8767, reload=False, access_log=False)
 
 
 if __name__ == "__main__":

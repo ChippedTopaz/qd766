@@ -25,7 +25,7 @@ class PublicPreviewTests(unittest.TestCase):
     def test_public_policy_and_health_without_authentication_claim(self):
         policy = self.client.get("/api/v1/access-policy")
         self.assertEqual(policy.status_code, 200)
-        self.assertEqual(policy.json(), {"publicReadOnly": True, "authenticated": False, "paidRequestsEnabled": False})
+        self.assertEqual(policy.json(), {"publicReadOnly": True, "loginRequired": False, "googleLoginEnabled": False, "paidRequestsEnabled": False})
         self.assertEqual(self.client.get("/api/v1/health/live").status_code, 200)
 
     def test_block_writes_and_operator_or_raw_reads_before_database_access(self):
