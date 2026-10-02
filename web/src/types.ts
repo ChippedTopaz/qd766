@@ -37,7 +37,7 @@ export interface Entity {
   apiScore: number | null;
   apiMaxScore: number | null;
   apiRatio: number | null;
-  scoreSource: "dvcqg-api";
+  scoreSource: "dvcqg-api" | "dvcqg-national-summary";
   metrics: Metric[];
   parameters: Record<string, unknown>;
 }
@@ -78,7 +78,8 @@ export interface Snapshot {
   delivery?: {
     result?: string;
     capturedAt?: string;
-    detailsCapturedAt?: string;
+    detailsCapturedAt?: string | null;
+    detailsAvailable?: boolean;
     provisional?: boolean;
     stale?: boolean;
     summaryStale?: boolean;

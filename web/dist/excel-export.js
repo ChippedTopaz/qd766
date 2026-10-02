@@ -12,6 +12,8 @@ const vietnamDateParts = (value) => {
     return Object.fromEntries(parts.map(part => [part.type, part.value]));
 };
 function capturedAtFor(snapshot, kind) {
+    if (kind === "details" && snapshot.delivery?.detailsAvailable === false)
+        return null;
     const detail = snapshot.delivery?.detailsCapturedAt;
     const summary = snapshot.delivery?.capturedAt;
     const fallback = snapshot.datasets.map(dataset => dataset.capture.capturedAt).filter(value => value && !Number.isNaN(Date.parse(value))).sort((a, b) => Date.parse(b) - Date.parse(a))[0];

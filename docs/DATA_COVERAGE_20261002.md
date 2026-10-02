@@ -1,5 +1,27 @@
 # Kiểm kê dữ liệu QĐ766 — 02/10/2026
 
+## Cập nhật sau backfill — 23:11 ngày 02/10/2026 (giờ Việt Nam)
+
+Đã kiểm kê lại trực tiếp PostgreSQL bằng transaction READ ONLY sau khi người dùng
+chạy thu thập trong PowerShell. Không chỉ dựa vào phần log được gửi.
+
+- PASS: 15 kỳ tổng hợp quốc gia đều kiểm tra nội dung đủ 34 tỉnh × 6 nhóm:
+  tháng 1–10, quý I–IV và năm 2026. 12 kỳ lịch sử thiếu đã được bổ sung.
+- Ba kỳ hiện tại được lấy lại khoảng 23:01; chưa quá hạn 2 giờ lúc kiểm kê.
+- Có kỳ liền trước cho tháng 2–10, quý II–IV. Không có tháng 12/2025,
+  quý IV/2025 hoặc năm 2025 để so sánh tháng 1, quý I hoặc năm 2026.
+- Chi tiết vẫn 48 cặp tỉnh/kỳ: năm 2026 đủ 34 tỉnh; tháng 10, quý IV chưa có
+  chi tiết tỉnh. Backfill tổng hợp không tạo chi tiết đơn vị trực thuộc.
+- Chi tiết Phú Thọ năm 2026 vẫn quá hạn 72 giờ; tháng 9 và quý III vẫn là bản
+  lấy trước khi kết thúc kỳ. Backfill tổng hợp không sửa các snapshot này.
+- Thiếu ba nhóm của đơn vị Đắk Lắk vẫn giữ nguyên, chưa cào lại/không gán 0.
+
+Đủ dữ liệu tổng hợp để nghiệm thu so sánh điểm quốc gia theo các kỳ nêu trên,
+không đồng nghĩa giao diện đã hỗ trợ mọi lựa chọn không có snapshot chi tiết.
+Bước tiếp theo là nghiệm thu luồng đọc tổng hợp và chi tiết, không cào hàng loạt.
+
+Phần dưới đây giữ nguyên ảnh kiểm kê trước backfill để đối chiếu lịch sử.
+
 Kiểm tra trực tiếp PostgreSQL máy cơ quan lúc 22:18 2/10/26 (giờ Việt Nam).
 Transaction REPEATABLE READ, READ ONLY; không tạo job, không gọi DVCQG,
 không sửa dữ liệu, lịch, circuit hoặc cấu hình server. Không xuất secret/tài khoản.

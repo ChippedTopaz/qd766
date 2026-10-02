@@ -305,6 +305,44 @@ def snapshot_payload(
     return result
 
 
+def summary_only_snapshot(summary: NationalSummarySnapshot, root_id: str) -> dict[str, Any] | None:
+    """Adapt saved national scores without inventing component or child data."""
+    row = next((item for item in summary.response_data.get("evaluation", [])
+                if str(item.get("departmentId")) == str(root_id)), None)
+    if row is None:
+        return None
+    scores = row.get("groupScores", {})
+    if any(scores.get(code) is None for code in NATIONAL_GROUP_CODES.values()):
+        return None
+    captured = summary.captured_at.isoformat()
+    stale = _national_summary_is_stale(summary)
+    datasets = []
+    for group, code in NATIONAL_GROUP_CODES.items():
+        score, maximum = float(scores[code]), NATIONAL_GROUP_MAXIMUMS[group]
+        datasets.append({
+            "group": group, "label": GROUP_LABELS[group], "schemaKind": "parameters",
+            "formulaStatus": "summary-only", "scorePolicy": "api-authoritative",
+            "root": {"departmentId": str(root_id), "departmentName": row["departmentName"],
+                "departmentType": "ADMINISTRATIVE_UNIT", "departmentLevel": "PROVINCE_TOTAL",
+                "agencyLevel": None, "apiScore": score, "apiMaxScore": maximum,
+                "apiRatio": round(score / maximum * 100, 2),
+                "scoreSource": "dvcqg-national-summary", "metrics": [], "parameters": {}},
+            "children": [], "raw": {"path": "", "sha256": summary.raw_sha256},
+            "capture": {"capturedAt": captured, "httpStatus": 200,
+                "contentType": "application/json", "bytes": 0},
+        })
+    return {"scope": "all", "formalityId": None, "status": {"state": "complete",
+            "requiredGroups": list(GROUP_LABELS), "loadedGroups": list(GROUP_LABELS),
+            "unsupportedGroups": [], "missingGroups": []},
+        "provinceAggregatedScore": float(row["totalScore"]), "provinceAggregatedMaximum": 100.0,
+        "scorePolicy": {"source": "national-summary", "detailsAvailable": False},
+        "datasets": datasets, "delivery": {"result": "national-summary", "capturedAt": captured,
+            "detailsCapturedAt": None, "detailsAvailable": False,
+            "provisional": _is_provisional(summary), "summaryStale": stale,
+            "detailsStale": False, "stale": stale,
+            "message": "Có điểm tổng hợp sáu nhóm của tỉnh; chưa có số liệu thành phần hoặc điểm đơn vị trực thuộc cho kỳ này."}}
+
+
 def dashboard_payload(
     snapshots: list[Snapshot],
     formality: Formality | None,
@@ -332,7 +370,13 @@ def dashboard_payload(
         ),
         None,
     )
-    ordered_periods = _available_periods(snapshots)
+    for key, summary in (national_summaries or {}).items():
+        snapshot_key = f"{_period_id(summary)}:all"
+        if snapshot_key not in payload_snapshots:
+            item = summary_only_snapshot(summary, str(root.id))
+            if item is not None:
+                payload_snapshots[snapshot_key] = item
+    ordered_periods = _available_periods([*snapshots, *(national_summaries or {}).values()])
     units: dict[str, dict[str, Any]] = {
         str(root.id): {
             "departmentId": str(root.id),

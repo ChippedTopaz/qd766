@@ -25,6 +25,7 @@ from .dashboard import (
     NATIONAL_GROUP_MAXIMUMS,
     dashboard_payload,
     snapshot_payload,
+    summary_only_snapshot,
 )
 from .database import get_session
 from .jobs import enqueue_job, request_idempotency_key
@@ -1038,12 +1039,11 @@ def dashboard(
         )
         formality = session.get(Formality, formality_id) if formality_id else None
         summaries: dict[tuple[str, int, int | None], NationalSummarySnapshot] = {}
-        for key in {
-            (item.period_type, item.year, item.period_value) for item in snapshots
-        }:
-            summary = latest_national_summary(session, PeriodSelection(*key))
-            if summary is not None:
-                summaries[key] = summary
+        for summary in session.scalars(select(NationalSummarySnapshot).where(
+                NationalSummarySnapshot.completeness_state == "complete",
+                NationalSummarySnapshot.group_count == 6).order_by(NationalSummarySnapshot.captured_at.desc())):
+            key = (summary.period_type, summary.year, summary.period_value)
+            summaries.setdefault(key, summary)
         return dashboard_payload(snapshots, formality, summaries)
 
     payload, cache_result = request.app.state.dashboard_cache.get_or_load(
@@ -1119,12 +1119,16 @@ def dashboard_selection(
             else statement.where(Snapshot.formality_id == formality_id)
         )
         selected = session.scalar(statement.limit(1))
-        if selected is None:
-            raise HTTPException(status_code=404, detail="Snapshot not found")
         national_summary = latest_national_summary(
             session,
             PeriodSelection(period_type, year, period_value),
         )
+        if selected is None:
+            if scope == "all" and formality_id is None and national_summary is not None:
+                item = summary_only_snapshot(national_summary, str(resolved_root_id))
+                if item is not None:
+                    return {"metadata": item["delivery"], "snapshot": item}
+            raise HTTPException(status_code=404, detail="Snapshot not found")
         item = snapshot_payload(selected, national_summary)
         return {"metadata": item["delivery"], "snapshot": item}
 

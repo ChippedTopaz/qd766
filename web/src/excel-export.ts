@@ -15,6 +15,7 @@ const vietnamDateParts = (value:string|Date) => {
 };
 
 function capturedAtFor(snapshot:Snapshot,kind:"scores"|"details"):string|null{
+  if(kind==="details"&&snapshot.delivery?.detailsAvailable===false)return null;
   const detail = snapshot.delivery?.detailsCapturedAt;
   const summary = snapshot.delivery?.capturedAt;
   const fallback = snapshot.datasets.map(dataset=>dataset.capture.capturedAt).filter(value=>value&&!Number.isNaN(Date.parse(value))).sort((a,b)=>Date.parse(b)-Date.parse(a))[0];
