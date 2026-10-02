@@ -21,7 +21,8 @@ from qd766.periods import PeriodSelection
 SERVICE_RESULTS_URL = (
     "https://dichvucong.gov.vn/api/v1/reporting/evaluation/service-results"
 )
-GROUP_CODES = {"CKMB", "TDGQ", "CLGQ", "TTTT", "MDHL", "MDSH"}
+GROUP_CODES = frozenset({"CKMB", "TDGQ", "CLGQ", "TTTT", "MDHL", "MDSH"})
+GROUP_COUNT = 6
 
 
 @dataclass(frozen=True)
@@ -116,7 +117,22 @@ def _validate_data(data: dict) -> None:
         if not item.get("departmentName") or not isinstance(item.get("totalScore"), Real):
             raise CollectionError("National summary province score is invalid")
         group_scores = item.get("groupScores")
-        if not isinstance(group_scores, dict) or set(group_scores) != GROUP_CODES:
-            raise CollectionError("National summary group scores are incomplete")
+        if not isinstance(group_scores, dict):
+            raise CollectionError("National summary group scores are invalid")
+        received_codes = set(group_scores)
+        if received_codes != GROUP_CODES:
+            missing = sorted(GROUP_CODES - received_codes)
+            unexpected = sorted(received_codes - GROUP_CODES)
+            detail = []
+            if missing:
+                detail.append(f"missing={','.join(missing)}")
+            if unexpected:
+                detail.append(f"unexpected={','.join(unexpected)}")
+            raise CollectionError(
+                "National summary group scores are incomplete "
+                f"for {item.get('departmentName')} ({'; '.join(detail)})"
+            )
+        if len(group_scores) != GROUP_COUNT:
+            raise CollectionError("National summary must contain exactly six groups")
         if not all(isinstance(value, Real) for value in group_scores.values()):
             raise CollectionError("National summary group score is invalid")

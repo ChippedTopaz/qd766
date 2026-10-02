@@ -394,6 +394,14 @@ class NationalSummarySnapshot(Base):
             "(period_type = 'year' AND period_value IS NULL)",
             name="ck_national_summary_period_value",
         ),
+        CheckConstraint(
+            "completeness_state = 'complete'",
+            name="ck_national_summary_completeness_state",
+        ),
+        CheckConstraint(
+            "group_count = 6",
+            name="ck_national_summary_group_count",
+        ),
         Index(
             "ix_national_summary_lookup",
             "period_type",
@@ -410,6 +418,9 @@ class NationalSummarySnapshot(Base):
     period_value: Mapped[int | None] = mapped_column(Integer)
     department_type: Mapped[str] = mapped_column(String(40), default="ADMINISTRATIVE_UNIT")
     province_count: Mapped[int] = mapped_column(Integer)
+    completeness_state: Mapped[str] = mapped_column(String(16), default="complete")
+    group_count: Mapped[int] = mapped_column(Integer, default=6)
+    group_codes: Mapped[list[str]] = mapped_column(JsonDocument)
     raw_sha256: Mapped[str] = mapped_column(String(64))
     request_payload: Mapped[dict[str, Any]] = mapped_column(JsonDocument)
     response_data: Mapped[dict[str, Any]] = mapped_column(JsonDocument)

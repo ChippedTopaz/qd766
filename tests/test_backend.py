@@ -404,6 +404,16 @@ class BackendTest(unittest.TestCase):
         )
         self.assertEqual(latest.status_code, 200)
         self.assertEqual(latest.json()["provinceCount"], 2)
+        self.assertEqual(latest.json()["completenessState"], "complete")
+        self.assertEqual(latest.json()["groupCount"], 6)
+        self.assertEqual(
+            set(latest.json()["groupCodes"]),
+            {"CKMB", "TDGQ", "CLGQ", "TTTT", "MDHL", "MDSH"},
+        )
+        listed = self.client.get("/api/v1/national-summaries")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()[0]["completenessState"], "complete")
+        self.assertEqual(listed.json()[0]["groupCount"], 6)
 
     def test_user_cannot_enqueue_aggregate_province_collection(self):
         response = self.client.post(

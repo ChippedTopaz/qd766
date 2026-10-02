@@ -317,6 +317,13 @@ Endpoint `service-results` trả điểm tổng hợp và sáu nhóm chỉ tiêu
 phiên bản bất biến trong `national_summary_snapshots`, chống trùng bằng
 SHA-256.
 
+Hợp đồng hoàn chỉnh áp dụng giống nhau cho tháng, quý và năm: mỗi một trong 34
+tỉnh phải có đúng sáu mã nhóm `CKMB`, `TDGQ`, `CLGQ`, `MDSH`, `MDHL`, `TTTT`.
+Snapshot được lưu với `completeness_state=complete`, `group_count=6` và danh
+sách mã nhóm đã kiểm tra. Phản hồi thiếu hoặc thừa nhóm bị từ chối trước khi
+ghi PostgreSQL, vì vậy không thể thay thế bản hoàn chỉnh gần nhất; task giờ kế
+tiếp sẽ thử lại theo lịch.
+
 ```powershell
 .\.venv\Scripts\python.exe .\tools\refresh_national_summaries.py
 ```

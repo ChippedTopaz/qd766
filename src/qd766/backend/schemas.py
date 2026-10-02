@@ -214,6 +214,9 @@ class NationalSummaryResponse(ApiModel):
     period_value: int | None
     department_type: str
     province_count: int
+    completeness_state: str
+    group_count: int
+    group_codes: list[str]
     raw_sha256: str
     captured_at: datetime
     created_at: datetime

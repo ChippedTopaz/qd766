@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from qd766.collection import RateLimitStop, SafetyStop, TransportResponse
+from qd766.collection import CollectionError
 from qd766.national_summary import (
     SERVICE_RESULTS_URL,
     build_national_summary_payload,
@@ -125,6 +126,36 @@ class NationalSummaryTest(unittest.TestCase):
         self.assertEqual(transport.calls[0][0], SERVICE_RESULTS_URL)
         self.assertEqual(capture.response_data["evaluation"][0]["totalScore"], 61.86)
         self.assertEqual(len(capture.raw_sha256), 64)
+
+    def test_all_period_types_require_all_six_groups(self):
+        raw = json.dumps(response_body(), ensure_ascii=False).encode()
+        for period in (
+            PeriodSelection("month", 2026, 9),
+            PeriodSelection("quarter", 2026, 3),
+            PeriodSelection("year", 2026),
+        ):
+            with self.subTest(period=period):
+                capture = collect_national_summary(
+                    period,
+                    FakeTransport(TransportResponse(200, raw, "application/json")),
+                )
+                self.assertEqual(
+                    set(capture.response_data["evaluation"][0]["groupScores"]),
+                    {"CKMB", "TDGQ", "CLGQ", "TTTT", "MDHL", "MDSH"},
+                )
+
+    def test_rejects_response_when_one_province_lacks_one_group(self):
+        body = response_body()
+        del body["data"]["evaluation"][0]["groupScores"]["TTTT"]
+        raw = json.dumps(body, ensure_ascii=False).encode()
+        with self.assertRaisesRegex(
+            CollectionError,
+            r"incomplete for UBND tỉnh Phú Thọ \(missing=TTTT\)",
+        ):
+            collect_national_summary(
+                PeriodSelection("year", 2026),
+                FakeTransport(TransportResponse(200, raw, "application/json")),
+            )
 
     def test_rate_limit_is_a_safety_stop(self):
         transport = FakeTransport(TransportResponse(429, b"rate limited", "text/plain"))

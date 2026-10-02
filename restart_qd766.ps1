@@ -59,6 +59,11 @@ if ($null -ne $nationalSummaryTask) {
     try {
         $currentYear = (Get-Date).Year
         $yearSummary = Invoke-RestMethod -Uri "http://127.0.0.1:8767/api/v1/national-summaries/latest?period_type=year&year=$currentYear"
+        if ($yearSummary.completenessState -ne "complete" -or $yearSummary.groupCount -ne 6) {
+            throw "National summary is not a complete six-group snapshot."
+        }
+        Write-Host "NATIONAL_SUMMARY_COMPLETENESS=$($yearSummary.completenessState)"
+        Write-Host "NATIONAL_SUMMARY_GROUP_COUNT=$($yearSummary.groupCount)"
         $provinceRows = @($yearSummary.data.evaluation | ForEach-Object { $_ })
         $phuTho = $provinceRows | Where-Object { $_.departmentName -eq "UBND tỉnh Phú Thọ" } | Select-Object -First 1
         if ($null -ne $phuTho) {

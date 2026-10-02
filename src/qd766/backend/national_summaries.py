@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from qd766.national_summary import NationalSummaryCapture
+from qd766.national_summary import GROUP_CODES, GROUP_COUNT, NationalSummaryCapture
 from qd766.periods import PeriodSelection
 
 from .models import NationalSummarySnapshot
@@ -36,6 +36,9 @@ def store_national_summary(
         period_value=period_value,
         department_type="ADMINISTRATIVE_UNIT",
         province_count=len(capture.response_data["evaluation"]),
+        completeness_state="complete",
+        group_count=GROUP_COUNT,
+        group_codes=sorted(GROUP_CODES),
         raw_sha256=capture.raw_sha256,
         request_payload=capture.request_payload,
         response_data=capture.response_data,
@@ -65,6 +68,8 @@ def latest_national_summary(
         .where(
             NationalSummarySnapshot.period_type == period.type,
             NationalSummarySnapshot.year == period.year,
+            NationalSummarySnapshot.completeness_state == "complete",
+            NationalSummarySnapshot.group_count == GROUP_COUNT,
         )
         .order_by(NationalSummarySnapshot.captured_at.desc())
         .limit(1)
@@ -75,4 +80,3 @@ def latest_national_summary(
         else statement.where(NationalSummarySnapshot.period_value == period.value)
     )
     return session.scalar(statement)
-

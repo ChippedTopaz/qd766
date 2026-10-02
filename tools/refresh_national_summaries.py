@@ -106,6 +106,8 @@ def main() -> int:
                         "year": period.year,
                         "periodValue": period.value,
                         "provinceCount": snapshot.province_count,
+                        "completenessState": snapshot.completeness_state,
+                        "groupCount": snapshot.group_count,
                         "capturedAt": snapshot.captured_at.isoformat(),
                         "created": created,
                     }
