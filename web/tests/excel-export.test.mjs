@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import ExcelJS from "exceljs";
 import { buildUnitView } from "../dist/analytics.js";
-import { buildAnalysisWorkbook } from "../dist/excel-export.js";
+import { analysisExcelFilename, buildAnalysisWorkbook } from "../dist/excel-export.js";
 import { parameterLabels } from "../dist/parameter-labels.js";
 
 const data = JSON.parse(readFileSync(new URL("../data/snapshots.json", import.meta.url)));
@@ -21,9 +21,12 @@ for(const kind of ["scores","details"]){
   const reopened = new ExcelJS.Workbook();
   await reopened.xlsx.load(buffer);
   const sheet = reopened.worksheets[0];
-  assert.equal(sheet.getCell("B8").value,"Đã quá hạn cập nhật");
-  assert.equal(sheet.getCell("B6").value.toISOString(),"2026-10-02T07:23:00.000Z");
-  assert.equal(sheet.views[0].ySplit,12);
+  assert.ok(sheet.getCell("A4").value.includes("Dữ liệu quá hạn cập nhật"));
+  assert.ok(sheet.getCell("A4").value.includes("02/10/2026 07:23"));
+  assert.equal(sheet.views[0].ySplit,6);
+  assert.equal(sheet.properties.defaultRowHeight,15);
+  assert.deepEqual(sheet.model.merges,[]);
+  sheet.eachRow(row=>assert.equal(row.height,15));
   const rows=[];sheet.eachRow(row=>rows.push(row.values));
   const text=JSON.stringify(rows);
   assert.ok(!text.includes("scoreDelta"));assert.ok(!text.includes("Mã/trường"));
@@ -41,10 +44,10 @@ for(const kind of ["scores","details"]){
     assert.equal(countCell.value,600057);assert.equal(countCell.numFmt,"#,##0");
     assert.equal(averageCell.value,8);assert.equal(averageCell.numFmt,"#,##0.00");
     assert.equal(zeroCell.value,0);
-    assert.equal(sheet.getCell("D13").value,null);
+    assert.equal(sheet.getCell("D7").value,null);
   }else{
-    assert.equal(sheet.getCell("B13").value,view.groups[0].score.value);
-    assert.equal(sheet.getCell("B13").numFmt,"#,##0.00");
+    assert.equal(sheet.getCell("B7").value,view.groups[0].score.value);
+    assert.equal(sheet.getCell("B7").numFmt,"#,##0.00");
   }
   if(process.env.QD766_EXPORT_QA_DIR){
     await mkdir(process.env.QD766_EXPORT_QA_DIR,{recursive:true});
@@ -57,5 +60,12 @@ const browserBook=buildAnalysisWorkbook(globalThis.ExcelJS.Workbook,view,snapsho
 const browserBytes=await browserBook.xlsx.writeBuffer();
 const browserReadback=new ExcelJS.Workbook();
 await browserReadback.xlsx.load(browserBytes);
-assert.equal(browserReadback.worksheets[0].getCell("C13").value,"Tổng hồ sơ tiếp nhận");
+assert.equal(browserReadback.worksheets[0].getCell("C7").value,"Tổng hồ sơ tiếp nhận");
+
+const exportTime = new Date("2026-10-02T04:30:23Z");
+assert.equal(analysisExcelFilename("UBND tỉnh Cà Mau",snapshot,"scores",exportTime),"UBND-tinh-Ca-Mau-20261002-tonghop-20261002-113023.xlsx");
+assert.equal(analysisExcelFilename("UBND tỉnh Cà Mau",snapshot,"details",exportTime),"UBND-tinh-Ca-Mau-20260928-chitiet-20261002-113023.xlsx");
+const boundary = structuredClone(snapshot);
+boundary.delivery.detailsCapturedAt = "2026-10-01T18:30:00Z";
+assert.ok(analysisExcelFilename('Cơ quan / "Đặc biệt"',boundary,"details",exportTime).startsWith("Co-quan-Dac-biet-20261002-chitiet-"));
 console.log("EXCEL_EXPORT_OK (Node and browser bundle)");

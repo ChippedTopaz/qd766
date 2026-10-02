@@ -62,6 +62,14 @@ dấu phẩy thập phân. Các tham số chưa có tên nghiệp vụ không đ
 vào tệp cho người dùng; bổ sung nhãn vào `web/src/parameter-labels.ts` khi
 nguồn xuất hiện chỉ tiêu mới.
 
+Quy cách Excel được cập nhật theo phản hồi người dùng: không merge ô, phần
+thông tin cơ bản gồm bốn dòng, bảng bắt đầu ở dòng 6. Các dòng dùng chiều cao
+mặc định 15pt; độ rộng cột vừa đủ nội dung và nút lọc. Tên tệp theo mẫu
+`Ten-co-quan-YYYYMMDD-tonghop/chitiet-YYYYMMDD-HHmmss.xlsx` (chọn một trong hai
+loại, không chứa dấu `/`); dùng ngày cập nhật điểm cho tổng hợp và ngày cập
+nhật snapshot thành phần cho chi tiết. Ngày/giờ xuất theo giờ Việt Nam, tên
+cơ quan chuyển không dấu và bỏ ký tự không hợp lệ trong tên tệp Windows.
+
 1. Mặc định hiển thị kết quả chung tỉnh Phú Thọ. Khi có đăng nhập, có thể thay
    bằng cơ quan, đơn vị gắn với tài khoản cán bộ.
 2. Xếp hạng chỉ gồm các cơ quan, đơn vị cùng cấp có điểm hợp lệ và dùng standard

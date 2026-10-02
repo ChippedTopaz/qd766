@@ -1,7 +1,7 @@
 import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerStats, similarVolumePeers, snapshotFor, snapshotKey } from "./analytics.js";
 import { analyzeOnlineScore, ONLINE_SCORING_PROFILE } from "./online-scoring.js";
 import { analyzeProgressScore } from "./progress-scoring.js";
-import { buildAnalysisWorkbook } from "./excel-export.js";
+import { analysisExcelFilename, buildAnalysisWorkbook } from "./excel-export.js";
 import { parameterLabels } from "./parameter-labels.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 import type TomSelectControl from "tom-select";
@@ -512,7 +512,7 @@ async function downloadAnalysisExcel(kind:"scores"|"details"):Promise<void>{
   const rankedView={...view,peer:rankFor(view,state.periodId,null),groups:view.groups.map(group=>({...group,peer:rankFor(group,state.periodId,group.id)}))};
   const scopeLabel=state.scope==="all"?"Tất cả TTHC":`${data.formality.code} · ${data.formality.name}`;
   const workbook=buildAnalysisWorkbook(ExcelJS.Workbook,rankedView,snapshot,period(),data.province.name,scopeLabel,kind);
-  const filename=`qd766-${state.periodId}-${state.unitId}-${state.scope}-${kind}.xlsx`;
+  const filename=analysisExcelFilename(view.name,snapshot,kind);
   const content=await workbook.xlsx.writeBuffer();
   const bytes=new Uint8Array(content);
   const url=URL.createObjectURL(new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));

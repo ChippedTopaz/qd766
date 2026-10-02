@@ -1,5 +1,36 @@
 import { buildAnalysisRows } from "./csv-export.js";
 import { parameterLabels } from "./parameter-labels.js";
+const vietnamDateParts = (value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+        return null;
+    const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    }).formatToParts(date);
+    return Object.fromEntries(parts.map(part => [part.type, part.value]));
+};
+function capturedAtFor(snapshot, kind) {
+    const detail = snapshot.delivery?.detailsCapturedAt;
+    const summary = snapshot.delivery?.capturedAt;
+    const fallback = snapshot.datasets.map(dataset => dataset.capture.capturedAt).filter(value => value && !Number.isNaN(Date.parse(value))).sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+    return (kind === "details" ? detail ?? fallback ?? summary : summary ?? detail ?? fallback) ?? null;
+}
+export function analysisExcelFilename(name, snapshot, kind, exportedAt = new Date()) {
+    const safeName = name.normalize("NFD").replace(/\p{M}/gu, "").replace(/đ/g, "d").replace(/Đ/g, "D")
+        .replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 130).replace(/-$/g, "") || "Co-quan";
+    const captured = capturedAtFor(snapshot, kind);
+    const updated = captured ? vietnamDateParts(captured) : null;
+    const exported = vietnamDateParts(exportedAt);
+    if (!exported)
+        throw new Error("Invalid export timestamp");
+    const date = updated ? `${updated.year}${updated.month}${updated.day}` : "chua-ro-ngay-cap-nhat";
+    return `${safeName}-${date}-${kind === "scores" ? "tonghop" : "chitiet"}-${exported.year}${exported.month}${exported.day}-${exported.hour}${exported.minute}${exported.second}.xlsx`;
+}
+function displayTimestamp(value) {
+    const parts = value ? vietnamDateParts(value) : null;
+    return parts ? `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}` : "Chưa có thời điểm cập nhật";
+}
 export function buildAnalysisWorkbook(WorkbookClass, view, snapshot, period, province, scopeLabel, kind) {
     const data = buildAnalysisRows(view, snapshot, period, province, scopeLabel, kind);
     const workbook = new WorkbookClass();
@@ -7,53 +38,35 @@ export function buildAnalysisWorkbook(WorkbookClass, view, snapshot, period, pro
     const sheet = workbook.addWorksheet(kind === "scores" ? "Điểm 6 nhóm" : "Số liệu thành phần");
     const headers = data[0].slice(8);
     const endColumn = headers.length;
-    sheet.mergeCells(1, 1, 1, endColumn);
+    sheet.properties.defaultRowHeight = 15;
     sheet.getCell(1, 1).value = kind === "scores" ? "BẢNG ĐIỂM BỘ CHỈ SỐ 766" : "SỐ LIỆU THÀNH PHẦN BỘ CHỈ SỐ 766";
-    sheet.getRow(1).height = 32;
-    sheet.getCell(1, 1).font = { name: "Calibri", size: 16, bold: true, color: { argb: "FF1E3A8A" } };
-    const context = data[1]?.slice(0, 8) ?? [];
-    const metadataLabels = data[0].slice(0, 8);
-    for (let i = 0; i < metadataLabels.length; i++) {
-        const row = i + 2;
-        sheet.getCell(row, 1).value = metadataLabels[i] ?? "";
-        let value = context[i];
-        if (i === 6 && !value)
-            value = snapshot.delivery?.stale === false ? "Trong ngưỡng cập nhật" : "Chưa có thông tin độ mới";
-        sheet.mergeCells(row, 2, row, endColumn);
-        // Preserve Vietnam wall-clock time when Excel stores dates without timezone.
-        if ((i === 4 || i === 5) && typeof value === "string" && value && !Number.isNaN(Date.parse(value))) {
-            sheet.getCell(row, 2).value = new Date(Date.parse(value) + 7 * 60 * 60 * 1000);
-            sheet.getCell(row, 2).numFmt = 'dd/mm/yyyy hh:mm "(giờ Việt Nam)"';
-        }
-        else
-            sheet.getCell(row, 2).value = value ?? "";
-        sheet.getCell(row, 1).font = { name: "Calibri", size: 11, bold: true };
-        sheet.getCell(row, 2).font = { name: "Calibri", size: 11 };
-        sheet.getCell(row, 2).alignment = { horizontal: "left", vertical: "middle", wrapText: true };
-        sheet.getRow(row).height = i === 1 || i === 3 ? 32 : 24;
-        sheet.getRow(row).alignment = { vertical: "middle", wrapText: true };
+    sheet.getCell(1, 1).font = { name: "Calibri", size: 11, bold: true, color: { argb: "FF1E3A8A" } };
+    sheet.getCell(2, 1).value = `Cơ quan, đơn vị: ${view.name}`;
+    sheet.getCell(3, 1).value = `Kỳ: ${period.label} | Phạm vi: ${scopeLabel}`;
+    const freshness = snapshot.delivery?.stale ? "Dữ liệu quá hạn cập nhật" : period.provisional ? "Kỳ chưa kết thúc" : "Kỳ đã kết thúc";
+    sheet.getCell(4, 1).value = `Cập nhật điểm: ${displayTimestamp(capturedAtFor(snapshot, "scores"))} | Chi tiết: ${displayTimestamp(capturedAtFor(snapshot, "details"))} (giờ Việt Nam) | ${freshness}`;
+    for (let row = 1; row <= 4; row++) {
+        sheet.getRow(row).height = 15;
+        sheet.getCell(row, 1).alignment = { horizontal: "left", vertical: "middle", wrapText: false };
+        if (row > 1)
+            sheet.getCell(row, 1).font = { name: "Calibri", size: 11 };
     }
-    sheet.mergeCells(10, 1, 10, endColumn);
-    sheet.getCell(10, 1).value = "Nguồn: Cổng Dịch vụ công Quốc gia. Ô trống là giá trị chưa được cung cấp; số 0 là giá trị đã ghi nhận.";
-    sheet.getCell(10, 1).font = { name: "Calibri", size: 10, color: { argb: "FF64748B" } };
-    sheet.getCell(10, 1).alignment = { wrapText: true, vertical: "middle" };
-    sheet.getRow(10).height = 30;
-    const headerRow = 12;
+    const headerRow = 6;
     sheet.getRow(headerRow).values = headers;
-    sheet.getRow(headerRow).height = 36;
+    sheet.getRow(headerRow).height = 15;
     sheet.getRow(headerRow).eachCell(cell => {
         cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A8A" } };
-        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: false };
     });
     const integerHeaders = new Set(["Số lượng đạt", "Tổng số", "Thứ hạng", "Số đơn vị so sánh"]);
     for (let index = 1; index < data.length; index++) {
         const row = sheet.getRow(headerRow + index);
         row.values = data[index].slice(8).map(value => value === undefined ? null : value);
-        row.height = kind === "scores" ? 30 : 46;
+        row.height = 15;
         row.eachCell({ includeEmpty: true }, (cell, column) => {
             cell.font = { name: "Calibri", size: 11 };
-            cell.alignment = { vertical: "middle", wrapText: true, horizontal: typeof cell.value === "number" ? "right" : "left" };
+            cell.alignment = { vertical: "middle", wrapText: false, horizontal: typeof cell.value === "number" ? "right" : "left" };
             if (index % 2 === 0)
                 cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
             if (typeof cell.value === "number") {
@@ -69,11 +82,16 @@ export function buildAnalysisWorkbook(WorkbookClass, view, snapshot, period, pro
         }
     }
     headers.forEach((header, index) => {
-        sheet.getColumn(index + 1).width = header === "Nhóm chỉ tiêu" ? 32 : header === "Tên chỉ tiêu" ? 64 : header === "Ghi chú" ? 60 : header === "Trạng thái dữ liệu" ? 27 : header === "Loại số liệu" ? 23 : 19;
+        // Fit business text and filter buttons; keep numeric columns compact.
+        const longest = Math.max(String(header).length + 3, ...data.slice(1).map(row => {
+            const value = row[index + 8];
+            return typeof value === "string" ? value.length + 2 : typeof value === "number" ? value.toLocaleString("vi-VN", { maximumFractionDigits: 2 }).length + 2 : 0;
+        }));
+        sheet.getColumn(index + 1).width = Math.max(10, longest);
     });
     sheet.views = [{ state: "frozen", ySplit: headerRow, showGridLines: false }];
     sheet.autoFilter = { from: { row: headerRow, column: 1 }, to: { row: headerRow + data.length - 1, column: endColumn } };
-    sheet.pageSetup = { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "12:12" };
+    sheet.pageSetup = { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: `${headerRow}:${headerRow}` };
     return workbook;
 }
 //# sourceMappingURL=excel-export.js.map
