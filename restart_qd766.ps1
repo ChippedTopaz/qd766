@@ -59,10 +59,16 @@ if ($null -ne $nationalSummaryTask) {
     try {
         $currentYear = (Get-Date).Year
         $yearSummary = Invoke-RestMethod -Uri "http://127.0.0.1:8767/api/v1/national-summaries/latest?period_type=year&year=$currentYear"
-        $provinceRows = @($yearSummary.data.evaluation)
+        $provinceRows = @($yearSummary.data.evaluation | ForEach-Object { $_ })
         $phuTho = $provinceRows | Where-Object { $_.departmentName -eq "UBND tỉnh Phú Thọ" } | Select-Object -First 1
         if ($null -ne $phuTho) {
-            $phuThoRank = [Array]::IndexOf($provinceRows, $phuTho) + 1
+            $phuThoRank = 0
+            for ($index = 0; $index -lt $provinceRows.Count; $index++) {
+                if ($provinceRows[$index].departmentId -eq $phuTho.departmentId) {
+                    $phuThoRank = $index + 1
+                    break
+                }
+            }
             Write-Host "PHU_THO_YEAR_SCORE=$($phuTho.totalScore)"
             Write-Host "PHU_THO_YEAR_RANK=$phuThoRank/$($provinceRows.Count)"
             Write-Host "NATIONAL_SUMMARY_CAPTURED_AT=$($yearSummary.capturedAt)"
