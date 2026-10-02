@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from qd766.collection import RateLimitStop, TransportResponse
+from qd766.collection import RateLimitStop, SafetyStop, TransportResponse
 from qd766.national_summary import (
     SERVICE_RESULTS_URL,
     build_national_summary_payload,
@@ -130,6 +130,15 @@ class NationalSummaryTest(unittest.TestCase):
         transport = FakeTransport(TransportResponse(429, b"rate limited", "text/plain"))
         with self.assertRaises(RateLimitStop):
             collect_national_summary(PeriodSelection("year", date.today().year), transport)
+
+    def test_html_stop_records_safe_diagnostics_without_response_body(self):
+        transport = FakeTransport(
+            TransportResponse(200, b"<html>Request Rejected</html>", "text/html")
+        )
+        with self.assertRaisesRegex(
+            SafetyStop, r"HTTP 200; content-type=text/html; body-sha256=[0-9a-f]{16}"
+        ):
+            collect_national_summary(PeriodSelection("year", 2026), transport)
 
 
 if __name__ == "__main__":

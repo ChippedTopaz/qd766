@@ -329,11 +329,12 @@ Công cụ dùng chung PostgreSQL collection lease với worker; nếu worker đ
 nguồn hoặc circuit đang mở thì không gửi request. HTTP 403, 429 và phản hồi
 HTML/rejection tiếp tục mở circuit theo quy tắc an toàn.
 
-Do lớp TLS của DVCQG có thể chủ động đóng kết nối từ client nền, công cụ mở một
-phiên Chrome hoặc Edge tạm thời ở chế độ headless, gọi API trong đúng origin
-`dichvucong.gov.vn`, rồi đóng trình duyệt ngay sau ba request tuần tự. Máy chủ
-Windows cần có Chrome hoặc Edge; cơ chế này không dùng proxy, xoay IP, retry
-vượt giới hạn hay bỏ qua tín hiệu WAF.
+Do lớp TLS của DVCQG có thể chủ động đóng kết nối từ client nền và từ chối
+trình duyệt headless, công cụ mở một phiên Chrome hoặc Edge thông thường với hồ
+sơ tạm, đặt cửa sổ ngoài vùng hiển thị, gọi API trong đúng origin
+`dichvucong.gov.vn`, rồi đóng trình duyệt ngay sau request. Máy chủ Windows cần
+có Chrome hoặc Edge; cơ chế này không dùng proxy, xoay IP, giả mạo dấu vân tay,
+retry vượt giới hạn hay bỏ qua tín hiệu WAF.
 
 Task `QD766 National Summary` chạy mỗi giờ. Dashboard cấp tỉnh ưu tiên tổng
 điểm, điểm sáu nhóm và thứ hạng từ bản tổng hợp mới nhất; chi tiết sở, xã, chỉ

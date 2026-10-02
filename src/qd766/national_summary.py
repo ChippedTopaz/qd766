@@ -85,7 +85,12 @@ def _guard_response(response: TransportResponse) -> None:
         or b"request rejected" in rejection_body
         or b"access denied" in rejection_body
     ):
-        raise SafetyStop("Stopped on rejection/HTML national summary response")
+        fingerprint = hashlib.sha256(response.body).hexdigest()[:16]
+        raise SafetyStop(
+            "Stopped on rejection/HTML national summary response "
+            f"(HTTP {response.status}; content-type={content_type or 'unknown'}; "
+            f"body-sha256={fingerprint})"
+        )
     if response.status not in {200, 201}:
         raise CollectionError(f"HTTP {response.status} for national summary")
 

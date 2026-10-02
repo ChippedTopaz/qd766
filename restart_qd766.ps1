@@ -51,6 +51,8 @@ if ($null -ne $nationalSummaryTask) {
         Start-Sleep -Seconds 2
     } while ((Get-Date) -lt $summaryDeadline)
     Write-Host "NATIONAL_SUMMARY_TASK=$nationalSummaryState"
+    $nationalSummaryInfo = Get-ScheduledTaskInfo -TaskName "QD766 National Summary"
+    Write-Host "NATIONAL_SUMMARY_LAST_RESULT=$($nationalSummaryInfo.LastTaskResult)"
     $summaryResponse = Invoke-RestMethod -Uri "http://127.0.0.1:8767/api/v1/national-summaries?limit=10"
     $summaries = @($summaryResponse | Where-Object { $null -ne $_ })
     Write-Host "NATIONAL_SUMMARY_COUNT=$($summaries.Count)"
@@ -68,5 +70,11 @@ if ($null -ne $nationalSummaryTask) {
     }
     catch {
         Write-Host "NATIONAL_SUMMARY_YEAR=NOT_AVAILABLE"
+        $nationalSummaryLog = "D:\QD766\logs\national-summary.log"
+        if (Test-Path -LiteralPath $nationalSummaryLog) {
+            Get-Content -LiteralPath $nationalSummaryLog -Tail 3 | ForEach-Object {
+                Write-Host "NATIONAL_SUMMARY_LOG=$_"
+            }
+        }
     }
 }

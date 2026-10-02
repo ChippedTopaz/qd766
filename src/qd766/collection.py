@@ -136,11 +136,12 @@ class BrowserTransport:
             self._process = subprocess.Popen(
                 [
                     executable_path,
-                    "--headless=new",
                     "--disable-gpu",
                     "--disable-background-networking",
                     "--no-first-run",
                     "--no-default-browser-check",
+                    "--window-position=-32000,-32000",
+                    "--window-size=800,600",
                     "--remote-allow-origins=*",
                     f"--remote-debugging-port={port}",
                     f"--user-data-dir={self._profile_path}",
