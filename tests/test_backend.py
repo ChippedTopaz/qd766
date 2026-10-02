@@ -44,6 +44,7 @@ from qd766.backend.models import (
     Snapshot,
 )
 from qd766.backend.province_batches import create_province_batch, resume_province_batch
+from qd766.backend.province_refresh import choose_detail_refresh_period
 from qd766.backend.worker import run_one_job
 from qd766.collection import SafetyStop
 from qd766.national_summary import NationalSummaryCapture
@@ -801,6 +802,33 @@ class BackendTest(unittest.TestCase):
                 )
             )
             self.assertEqual(item.state, "queued")
+
+    def test_detail_refresh_rotates_current_year_month_and_quarter(self):
+        now = datetime(2026, 10, 2, 2, 15, tzinfo=timezone.utc)
+        year = choose_detail_refresh_period(now, {})
+        self.assertEqual(year, PeriodSelection("year", 2026))
+        month = choose_detail_refresh_period(
+            now,
+            {("year", 2026, None): now},
+        )
+        self.assertEqual(month, PeriodSelection("month", 2026, 10))
+        quarter = choose_detail_refresh_period(
+            now,
+            {
+                ("year", 2026, None): now,
+                ("month", 2026, 10): now,
+            },
+        )
+        self.assertEqual(quarter, PeriodSelection("quarter", 2026, 4))
+        fresh = choose_detail_refresh_period(
+            now,
+            {
+                ("year", 2026, None): now,
+                ("month", 2026, 10): now,
+                ("quarter", 2026, 4): now,
+            },
+        )
+        self.assertIsNone(fresh)
 
     def test_worker_halts_on_upstream_safety_signal(self):
         with self.app.state.session_factory.begin() as session:

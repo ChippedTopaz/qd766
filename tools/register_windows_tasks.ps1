@@ -8,10 +8,11 @@ $RepositoryRoot = Split-Path -Parent $PSScriptRoot
 $BackendScript = Join-Path $PSScriptRoot "start_backend.ps1"
 $WorkerScript = Join-Path $PSScriptRoot "start_worker.ps1"
 $NationalSummaryScript = Join-Path $PSScriptRoot "start_national_summary.ps1"
+$ProvinceRefreshScript = Join-Path $PSScriptRoot "start_province_refresh.ps1"
 $BackupScript = Join-Path $PSScriptRoot "backup_postgresql.ps1"
 $CurrentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 
-foreach ($path in @($BackendScript, $WorkerScript, $NationalSummaryScript, $BackupScript)) {
+foreach ($path in @($BackendScript, $WorkerScript, $NationalSummaryScript, $ProvinceRefreshScript, $BackupScript)) {
     if (-not (Test-Path -LiteralPath $path)) {
         throw "Missing required script: $path"
     }
@@ -74,6 +75,19 @@ $nationalSummaryTask = New-ScheduledTask `
     -Settings $settings
 Register-ScheduledTask -TaskName "QD766 National Summary" -InputObject $nationalSummaryTask -Force | Out-Null
 
+$provinceRefreshArguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $ProvinceRefreshScript
+$provinceRefreshAction = New-ScheduledTaskAction `
+    -Execute "powershell.exe" `
+    -Argument $provinceRefreshArguments `
+    -WorkingDirectory $RepositoryRoot
+$provinceRefreshTrigger = New-ScheduledTaskTrigger -Daily -At "02:15"
+$provinceRefreshTask = New-ScheduledTask `
+    -Action $provinceRefreshAction `
+    -Trigger $provinceRefreshTrigger `
+    -Principal $principal `
+    -Settings $settings
+Register-ScheduledTask -TaskName "QD766 Province Detail Refresh" -InputObject $provinceRefreshTask -Force | Out-Null
+
 $backupArguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -Destination "{1}"' -f $BackupScript, $BackupDestination
 $backupAction = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
@@ -91,5 +105,6 @@ Write-Output "TASKS_REGISTERED"
 Write-Output "BACKEND_TASK=QD766 Backend (at logon)"
 Write-Output "WORKER_TASK=QD766 Worker (at logon; circuit-protected)"
 Write-Output "NATIONAL_SUMMARY_TASK=QD766 National Summary (hourly; circuit-protected)"
+Write-Output "PROVINCE_REFRESH_TASK=QD766 Province Detail Refresh (daily 02:15; staggered 72h; circuit-protected)"
 Write-Output "BACKUP_TASK=QD766 Backup (daily $BackupTime)"
 Write-Output "BACKUP_DESTINATION=$BackupDestination"

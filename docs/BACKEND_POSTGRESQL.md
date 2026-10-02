@@ -358,3 +358,11 @@ API chỉ đọc:
 Batch quản trị mặc định vẫn bỏ qua tỉnh đã có dữ liệu. Truyền `--refresh-key`
 mới tạo một chu kỳ làm mới có chủ đích cho toàn bộ tỉnh; nếu raw không thay đổi
 thì lớp lưu trữ vẫn chống trùng theo hash nội dung.
+
+Task `QD766 Province Detail Refresh` chạy hằng ngày lúc 02:15. Nó không gọi
+nguồn trực tiếp mà chỉ tạo tối đa một batch khi không có batch tỉnh đang chạy,
+không có batch lỗi cần rà soát và circuit đang đóng. Ba kỳ hiện tại (năm,
+tháng, quý) được luân phiên theo thời điểm hoàn tất cũ nhất, với ngưỡng mặc định
+72 giờ. Worker tiếp tục xử lý từng tỉnh và sáu endpoint tuần tự; vì vậy không có
+hai luồng chi tiết gọi DVCQG đồng thời. Điểm tổng hợp 34 tỉnh vẫn được task
+National Summary cập nhật riêng mỗi giờ.

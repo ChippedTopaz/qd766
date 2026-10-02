@@ -3,7 +3,8 @@ $ErrorActionPreference = "Stop"
 $backendTask = Get-ScheduledTask -TaskName "QD766 Backend" -ErrorAction SilentlyContinue
 $workerTask = Get-ScheduledTask -TaskName "QD766 Worker" -ErrorAction SilentlyContinue
 $nationalSummaryTask = Get-ScheduledTask -TaskName "QD766 National Summary" -ErrorAction SilentlyContinue
-foreach ($task in @($backendTask, $workerTask, $nationalSummaryTask)) {
+$provinceRefreshTask = Get-ScheduledTask -TaskName "QD766 Province Detail Refresh" -ErrorAction SilentlyContinue
+foreach ($task in @($backendTask, $workerTask, $nationalSummaryTask, $provinceRefreshTask)) {
     if ($null -ne $task -and $task.State -eq "Running") {
         Stop-ScheduledTask -InputObject $task
     }
@@ -30,6 +31,12 @@ if ($null -ne $workerTask) {
 }
 if ($null -ne $nationalSummaryTask) {
     Start-ScheduledTask -InputObject $nationalSummaryTask
+}
+if ($null -ne $provinceRefreshTask) {
+    $provinceRefreshState = (Get-ScheduledTask -TaskName "QD766 Province Detail Refresh").State
+    $provinceRefreshInfo = Get-ScheduledTaskInfo -TaskName "QD766 Province Detail Refresh"
+    Write-Host "PROVINCE_REFRESH_TASK=$provinceRefreshState"
+    Write-Host "PROVINCE_REFRESH_LAST_RESULT=$($provinceRefreshInfo.LastTaskResult)"
 }
 
 Start-Sleep -Seconds 5
