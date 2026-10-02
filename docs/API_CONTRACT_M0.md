@@ -90,10 +90,13 @@ trang đại diện nói trên; không thu toàn bộ 575 trang.
 Mỗi metric giữ `code`, `name`, `numerator`, `denominator`, `ratio`, `score` và
 `maxScore`, kể cả `null`. Không thay `null` bằng 0.
 
-`dvc-progress-tree`, `provide-online-tree` và
-`formality-online-payment-tree` dùng các parameter trực tiếp trên `parent` và
-`children`; không có metric code riêng. Adapter phải giữ các parameter gốc để
-công thức tính tỷ lệ/điểm được bổ sung sau.
+`dvc-progress-tree` và `formality-online-payment-tree` dùng các parameter trực
+tiếp trên `parent` và `children`; không có metric code riêng. Với
+`provide-online-tree`, các parameter thành phần chỉ xuất hiện ở `parent`, còn
+`children` hiện chỉ có điểm, điểm tối đa, tỷ lệ và thông tin nhận diện. Adapter
+phải giữ nguyên dữ liệu nguồn, không suy diễn parameter còn thiếu. Công thức
+Thanh toán trực tuyến chưa được xác minh nên các parameter chỉ dùng để theo dõi,
+không dùng để tự tính lại điểm.
 
 Khi lọc một TTHC ở `dossier-digitized`, API không trả metric tổng hợp
 `CITIZEN_DATA_CONNECTED_FORMALITY`. Đây là biến thể schema đã quan sát, không
