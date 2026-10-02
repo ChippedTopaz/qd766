@@ -8,6 +8,8 @@
     "data": "python tools/build_web_data.py",
     "typecheck": "tsc --noEmit",
     "build": "npm run data && node tools/prepare_excel_vendor.mjs && tsc",
+    "build:netlify": "node tools/prepare_excel_vendor.mjs && tsc && node tools/package_netlify.mjs",
+    "test:netlify": "npm run build:netlify && node web/tests/netlify-package.test.mjs",
     "test:excel": "npm run build && node web/tests/excel-export.test.mjs",
     "test:leadership": "npm run build && node web/tests/leadership-report.test.mjs",
     "test:progress": "npm run build && node web/tests/progress-scoring.test.mjs",

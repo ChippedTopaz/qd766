@@ -895,10 +895,13 @@ async function switchProvince(rootDepartmentId:string):Promise<void>{
 }
 
 async function start(): Promise<void> {
+  const productionSite=document.querySelector('meta[name="qd766-deployment"]')?.getAttribute("content")==="public";
   try {
     const policyResponse=await fetch("/api/v1/access-policy");
+    if(productionSite&&!policyResponse.ok)throw new Error("Website chưa kết nối được backend HTTPS máy cơ quan.");
     if(policyResponse.ok){
       const policy=await policyResponse.json() as {publicReadOnly:boolean;loginRequired?:boolean;googleLoginEnabled?:boolean};
+      if(productionSite&&policy.publicReadOnly!==true)throw new Error("Backend chưa bật chế độ truy cập công khai an toàn.");
       publicReadOnly=Boolean(policy.publicReadOnly);loginRequired=Boolean(policy.loginRequired);googleLoginEnabled=Boolean(policy.googleLoginEnabled);
     }
     if(googleLoginEnabled||loginRequired){
@@ -915,7 +918,7 @@ async function start(): Promise<void> {
     if(apiResponse.ok){
       data=normalizeLoadedData(await apiResponse.json() as AppData);
     }else{
-      if(publicReadOnly)throw new Error("Chưa tải được dữ liệu thật từ máy chủ. Không dùng dữ liệu mẫu thay thế.");
+      if(publicReadOnly||productionSite)throw new Error("Chưa tải được dữ liệu thật từ máy chủ. Không dùng dữ liệu mẫu thay thế.");
       const fixtureResponse=await fetch("./data/snapshots.json");
       if(!fixtureResponse.ok)throw new Error(`API HTTP ${apiResponse.status}; fixture HTTP ${fixtureResponse.status}`);
       data=normalizeLoadedData(await fixtureResponse.json() as AppData);
@@ -927,7 +930,7 @@ async function start(): Promise<void> {
     render();
     void loadProvinceBenchmarks();
   } catch(error) {
-    root.innerHTML=`<main class="content"><div class="empty-state"><h2>Không thể tải dữ liệu</h2><p>${esc(error instanceof Error?error.message:error)}. Hãy mở website qua máy chủ cục bộ và kiểm tra web/data/snapshots.json.</p></div></main>`;
+    root.innerHTML=`<main class="content"><div class="empty-state"><h2>Không thể tải dữ liệu</h2><p>${esc(error instanceof Error?error.message:error)}</p><p>${productionSite?"Vui lòng thử lại sau hoặc liên hệ quản trị viên. Website không sử dụng dữ liệu mẫu thay cho dữ liệu thật.":"Hãy kiểm tra máy chủ cục bộ và dữ liệu đầu vào."}</p></div></main>`;
   }
 }
 
