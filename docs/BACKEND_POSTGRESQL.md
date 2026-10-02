@@ -45,9 +45,11 @@ Danh mục đơn vị dùng UUID của DVCQG làm khóa chính. Tên, mã, cấp
 
 ### `snapshots`
 
-Một bản chụp theo tỉnh, kỳ, phạm vi và TTHC. `snapshot_key` là khóa idempotency
-ổn định. Snapshot đã tồn tại chỉ được chấp nhận lại nếu toàn bộ raw SHA-256
-giống nhau; cùng khóa nhưng hash khác bị từ chối.
+Một bản chụp theo tỉnh, kỳ, phạm vi và TTHC. Từ phiên bản `snapshot:v2`,
+`snapshot_key` gồm cả hash nội dung của các raw dataset. Vì vậy cùng
+tỉnh/kỳ/phạm vi có thể có nhiều phiên bản bất biến khi dữ liệu nguồn thay đổi;
+nhập lại đúng cùng nội dung vẫn trả về bản đã có. API dashboard và
+`snapshots/latest` luôn chọn phiên bản hoàn chỉnh mới nhất.
 
 ### `formalities` và `formality_departments`
 
@@ -352,3 +354,7 @@ API chỉ đọc:
 
 - `GET /api/v1/national-summaries`
 - `GET /api/v1/national-summaries/latest?period_type=year&year=2026`
+
+Batch quản trị mặc định vẫn bỏ qua tỉnh đã có dữ liệu. Truyền `--refresh-key`
+mới tạo một chu kỳ làm mới có chủ đích cho toàn bộ tỉnh; nếu raw không thay đổi
+thì lớp lưu trữ vẫn chống trùng theo hash nội dung.

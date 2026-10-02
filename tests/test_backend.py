@@ -15,7 +15,6 @@ from sqlalchemy import func, select
 from qd766.backend import create_app
 from qd766.backend.config import Settings
 from qd766.backend.importer import (
-    SnapshotConflict,
     SnapshotImportError,
     store_formality_page,
     store_normalized_snapshot,
@@ -430,14 +429,32 @@ class BackendTest(unittest.TestCase):
         with self.app.state.session_factory() as session:
             self.assertIsNone(session.scalar(select(CollectionJob)))
 
-    def test_conflicting_snapshot_is_rejected(self):
+    def test_changed_snapshot_is_stored_as_a_new_version_and_latest_is_selected(self):
         with self.app.state.session_factory.begin() as session:
-            store_normalized_snapshot(session, snapshot_payload())
+            first = store_normalized_snapshot(session, snapshot_payload())
         changed = copy.deepcopy(snapshot_payload())
         changed["datasets"][0]["raw"]["sha256"] = "b" * 64
-        with self.assertRaises(SnapshotConflict):
-            with self.app.state.session_factory.begin() as session:
-                store_normalized_snapshot(session, changed)
+        changed["provinceAggregatedScore"] = 6
+        changed["datasets"][0]["root"]["apiScore"] = 6
+        with self.app.state.session_factory.begin() as session:
+            second = store_normalized_snapshot(session, changed)
+            self.assertNotEqual(first.id, second.id)
+            self.assertEqual(session.scalar(select(func.count()).select_from(Snapshot)), 2)
+        latest = self.client.get(
+            "/api/v1/snapshots/latest",
+            params={
+                "root_department_id": ROOT_ID,
+                "period_type": "month",
+                "year": 2026,
+                "period_value": 8,
+                "scope": "all",
+            },
+        )
+        self.assertEqual(latest.status_code, 200)
+        self.assertEqual(latest.json()["id"], str(second.id))
+        dashboard = self.client.get(f"/api/v1/dashboard?root_department_id={ROOT_ID}")
+        snapshot = dashboard.json()["snapshots"]["month-2026-08:all"]
+        self.assertEqual(snapshot["provinceAggregatedScore"], 6.0)
 
     def test_incomplete_snapshot_is_rejected(self):
         payload = snapshot_payload()
@@ -756,6 +773,34 @@ class BackendTest(unittest.TestCase):
             self.assertEqual(stored.state, "succeeded")
             self.assertEqual(stored.failed_items, 0)
             self.assertEqual(stored.completed_items, 1)
+
+    def test_named_province_refresh_does_not_skip_existing_snapshot(self):
+        root = ProvinceRoot(
+            "25",
+            "Phú Thọ",
+            uuid.UUID(ROOT_ID),
+            "UBND tỉnh Phú Thọ",
+            "H44",
+            "fixture",
+        )
+        with self.app.state.session_factory.begin() as session:
+            store_normalized_snapshot(session, snapshot_payload())
+            batch, created = create_province_batch(
+                session,
+                [root],
+                PeriodSelection("month", 2026, 8),
+                catalog_version="fixture:v1",
+                refresh_key="2026-10-02",
+            )
+            self.assertTrue(created)
+            self.assertEqual(batch.available_items, 0)
+        with self.app.state.session_factory() as session:
+            item = session.scalar(
+                select(ProvinceCollectionBatchItem).where(
+                    ProvinceCollectionBatchItem.batch_id == batch.id
+                )
+            )
+            self.assertEqual(item.state, "queued")
 
     def test_worker_halts_on_upstream_safety_signal(self):
         with self.app.state.session_factory.begin() as session:

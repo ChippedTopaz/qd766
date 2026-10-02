@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -60,11 +63,15 @@ def _period_value(period: dict[str, Any]) -> int | None:
     raise SnapshotImportError("Unsupported period type")
 
 
-def _snapshot_key(payload: dict[str, Any], root_department_id: uuid.UUID) -> str:
+def _snapshot_key(
+    payload: dict[str, Any],
+    root_department_id: uuid.UUID,
+    raw_hashes: dict[str, str],
+) -> str:
     period = payload["period"]
     value = _period_value(period)
     formality = payload.get("formalityId") or "all"
-    return ":".join(
+    logical_key = ":".join(
         [
             str(root_department_id),
             str(period["type"]),
@@ -74,6 +81,9 @@ def _snapshot_key(payload: dict[str, Any], root_department_id: uuid.UUID) -> str
             str(formality),
         ]
     )
+    content = json.dumps(raw_hashes, sort_keys=True, separators=(",", ":")).encode()
+    content_hash = hashlib.sha256(content).hexdigest()
+    return f"snapshot:v2:{logical_key}:{content_hash}"
 
 
 def _raw_hashes(datasets: Iterable[dict[str, Any]]) -> dict[str, str]:
@@ -236,13 +246,14 @@ def store_normalized_snapshot(session: Session, payload: dict[str, Any]) -> Snap
     if len(root_ids) != 1:
         raise SnapshotImportError("Datasets do not share one root department")
     root_department_id = next(iter(root_ids))
-    key = _snapshot_key(payload, root_department_id)
+    raw_hashes = _raw_hashes(datasets)
+    key = _snapshot_key(payload, root_department_id, raw_hashes)
     existing = session.scalar(select(Snapshot).where(Snapshot.snapshot_key == key))
     if existing is not None:
         existing_hashes = {item.group_name: item.raw_sha256 for item in existing.datasets}
-        if existing_hashes == _raw_hashes(datasets):
+        if existing_hashes == raw_hashes:
             return existing
-        raise SnapshotConflict("Snapshot key already exists with different raw hashes")
+        raise SnapshotConflict("Content-addressed snapshot key collision")
 
     department_cache: dict[uuid.UUID, Department] = {}
     root_department = _upsert_department(session, datasets[0]["root"], department_cache)
@@ -265,6 +276,7 @@ def store_normalized_snapshot(session: Session, payload: dict[str, Any]) -> Snap
         province_aggregated_maximum=payload.get("provinceAggregatedMaximum"),
         policy=payload.get("scorePolicy", {}),
         status_detail=status,
+        created_at=datetime.now(timezone.utc),
     )
     session.add(snapshot)
     for position, item in enumerate(datasets):
@@ -276,7 +288,7 @@ def store_normalized_snapshot(session: Session, payload: dict[str, Any]) -> Snap
             formula_status=item["formulaStatus"],
             score_policy=item["scorePolicy"],
             raw_path=item["raw"]["path"],
-            raw_sha256=_validate_raw_hash(item["raw"]["sha256"]),
+            raw_sha256=raw_hashes[item["group"]],
             details=item.get("details", {}),
         )
         session.add(dataset)

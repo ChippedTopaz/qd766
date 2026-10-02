@@ -87,6 +87,13 @@ def main() -> int:
     create.add_argument("--period-type", choices=("month", "quarter", "year"), required=True)
     create.add_argument("--year", type=int, required=True)
     create.add_argument("--period-value", type=int)
+    create.add_argument(
+        "--refresh-key",
+        help=(
+            "Create a new immutable refresh cycle (for example 2026-10-02); "
+            "existing province snapshots will not be skipped."
+        ),
+    )
     status = subparsers.add_parser("status")
     status.add_argument("--batch-id")
     resume = subparsers.add_parser("resume")
@@ -106,6 +113,7 @@ def main() -> int:
                     load_province_roots().values(),
                     period,
                     catalog_version=_catalog_version(),
+                    refresh_key=arguments.refresh_key,
                 )
                 output = _payload(session, batch, created=created)
         elif arguments.action == "resume":

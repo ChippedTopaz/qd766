@@ -66,6 +66,23 @@ router = APIRouter(prefix="/api/v1")
 DbSession = Annotated[Session, Depends(get_session)]
 
 
+def _latest_snapshot_versions(snapshots: list[Snapshot]) -> list[Snapshot]:
+    """Keep the newest immutable version of every logical snapshot."""
+
+    latest: dict[tuple, Snapshot] = {}
+    for snapshot in sorted(snapshots, key=lambda item: item.created_at, reverse=True):
+        key = (
+            snapshot.root_department_id,
+            snapshot.period_type,
+            snapshot.year,
+            snapshot.period_value,
+            snapshot.scope,
+            snapshot.formality_id,
+        )
+        latest.setdefault(key, snapshot)
+    return list(latest.values())
+
+
 def _merge_national_rankings(
     detailed: list[dict], summary: NationalSummarySnapshot
 ) -> list[dict]:
@@ -988,9 +1005,16 @@ def dashboard(
                 Snapshot.state == "complete",
                 Snapshot.root_department_id == resolved_root_id,
             )
-            .order_by(Snapshot.year.desc(), Snapshot.period_type, Snapshot.period_value.desc())
+            .order_by(
+                Snapshot.year.desc(),
+                Snapshot.period_type,
+                Snapshot.period_value.desc(),
+                Snapshot.created_at.desc(),
+            )
         )
-        snapshots = list(session.scalars(statement).unique())
+        snapshots = _latest_snapshot_versions(
+            list(session.scalars(statement).unique())
+        )
         if not snapshots:
             raise HTTPException(status_code=404, detail="No complete snapshots found")
         formality_id = next(

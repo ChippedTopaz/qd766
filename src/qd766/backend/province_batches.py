@@ -27,6 +27,7 @@ def create_province_batch(
     period: PeriodSelection,
     *,
     catalog_version: str,
+    refresh_key: str | None = None,
 ) -> tuple[ProvinceCollectionBatch, bool]:
     """Create one resumable national batch and enqueue only its first missing province."""
     period.validate_collectable()
@@ -46,6 +47,8 @@ def create_province_batch(
         "catalogVersion": catalog_version,
         "rootDepartmentIds": [str(item.root_department_id) for item in ordered],
     }
+    if refresh_key is not None:
+        identity["refreshKey"] = refresh_key
     canonical = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
     key = "province-batch:v1:" + hashlib.sha256(canonical).hexdigest()
     existing = session.scalar(
@@ -87,7 +90,12 @@ def create_province_batch(
         if period.value is None
         else available_statement.where(Snapshot.period_value == period.value)
     )
-    available = set(session.scalars(available_statement))
+    # A named refresh deliberately creates new immutable versions. Without a
+    # refresh key, the original backfill behavior remains: existing snapshots
+    # are skipped.
+    available = (
+        set() if refresh_key is not None else set(session.scalars(available_statement))
+    )
     batch = ProvinceCollectionBatch(
         idempotency_key=key,
         state="queued",
