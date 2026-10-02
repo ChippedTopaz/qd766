@@ -22,6 +22,7 @@ const screens: Array<{id: ScreenId; label: string; icon: string}> = [
   {id:"suggestions",label:"Gợi ý",icon:"◇"},{id:"quality",label:"Chất lượng dữ liệu",icon:"✓"},
   {id:"operations",label:"Vận hành",icon:"⚙"},
 ];
+let publicReadOnly=false;
 let data: AppData;
 let state: State;
 let selectionRequest=0;
@@ -132,7 +133,7 @@ const unitOptions = () => {
 };
 
 function nav(): string {
-  return `<aside class="sidebar"><div class="brand"><span class="brand-mark">766</span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.map((item)=>`<button data-nav="${item.id}" class="${state.screen===item.id?"active":""}" aria-current="${state.screen===item.id?"page":"false"}"><span class="nav-icon" aria-hidden="true">${item.icon}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
+  return `<aside class="sidebar"><div class="brand"><span class="brand-mark">766</span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item=>!publicReadOnly||!["procedure","operations","suggestions"].includes(item.id)).map((item)=>`<button data-nav="${item.id}" class="${state.screen===item.id?"active":""}" aria-current="${state.screen===item.id?"page":"false"}"><span class="nav-icon" aria-hidden="true">${item.icon}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
 }
 
 function context(): string {
@@ -143,7 +144,7 @@ function context(): string {
   const canSubmit=state.scope==="formality"&&state.demo==="ready"&&(catalogPreview.mode==="filtered"?catalogPreview.selected>0:Boolean(catalogPreview.selectedId));
   const selectedProvinceId=pendingProvinceId||data.province.id;
   const provinceItems=(provinceOptions.length?provinceOptions:[{id:data.province.id,name:data.province.name,departmentCode:null,provinceCode:data.province.code??null,snapshotCount:0,latestSnapshotAt:null,available:true}]).slice().sort((left,right)=>alphabet.compare(displayProvinceName(left.name),displayProvinceName(right.name))).map(item=>`<option value="${esc(item.id)}" ${item.id===selectedProvinceId?"selected":""}>${esc(displayProvinceName(item.name))}${item.available?"":" · chưa có dữ liệu"}</option>`).join("");
-  return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type==="month"?"selected":""}>Tháng</option><option value="quarter" ${selectedPeriod.type==="quarter"?"selected":""}>Quý</option><option value="year" ${selectedPeriod.type==="year"?"selected":""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item=>`<option value="${item.id}" ${item.id===state.periodId?"selected":""}>${item.type==="month"?`Tháng ${item.value}`:item.type==="quarter"?`Quý ${item.value}`:"Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year=>`<option value="${year}" ${year===selectedPeriod.year?"selected":""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope==="all"?"selected":""}>Tất cả thủ tục hành chính</option><option value="formality" ${state.scope==="formality"?"selected":""}>${esc(formalityScopeLabel)}</option></select></label></div><div class="context-actions">${canSubmit?`<button class="btn primary" data-action="submit-statistics">Thống kê</button>`:""}<button class="btn" data-action="open-quality">● Dữ liệu đầy đủ</button><button class="btn" data-action="export">Xuất</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></header>`;
+  return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type==="month"?"selected":""}>Tháng</option><option value="quarter" ${selectedPeriod.type==="quarter"?"selected":""}>Quý</option><option value="year" ${selectedPeriod.type==="year"?"selected":""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item=>`<option value="${item.id}" ${item.id===state.periodId?"selected":""}>${item.type==="month"?`Tháng ${item.value}`:item.type==="quarter"?`Quý ${item.value}`:"Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year=>`<option value="${year}" ${year===selectedPeriod.year?"selected":""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope==="all"?"selected":""}>Tất cả thủ tục hành chính</option>${publicReadOnly?"":`<option value="formality" ${state.scope==="formality"?"selected":""}>${esc(formalityScopeLabel)}</option>`}</select></label></div><div class="context-actions">${canSubmit?`<button class="btn primary" data-action="submit-statistics">Thống kê</button>`:""}<button class="btn" data-action="open-quality">● Dữ liệu đầy đủ</button><button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></header>`;
 }
 
 function shell(content: string): void {
@@ -887,11 +888,14 @@ async function switchProvince(rootDepartmentId:string):Promise<void>{
 
 async function start(): Promise<void> {
   try {
+    const policyResponse=await fetch("/api/v1/access-policy");
+    if(policyResponse.ok)publicReadOnly=Boolean((await policyResponse.json() as {publicReadOnly:boolean}).publicReadOnly);
     const [apiResponse,provincesResponse]=await Promise.all([fetch("/api/v1/dashboard"),fetch("/api/v1/dashboard/provinces")]);
     if(provincesResponse.ok)provinceOptions=await provincesResponse.json() as ProvinceOption[];
     if(apiResponse.ok){
       data=normalizeLoadedData(await apiResponse.json() as AppData);
     }else{
+      if(publicReadOnly)throw new Error("Chưa tải được dữ liệu thật từ máy chủ. Không dùng dữ liệu mẫu thay thế.");
       const fixtureResponse=await fetch("./data/snapshots.json");
       if(!fixtureResponse.ok)throw new Error(`API HTTP ${apiResponse.status}; fixture HTTP ${fixtureResponse.status}`);
       data=normalizeLoadedData(await fixtureResponse.json() as AppData);

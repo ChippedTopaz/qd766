@@ -977,14 +977,15 @@ def dashboard(
     session: DbSession,
     root_department_id: uuid.UUID | None = None,
 ) -> dict:
-    cache_key = str(root_department_id) if root_department_id else "latest"
+    public_read_only = request.app.state.settings.public_read_only
+    cache_key = ("public:" if public_read_only else "office:") + (str(root_department_id) if root_department_id else "latest")
 
     def load_dashboard() -> dict:
         resolved_root_id = root_department_id
         if resolved_root_id is None:
             resolved_root_id = session.scalar(
                 select(Snapshot.root_department_id)
-                .where(Snapshot.state == "complete")
+                .where(Snapshot.state == "complete", Snapshot.scope == "all" if public_read_only else True)
                 .order_by(Snapshot.created_at.desc())
                 .limit(1)
             )
@@ -1004,6 +1005,8 @@ def dashboard(
             .where(
                 Snapshot.state == "complete",
                 Snapshot.root_department_id == resolved_root_id,
+                Snapshot.scope == "all" if public_read_only else True,
+                Snapshot.formality_id.is_(None) if public_read_only else True,
             )
             .order_by(
                 Snapshot.year.desc(),

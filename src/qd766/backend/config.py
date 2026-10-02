@@ -55,6 +55,7 @@ def _database_url_from_env() -> str:
 
 @dataclass(frozen=True)
 class Settings:
+    public_read_only: bool = False
     database_url: str = DEFAULT_DATABASE_URL
     cors_origins: tuple[str, ...] = ()
     sql_echo: bool = False
@@ -79,6 +80,7 @@ class Settings:
             if item.strip()
         )
         return cls(
+            public_read_only=_as_bool(os.getenv("QD766_PUBLIC_READ_ONLY")),
             database_url=_database_url_from_env(),
             cors_origins=origins,
             sql_echo=_as_bool(os.getenv("QD766_SQL_ECHO")),

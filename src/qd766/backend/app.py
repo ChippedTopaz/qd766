@@ -12,13 +12,24 @@ from .cache import SingleFlightTTLCache
 from .config import Settings
 from .database import create_database_engine, create_session_factory
 from .routes import router
+from .access_policy import enforce_public_read_only
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings.from_env()
+    if resolved.public_read_only and "*" in resolved.cors_origins:
+        raise ValueError("Public preview requires explicit CORS origins, not '*'")
     engine = create_database_engine(resolved)
-    app = FastAPI(title="QD766 API", version="0.2.0")
+    app = FastAPI(title="QD766 API", version="0.2.0", docs_url=None if resolved.public_read_only else "/docs",
+                  redoc_url=None if resolved.public_read_only else "/redoc",
+                  openapi_url=None if resolved.public_read_only else "/openapi.json")
     app.state.settings = resolved
+    app.middleware("http")(enforce_public_read_only)
+
+    @app.get("/api/v1/access-policy", tags=["health"])
+    def access_policy() -> dict:
+        return {"publicReadOnly": resolved.public_read_only,
+                "authenticated": False, "paidRequestsEnabled": False}
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
     app.state.dashboard_cache = SingleFlightTTLCache[str, dict](
