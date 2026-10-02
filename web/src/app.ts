@@ -2,6 +2,7 @@ import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerSta
 import { analyzeOnlineScore, ONLINE_SCORING_PROFILE } from "./online-scoring.js";
 import { analyzeProgressScore } from "./progress-scoring.js";
 import { analysisExcelFilename, buildAnalysisWorkbook } from "./excel-export.js";
+import { buildLeadershipReport, buildLeadershipWorkbook, leadershipColors, leadershipUpdatedLabel } from "./leadership-report.js";
 import { parameterLabels } from "./parameter-labels.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 import type TomSelectControl from "tom-select";
@@ -496,13 +497,40 @@ async function loadOperations():Promise<void>{
 }
 
 function briefModal(): string {
-  const view=unit(), list=buildSuggestions(view).filter(x=>x.severity==="critical"||x.severity==="warning").slice(0,3);
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Báo cáo ngắn cho lãnh đạo"><div class="modal"><div class="modal-top no-print"><strong>Báo cáo lãnh đạo · 1 trang</strong><div><button class="btn small" data-action="print">In / PDF</button> <button class="btn small" data-action="close-modal">Đóng</button></div></div><article class="brief"><p class="eyebrow">${esc(view.name)} · ${esc(period().label)}</p><h1>Báo cáo nhanh Bộ chỉ số 766</h1><p class="muted">Phạm vi ${state.scope==="all"?"tất cả thủ tục hành chính":data.formality.code}</p><section class="kpi-strip"><div class="kpi"><div class="kpi-label">Tổng điểm</div><div class="kpi-value large num">${n(view.totalScore)}/${n(view.totalMaximum)}</div></div><div class="kpi"><div class="kpi-label">Thứ hạng</div><div class="kpi-value num">${view.peer?`${view.peer.rank}/${view.peer.total}`:"Không áp dụng"}</div></div><div class="kpi"><div class="kpi-label">Phân vị</div><div class="kpi-value num">${view.peer?`P${Math.round(view.peer.percentile)}`:"—"}</div></div><div class="kpi"><div class="kpi-label">So kỳ trước</div><div class="kpi-value">Chưa đủ kỳ</div></div></section><div class="brief-groups">${view.groups.map(g=>`<div class="brief-item"><span>${esc(g.label)}</span><strong class="num">${n(scoreValue(g))}/${n(g.maximum)}</strong></div>`).join("")}</div><h2>Ba việc cần chú ý</h2>${list.length?list.map((x,i)=>`<p><strong>${i+1}. ${esc(x.finding)}</strong><br><span class="muted">${esc(x.evidence)} ${esc(x.action)}</span></p>`).join(""):`<p>Chưa phát hiện cảnh báo ưu tiên từ các thông tin hiện có.</p>`}<p class="muted">Lưu ý: chưa có hai kỳ cùng loại để xác nhận xu hướng; cách quy đổi chi tiết điểm DVC trực tuyến đang chờ xác nhận.</p></article></div></div>`;
+  const report=leadershipReport(),loading=benchmarkLoading.has(benchmarkCacheKey(state.periodId));
+  const point=(value:number|null)=>value===null?"—":n(value);
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Báo cáo xếp hạng cho lãnh đạo"><div class="modal ranking-modal"><div class="modal-top no-print"><strong>Báo cáo lãnh đạo · Xếp hạng cùng cấp</strong><div><button class="btn small primary" data-action="leadership-excel" ${report.rows.length?"":"disabled"}>Tải Excel</button> <button class="btn small" data-action="print" ${report.rows.length?"":"disabled"}>In / PDF</button> <button class="btn small" data-action="close-modal">Đóng</button></div></div><article class="ranking-report"><h1>XẾP HẠNG ĐÁNH GIÁ CHẤT LƯỢNG PHỤC VỤ</h1><p>${esc(report.period)} · ${esc(report.population)} · ${esc(report.scope)}</p><p class="muted">Cập nhật: ${esc(leadershipUpdatedLabel(report))}</p>${report.rows.length?`<div class="ranking-scroll"><table class="leadership-table"><thead><tr><th>STT</th><th>${esc(report.nameHeader)}</th>${report.groupLabels.map((label,index)=>`<th style="background:#${leadershipColors[index]}">${esc(label)}</th><th style="background:#${leadershipColors[index]}">Hạng</th>`).join("")}<th>Tổng điểm</th></tr></thead><tbody>${report.rows.map((row,index)=>`<tr class="${row.id===report.selectedId?"selected-agency":""}" ${row.id===report.selectedId?'aria-current="true"':""}><td>${index+1}</td><td>${esc(row.name)}</td>${row.scores.map((score,i)=>`<td>${point(score)}</td><td class="leadership-rank">${row.ranks[i]??"—"}</td>`).join("")}<td class="leadership-total">${point(row.total)}</td></tr>`).join("")}</tbody></table></div>`:`<p role="status">${loading?"Đang đọc dữ liệu xếp hạng đã lưu…":"Chưa có dữ liệu xếp hạng cho lựa chọn này. Không gửi yêu cầu lấy dữ liệu mới."}</p>`}<div class="ranking-notes"><p>Cơ quan đang chọn: <strong>${esc(report.selectedName)}</strong>. Dòng màu xanh là cơ quan đang chọn. STT là vị trí dòng theo tổng điểm giảm dần, không phải thứ hạng khi có đồng điểm.</p>${report.notes.map(note=>`<p>${esc(note)}</p>`).join("")}</div></article></div></div>`;
+}
+
+const leadershipReport=()=>{
+  const report=buildLeadershipReport(data,state.periodId,state.scope,state.unitId,provinceBenchmarks[benchmarkCacheKey(state.periodId)]??[]);
+  if(state.demo!=="normal"){report.rows=[];report.capturedAt=[];report.notes=["Có dữ liệu thật của lựa chọn hiện tại mới lập được báo cáo."];}
+  return report;
+};
+async function openLeadershipReport():Promise<void>{
+  state.modal="brief";render();
+  if(state.demo==="normal"&&(state.unitId===data.province.id||data.units.find(item=>item.departmentId===state.unitId)?.departmentLevel==="PROVINCE_TOTAL")){
+    // Re-read saved rankings on open so a later automatic refresh is reflected.
+    if(!benchmarkLoading.has(benchmarkCacheKey(state.periodId)))delete provinceBenchmarks[benchmarkCacheKey(state.periodId)];
+    const loading=loadProvinceBenchmarks();render();await loading;
+  }
+  if(state.modal==="brief")render();
+}
+
+async function downloadLeadershipExcel():Promise<void>{
+  const report=leadershipReport();if(!report.rows.length)return;
+  const workbook=buildLeadershipWorkbook(ExcelJS.Workbook,report);
+  const snap=data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)];
+  const reportSnapshot:Snapshot={...(snap??{scope:state.scope,formalityId:null,status:{state:"incomplete",requiredGroups:[],loadedGroups:[],unsupportedGroups:[],missingGroups:[]},provinceAggregatedScore:null,provinceAggregatedMaximum:null,scorePolicy:{},datasets:[]}),delivery:{capturedAt:report.capturedAt.at(-1)??""}};
+  const filename=analysisExcelFilename(report.selectedName,reportSnapshot,"scores").replace("-tonghop-","-tonghop-baocao-lanhdao-");
+  const content=await workbook.xlsx.writeBuffer();
+  const url=URL.createObjectURL(new Blob([new Uint8Array(content)],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
+  const link=document.createElement("a");link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
 function exportModal(): string {
   const available=state.demo==="normal"&&Boolean(data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]);
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Trung tâm xuất báo cáo"><div class="modal"><div class="modal-top"><strong>Xuất dữ liệu và báo cáo</strong><button class="btn small" data-action="close-modal">Đóng</button></div><div class="brief"><p class="eyebrow">${esc(data.units.find(item=>item.departmentId===state.unitId)?.departmentName??data.province.name)} · ${esc(period().label)}</p><h1>Xuất dữ liệu đang xem</h1><p class="muted">Tệp Excel có tên chỉ tiêu tiếng Việt, định dạng số và bộ lọc. Giữ nguyên số 0, để trống giá trị chưa có; kèm kỳ và thời điểm cập nhật.${available?"":" Cần có dữ liệu của lựa chọn hiện tại trước khi xuất."}</p><div class="quality-grid" style="margin-top:18px"><article class="quality-card"><h3>Điểm 6 nhóm chỉ tiêu</h3><strong>Excel (.xlsx)</strong><p>Điểm nguồn, thứ hạng, trung vị và trạng thái dữ liệu của cơ quan đang chọn.</p><button class="btn small primary" data-export-excel="scores" ${available?"":"disabled"}>Tải Excel bảng điểm</button></article><article class="quality-card"><h3>Số liệu thành phần</h3><strong>Excel (.xlsx)</strong><p>Chỉ tiêu và số liệu nghiệp vụ của 6 nhóm, sử dụng tên tiếng Việt.</p><button class="btn small" data-export-excel="details" ${available?"":"disabled"}>Tải Excel chi tiết</button></article><article class="quality-card"><h3>Báo cáo lãnh đạo</h3><strong>Chờ thiết kế lại</strong><p>Thiết kế hiện tại chưa được duyệt. Tính năng này sẽ được hoàn thiện sau.</p><button class="btn small" disabled>Chưa phát hành</button></article></div></div></div></div>`;
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Trung tâm xuất báo cáo"><div class="modal"><div class="modal-top"><strong>Xuất dữ liệu và báo cáo</strong><button class="btn small" data-action="close-modal">Đóng</button></div><div class="brief"><p class="eyebrow">${esc(data.units.find(item=>item.departmentId===state.unitId)?.departmentName??data.province.name)} · ${esc(period().label)}</p><h1>Xuất dữ liệu đang xem</h1><p class="muted">Tệp Excel có tên chỉ tiêu tiếng Việt, định dạng số và bộ lọc. Giữ nguyên số 0, để trống giá trị chưa có; kèm kỳ và thời điểm cập nhật.${available?"":" Cần có dữ liệu của lựa chọn hiện tại trước khi xuất."}</p><div class="quality-grid" style="margin-top:18px"><article class="quality-card"><h3>Điểm 6 nhóm chỉ tiêu</h3><strong>Excel (.xlsx)</strong><p>Điểm nguồn, thứ hạng, trung vị và trạng thái dữ liệu của cơ quan đang chọn.</p><button class="btn small primary" data-export-excel="scores" ${available?"":"disabled"}>Tải Excel bảng điểm</button></article><article class="quality-card"><h3>Số liệu thành phần</h3><strong>Excel (.xlsx)</strong><p>Chỉ tiêu và số liệu nghiệp vụ của 6 nhóm, sử dụng tên tiếng Việt.</p><button class="btn small" data-export-excel="details" ${available?"":"disabled"}>Tải Excel chi tiết</button></article><article class="quality-card"><h3>Báo cáo lãnh đạo</h3><strong>Xếp hạng cùng cấp</strong><p>Điểm và hạng của 6 nhóm, tổng điểm; so sánh tỉnh, Sở ngành hoặc xã phường theo cơ quan đang chọn.</p><button class="btn small" data-action="brief">Xem báo cáo</button></article></div></div></div></div>`;
 }
 
 async function downloadAnalysisExcel(kind:"scores"|"details"):Promise<void>{
@@ -543,7 +571,11 @@ function bind(): void {
   document.querySelectorAll<HTMLInputElement>("input[name=catalog-formality]").forEach(el=>el.addEventListener("change",()=>{const item=catalogPreview.items.find(candidate=>candidate.id===el.value);if(!item)return;catalogPreview.selectedId=item.id;data.formality={id:item.id,code:item.code,name:item.name};void loadSelection()}));
   document.querySelectorAll<HTMLElement>("[data-catalog-mode]").forEach(el=>el.addEventListener("click",()=>{catalogPreview.mode=el.dataset.catalogMode as CatalogPreview["mode"];state.demo="ready";render()}));
   document.querySelector<HTMLInputElement>("#peer-search")?.addEventListener("input",e=>{state.search=(e.target as HTMLInputElement).value;render()});
-  document.querySelectorAll<HTMLElement>("[data-action=brief]").forEach(el=>el.addEventListener("click",()=>{state.modal="brief";render()}));
+  document.querySelectorAll<HTMLElement>("[data-action=brief]").forEach(el=>el.addEventListener("click",()=>{void openLeadershipReport()}));
+  document.querySelector<HTMLButtonElement>("[data-action=leadership-excel]")?.addEventListener("click",async event=>{
+    const button=event.currentTarget as HTMLButtonElement;button.disabled=true;
+    try{await downloadLeadershipExcel()}catch(error){console.error(error);window.alert("Không tạo được báo cáo Excel. Vui lòng thử lại.")}finally{button.disabled=false}
+  });
   document.querySelector<HTMLElement>("[data-action=export]")?.addEventListener("click",()=>{state.modal="export";render()});
   document.querySelectorAll<HTMLButtonElement>("[data-export-excel]").forEach(el=>el.addEventListener("click",async()=>{
     el.disabled=true;const label=el.textContent;el.textContent="Đang tạo Excel…";
@@ -608,7 +640,7 @@ async function loadProvinceBenchmarks():Promise<void>{
       if(response.ok){provinceBenchmarks[key]=await response.json() as ProvinceBenchmark[];changed=true}
     }catch(error){console.error(error)}finally{benchmarkLoading.delete(key)}
   }));
-  if(changed&&state.periodId===requestedPeriodId&&state.demo==="normal")render();
+  if((changed||state.modal==="brief")&&state.periodId===requestedPeriodId&&state.demo==="normal")render();
 }
 
 interface CollectionRequestResult {jobId:string|null;state:string;created:boolean;circuitState:string;message:string}

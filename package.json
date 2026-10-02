@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run data && node tools/prepare_excel_vendor.mjs && tsc",
     "test:excel": "npm run build && node web/tests/excel-export.test.mjs",
+    "test:leadership": "npm run build && node web/tests/leadership-report.test.mjs",
     "test:progress": "npm run build && node web/tests/progress-scoring.test.mjs",
     "test:csv": "npm run build && node web/tests/csv-export.test.mjs",
     "serve": "python tools/serve_app.py",

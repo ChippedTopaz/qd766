@@ -33,7 +33,7 @@ biểu diễn bằng trạng thái nguồn không hỗ trợ.
 | Tiêu chí không áp dụng cấp xã | Danh mục có dữ liệu, mapping response chưa đủ | Chưa gắn nhãn vào điểm cụ thể để tránh kết luận sai |
 | Impact–Effort | Có bố cục; effort chưa có dữ liệu | Gắn nhãn giả định cần phê duyệt |
 | Excel XLSX export | Đã triển khai | Bảng điểm 6 nhóm và số liệu thành phần của cơ quan đang chọn; tên tiếng Việt dùng chung với frontend; bỏ scoreDelta và mã/trường kỹ thuật; số giữ kiểu numeric, có phân cách hàng nghìn; kèm kỳ và thời điểm cập nhật |
-| Báo cáo lãnh đạo một trang | Chưa được duyệt thiết kế | Người dùng sẽ thiết kế lại sau; chưa coi là tính năng hoàn tất cho production |
+| Báo cáo lãnh đạo xếp hạng cùng cấp | Triển khai theo mẫu ngày 02/10/2026, chờ nghiệm thu | UBND tỉnh: 34 tỉnh/thành phố; Sở ngành: các Sở ngành trong tỉnh; xã phường: các UBND xã phường trong tỉnh. Đủ 6 nhóm, điểm và hạng từng nhóm, tổng điểm, tô xanh cơ quan đang chọn. Tải Excel và in/PDF khổ ngang |
 
 Không có dữ liệu mô phỏng trộn vào dữ liệu thật.
 
@@ -53,9 +53,14 @@ Không có dữ liệu mô phỏng trộn vào dữ liệu thật.
 
 ## 4. Quyết định và giả định cần xác nhận
 
-Ngày 02/10/2026: người dùng xác nhận Báo cáo lãnh đạo chưa đạt yêu cầu thiết
-kế, sẽ tự thiết kế lại sau. Tạm hoãn hoàn thiện giao diện báo cáo này; không
-đánh dấu hoàn tất trong nghiệm thu production. Xuất dữ liệu dùng Excel .xlsx
+Ngày 02/10/2026: thay báo cáo nhanh cũ bằng bảng xếp hạng theo ảnh mẫu mới
+của người dùng. Giữ riêng 6 nhóm (ảnh mẫu gộp DVCTT và thanh toán). Báo cáo
+chỉ đọc dữ liệu đã lưu, không tạo job thu thập. Thứ hạng đồng điểm dùng
+1, 2, 2, 4 theo cơ chế phân tích hiện có; STT là số thứ tự dòng, không phải
+hạng khi đồng điểm. Điểm thiếu để trống, không quy thành 0; chỉ xếp hạng
+tổng điểm khi đủ 6 nhóm. Nếu chưa đủ 34 tỉnh hoặc thời điểm cập nhật khác
+nhau, hiển thị cảnh báo phạm vi. Thiết kế chờ nghiệm thu trên máy cơ quan.
+Xuất dữ liệu dùng Excel .xlsx
 thay cho CSV. Tệp Excel lưu số nguyên/số thập phân đúng kiểu dữ liệu, định dạng
 `#,##0` và `#,##0.00`; Excel với vùng Việt Nam hiển thị dấu chấm hàng nghìn và
 dấu phẩy thập phân. Các tham số chưa có tên nghiệp vụ không đưa mã kỹ thuật
