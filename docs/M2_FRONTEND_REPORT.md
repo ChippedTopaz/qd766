@@ -32,9 +32,8 @@ biểu diễn bằng trạng thái nguồn không hỗ trợ.
 | Công thức chi tiết DVC trực tuyến | Đã khớp 6 fixture M0 trong sai số 0,015 | Điểm API vẫn là giá trị chính thức; công thức chỉ dùng để giải thích |
 | Tiêu chí không áp dụng cấp xã | Danh mục có dữ liệu, mapping response chưa đủ | Chưa gắn nhãn vào điểm cụ thể để tránh kết luận sai |
 | Impact–Effort | Có bố cục; effort chưa có dữ liệu | Gắn nhãn giả định cần phê duyệt |
-| CSV export | Đã triển khai | Bảng điểm 6 nhóm và số liệu thành phần của cơ quan đang chọn; kèm kỳ, độ mới và thời điểm cập nhật; mở bằng Excel |
-| Excel XLSX export | Chưa triển khai | Dùng CSV để đối chiếu trước |
-| Báo cáo lãnh đạo một trang | Hoạt động | Modal A4, có In/PDF |
+| Excel XLSX export | Đã triển khai | Bảng điểm 6 nhóm và số liệu thành phần của cơ quan đang chọn; tên tiếng Việt dùng chung với frontend; bỏ scoreDelta và mã/trường kỹ thuật; số giữ kiểu numeric, có phân cách hàng nghìn; kèm kỳ và thời điểm cập nhật |
+| Báo cáo lãnh đạo một trang | Chưa được duyệt thiết kế | Người dùng sẽ thiết kế lại sau; chưa coi là tính năng hoàn tất cho production |
 
 Không có dữ liệu mô phỏng trộn vào dữ liệu thật.
 
@@ -53,6 +52,15 @@ Không có dữ liệu mô phỏng trộn vào dữ liệu thật.
   empty, malformed/error và insufficient-history.
 
 ## 4. Quyết định và giả định cần xác nhận
+
+Ngày 02/10/2026: người dùng xác nhận Báo cáo lãnh đạo chưa đạt yêu cầu thiết
+kế, sẽ tự thiết kế lại sau. Tạm hoãn hoàn thiện giao diện báo cáo này; không
+đánh dấu hoàn tất trong nghiệm thu production. Xuất dữ liệu dùng Excel .xlsx
+thay cho CSV. Tệp Excel lưu số nguyên/số thập phân đúng kiểu dữ liệu, định dạng
+`#,##0` và `#,##0.00`; Excel với vùng Việt Nam hiển thị dấu chấm hàng nghìn và
+dấu phẩy thập phân. Các tham số chưa có tên nghiệp vụ không đưa mã kỹ thuật
+vào tệp cho người dùng; bổ sung nhãn vào `web/src/parameter-labels.ts` khi
+nguồn xuất hiện chỉ tiêu mới.
 
 1. Mặc định hiển thị kết quả chung tỉnh Phú Thọ. Khi có đăng nhập, có thể thay
    bằng cơ quan, đơn vị gắn với tài khoản cán bộ.

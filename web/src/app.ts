@@ -1,11 +1,13 @@
 import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerStats, similarVolumePeers, snapshotFor, snapshotKey } from "./analytics.js";
 import { analyzeOnlineScore, ONLINE_SCORING_PROFILE } from "./online-scoring.js";
 import { analyzeProgressScore } from "./progress-scoring.js";
-import { buildAnalysisCsv } from "./csv-export.js";
+import { buildAnalysisWorkbook } from "./excel-export.js";
+import { parameterLabels } from "./parameter-labels.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 import type TomSelectControl from "tom-select";
 
 declare const TomSelect: typeof TomSelectControl;
+declare const ExcelJS: {Workbook:new()=>import("exceljs").Workbook};
 
 type DemoState = "normal" | "ready" | "loading" | "queued" | "blocked" | "empty" | "error" | "insufficient";
 interface State { screen: ScreenId; periodId: string; scope: Scope; unitId: string; peerDimension: "total" | GroupId; selectedGroup: GroupId | null; selectedMetric: string | null; search: string; demo: DemoState; modal: "none" | "brief" | "export" }
@@ -126,17 +128,6 @@ const unitOptions = () => {
     {label:"Xã, phường",items:data.units.filter(item=>item.departmentLevel==="COMMUNE")},
   ];
   return groups.map(group=>`<optgroup label="${group.label}">${group.items.sort(byName).map(item=>`<option value="${esc(item.departmentId)}" ${item.departmentId===state.unitId?"selected":""}>${esc(item.departmentName)}</option>`).join("")}</optgroup>`).join("");
-};
-const parameterLabels: Record<string,string> = {
-  averageScore:"Điểm đánh giá trung bình", avgProcessingDays:"Số ngày xử lý trung bình",
-  classifiedPetitions:"Số phản ánh, kiến nghị đã phân loại", scoreDelta:"Mức thay đổi điểm",
-  totalDossierFinancialObligation:"Hồ sơ có nghĩa vụ tài chính",
-  totalDossierOnlineFormalityPaymentSuccess:"Hồ sơ thanh toán trực tuyến thành công theo thủ tục",
-  totalDossierOnlinePaymentSuccess:"Hồ sơ thanh toán trực tuyến thành công",
-  totalDossiers:"Tổng số hồ sơ", totalFeeDossierFormality:"Hồ sơ có phát sinh phí, lệ phí",
-  totalFeeDossierFormalityDistinct:"Hồ sơ có phí, lệ phí không trùng lặp",
-  totalFeeFormality:"Thủ tục có phát sinh phí, lệ phí", totalOnTime:"Hồ sơ giải quyết đúng hạn",
-  totalOverdue:"Hồ sơ quá hạn", totalPetitions:"Tổng số phản ánh, kiến nghị", totalReceived:"Tổng hồ sơ tiếp nhận",
 };
 
 function nav(): string {
@@ -511,20 +502,23 @@ function briefModal(): string {
 
 function exportModal(): string {
   const available=state.demo==="normal"&&Boolean(data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]);
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Trung tâm xuất báo cáo"><div class="modal"><div class="modal-top"><strong>Xuất dữ liệu và báo cáo</strong><button class="btn small" data-action="close-modal">Đóng</button></div><div class="brief"><p class="eyebrow">${esc(data.units.find(item=>item.departmentId===state.unitId)?.departmentName??data.province.name)} · ${esc(period().label)}</p><h1>Xuất dữ liệu đang xem</h1><p class="muted">CSV mở được bằng Excel, giữ nguyên số 0 và để trống giá trị chưa có. Tệp có kèm kỳ và thời điểm cập nhật.${available?"":" Cần có dữ liệu của lựa chọn hiện tại trước khi xuất."}</p><div class="quality-grid" style="margin-top:18px"><article class="quality-card"><h3>Điểm 6 nhóm chỉ tiêu</h3><strong>CSV</strong><p>Điểm nguồn, thứ hạng, trung vị và trạng thái dữ liệu của cơ quan đang chọn.</p><button class="btn small primary" data-export-csv="scores" ${available?"":"disabled"}>Tải bảng điểm</button></article><article class="quality-card"><h3>Số liệu thành phần</h3><strong>CSV</strong><p>Chỉ tiêu và tham số gốc của 6 nhóm. Chỉ xuất dữ liệu nguồn đã cung cấp.</p><button class="btn small" data-export-csv="details" ${available?"":"disabled"}>Tải số liệu chi tiết</button></article><article class="quality-card"><h3>Báo cáo lãnh đạo</h3><strong>PDF</strong><p>Mở báo cáo một trang, sau đó chọn In / PDF.</p><button class="btn small primary" data-action="brief" ${available?"":"disabled"}>Mở báo cáo</button></article></div></div></div></div>`;
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Trung tâm xuất báo cáo"><div class="modal"><div class="modal-top"><strong>Xuất dữ liệu và báo cáo</strong><button class="btn small" data-action="close-modal">Đóng</button></div><div class="brief"><p class="eyebrow">${esc(data.units.find(item=>item.departmentId===state.unitId)?.departmentName??data.province.name)} · ${esc(period().label)}</p><h1>Xuất dữ liệu đang xem</h1><p class="muted">Tệp Excel có tên chỉ tiêu tiếng Việt, định dạng số và bộ lọc. Giữ nguyên số 0, để trống giá trị chưa có; kèm kỳ và thời điểm cập nhật.${available?"":" Cần có dữ liệu của lựa chọn hiện tại trước khi xuất."}</p><div class="quality-grid" style="margin-top:18px"><article class="quality-card"><h3>Điểm 6 nhóm chỉ tiêu</h3><strong>Excel (.xlsx)</strong><p>Điểm nguồn, thứ hạng, trung vị và trạng thái dữ liệu của cơ quan đang chọn.</p><button class="btn small primary" data-export-excel="scores" ${available?"":"disabled"}>Tải Excel bảng điểm</button></article><article class="quality-card"><h3>Số liệu thành phần</h3><strong>Excel (.xlsx)</strong><p>Chỉ tiêu và số liệu nghiệp vụ của 6 nhóm, sử dụng tên tiếng Việt.</p><button class="btn small" data-export-excel="details" ${available?"":"disabled"}>Tải Excel chi tiết</button></article><article class="quality-card"><h3>Báo cáo lãnh đạo</h3><strong>Chờ thiết kế lại</strong><p>Thiết kế hiện tại chưa được duyệt. Tính năng này sẽ được hoàn thiện sau.</p><button class="btn small" disabled>Chưa phát hành</button></article></div></div></div></div>`;
 }
 
-function downloadAnalysisCsv(kind:"scores"|"details"):void{
+async function downloadAnalysisExcel(kind:"scores"|"details"):Promise<void>{
   const snapshot=data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)];
   if(!snapshot||state.demo!=="normal")return;
   const view=unit();
   const rankedView={...view,peer:rankFor(view,state.periodId,null),groups:view.groups.map(group=>({...group,peer:rankFor(group,state.periodId,group.id)}))};
   const scopeLabel=state.scope==="all"?"Tất cả TTHC":`${data.formality.code} · ${data.formality.name}`;
-  const content=buildAnalysisCsv(rankedView,snapshot,period(),data.province.name,scopeLabel,kind);
-  const url=URL.createObjectURL(new Blob([content],{type:"text/csv;charset=utf-8"}));
+  const workbook=buildAnalysisWorkbook(ExcelJS.Workbook,rankedView,snapshot,period(),data.province.name,scopeLabel,kind);
+  const filename=`qd766-${state.periodId}-${state.unitId}-${state.scope}-${kind}.xlsx`;
+  const content=await workbook.xlsx.writeBuffer();
+  const bytes=new Uint8Array(content);
+  const url=URL.createObjectURL(new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
   const link=document.createElement("a");
   link.href=url;
-  link.download=`qd766-${state.periodId}-${state.unitId}-${state.scope}-${kind}.csv`;
+  link.download=filename;
   document.body.append(link);link.click();link.remove();
   window.setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
@@ -551,7 +545,12 @@ function bind(): void {
   document.querySelector<HTMLInputElement>("#peer-search")?.addEventListener("input",e=>{state.search=(e.target as HTMLInputElement).value;render()});
   document.querySelectorAll<HTMLElement>("[data-action=brief]").forEach(el=>el.addEventListener("click",()=>{state.modal="brief";render()}));
   document.querySelector<HTMLElement>("[data-action=export]")?.addEventListener("click",()=>{state.modal="export";render()});
-  document.querySelectorAll<HTMLElement>("[data-export-csv]").forEach(el=>el.addEventListener("click",()=>{downloadAnalysisCsv(el.dataset.exportCsv as "scores"|"details")}));
+  document.querySelectorAll<HTMLButtonElement>("[data-export-excel]").forEach(el=>el.addEventListener("click",async()=>{
+    el.disabled=true;const label=el.textContent;el.textContent="Đang tạo Excel…";
+    try{await downloadAnalysisExcel(el.dataset.exportExcel as "scores"|"details")}
+    catch(error){console.error(error);window.alert("Không tạo được tệp Excel. Anh/chị vui lòng tải lại trang và thử lại.")}
+    finally{el.disabled=false;el.textContent=label}
+  }));
   document.querySelector<HTMLElement>("[data-action=close-modal]")?.addEventListener("click",()=>{state.modal="none";render()});
   document.querySelector<HTMLElement>("[data-action=print]")?.addEventListener("click",()=>window.print());
   document.querySelector<HTMLElement>("[data-action=open-quality]")?.addEventListener("click",()=>{state.screen="quality";render()});

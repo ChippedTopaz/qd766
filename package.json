@@ -7,16 +7,19 @@
   "scripts": {
     "data": "python tools/build_web_data.py",
     "typecheck": "tsc --noEmit",
-    "build": "npm run data && tsc",
+    "build": "npm run data && node tools/prepare_excel_vendor.mjs && tsc",
+    "test:excel": "npm run build && node web/tests/excel-export.test.mjs",
     "test:progress": "npm run build && node web/tests/progress-scoring.test.mjs",
     "test:csv": "npm run build && node web/tests/csv-export.test.mjs",
     "serve": "python tools/serve_app.py",
     "serve:static": "python tools/serve_web.py"
   },
   "devDependencies": {
+    "@types/node": "22.20.5",
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "exceljs": "4.4.0",
     "tom-select": "2.6.2"
   }
 }

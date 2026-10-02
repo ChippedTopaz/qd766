@@ -1,3 +1,4 @@
+import { parameterLabels } from "./parameter-labels.js";
 /** UTF-8 BOM and semicolons work with Vietnamese Excel regional settings. */
 export function encodeCsv(rows) {
     return "\uFEFF" + rows.map(row => row.map(value => {
@@ -10,7 +11,7 @@ export function encodeCsv(rows) {
         return '"' + text.replaceAll('"', '""') + '"';
     }).join(";")).join("\r\n") + "\r\n";
 }
-export function buildAnalysisCsv(view, snapshot, period, province, scopeLabel, kind) {
+export function buildAnalysisRows(view, snapshot, period, province, scopeLabel, kind) {
     const context = [province, view.name, period.label, scopeLabel,
         snapshot.delivery?.capturedAt ?? "", snapshot.delivery?.detailsCapturedAt ?? "",
         snapshot.delivery?.stale ? "Đã quá hạn cập nhật" : "",
@@ -29,31 +30,44 @@ export function buildAnalysisCsv(view, snapshot, period, province, scopeLabel, k
         rows.push([...context, "Tổng điểm", view.totalScore, view.totalMaximum, view.ratio,
             view.peer?.rank, view.peer?.total, view.peer?.median,
             view.totalScore === null ? "Chưa đủ dữ liệu" : "Có dữ liệu"]);
-        return encodeCsv(rows);
+        return rows;
     }
-    const rows = [[...headers, "Nhóm chỉ tiêu", "Loại số liệu", "Mã/trường",
+    const rows = [[...headers, "Nhóm chỉ tiêu", "Loại số liệu",
             "Tên chỉ tiêu", "Số lượng đạt", "Tổng số", "Tỷ lệ (%)", "Điểm nguồn",
             "Điểm tối đa nguồn", "Giá trị tham số", "Ghi chú"]];
     for (const group of view.groups) {
         const entity = group.entity;
-        if (!entity || (!entity.metrics.length && !Object.keys(entity.parameters).length)) {
-            rows.push([...context, group.label, "Trạng thái", "", "", null, null, null,
+        const visibleParameters = entity ? Object.entries(entity.parameters).filter(([key]) => key !== "scoreDelta" && Boolean(parameterLabels[key])) : [];
+        if (!entity || (!entity.metrics.length && !visibleParameters.length)) {
+            rows.push([...context, group.label, "Trạng thái", "", null, null, null,
                 null, null, "", group.score.kind === "UNSUPPORTED_SOURCE" ?
                     "Nguồn không hỗ trợ" : "Nguồn chưa cung cấp số liệu thành phần"]);
             continue;
         }
         for (const metric of entity.metrics) {
-            rows.push([...context, group.label, "Chỉ tiêu", metric.code, metric.name,
+            if (metric.code === "scoreDelta")
+                continue;
+            rows.push([...context, group.label, "Chỉ tiêu", metric.name,
                 metric.numerator, metric.denominator, metric.ratio, metric.apiScore,
                 metric.apiMaxScore, "", "Số liệu nguồn; ô trống không đồng nghĩa bằng 0"]);
         }
-        for (const [key, value] of Object.entries(entity.parameters)) {
+        for (const [key, value] of visibleParameters) {
+            if (key === "scoreDelta")
+                continue;
+            const label = parameterLabels[key];
+            // Only expose known business fields; never leak a new technical key.
+            if (!label)
+                continue;
             const scalar = value === null || typeof value === "number" ||
                 typeof value === "string" || typeof value === "boolean" ? value : JSON.stringify(value);
-            rows.push([...context, group.label, "Tham số nguồn", key, "", null, null,
+            rows.push([...context, group.label, "Số liệu nghiệp vụ", label, null, null,
                 null, null, null, scalar, "Tham số gốc; chưa quy đổi thành điểm"]);
         }
     }
-    return encodeCsv(rows);
+    return rows;
+}
+// Retained for internal CSV checks; user downloads use the Excel writer.
+export function buildAnalysisCsv(view, snapshot, period, province, scopeLabel, kind) {
+    return encodeCsv(buildAnalysisRows(view, snapshot, period, province, scopeLabel, kind));
 }
 //# sourceMappingURL=csv-export.js.map
