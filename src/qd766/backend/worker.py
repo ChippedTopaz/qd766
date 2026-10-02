@@ -33,6 +33,10 @@ from .jobs import (
     succeed_job,
 )
 from .models import CollectionJob
+from .paid_requests import (
+    refund_paid_requests_for_job,
+    settle_paid_requests_for_job,
+)
 from .province_batches import (
     finish_province_batch_job,
     mark_province_batch_job_running,
@@ -122,7 +126,8 @@ def run_one_job(
         snapshot = processor(job_id, request)
         with factory.begin() as session:
             job = _locked_job(session, job_id)
-            store_normalized_snapshot(session, snapshot)
+            stored_snapshot = store_normalized_snapshot(session, snapshot)
+            settle_paid_requests_for_job(session, job, stored_snapshot)
             succeed_job(session, job, worker_id)
             finish_batch_job(session, job, "succeeded")
             finish_province_batch_job(session, job, "succeeded")
@@ -197,6 +202,7 @@ def _halt(
         detail = _error(kind, error, retryable=False)
         job = _locked_job(session, job_id)
         halt_job(session, job, worker_id, detail)
+        refund_paid_requests_for_job(session, job, detail)
         finish_batch_job(session, job, "halted", detail)
         finish_province_batch_job(session, job, "halted", detail)
         if open_circuit:
@@ -226,6 +232,7 @@ def _retry_or_fail(
             delay_seconds=retry_delay_seconds,
         )
         if job.state == "failed":
+            refund_paid_requests_for_job(session, job, job.error or {})
             finish_batch_job(session, job, "failed", job.error)
             finish_province_batch_job(session, job, "failed", job.error)
         release_collection_lease(session, worker_id)

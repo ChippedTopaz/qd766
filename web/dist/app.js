@@ -938,68 +938,6 @@ async function openProvince(rootDepartmentId, requestId) {
     void loadProvinceBenchmarks();
     scrollTo(0, 0);
 }
-function pollProvinceJob(jobId, option, requestId) {
-    window.setTimeout(async () => {
-        try {
-            const response = await fetch(`/api/v1/collection-jobs/${encodeURIComponent(jobId)}`);
-            if (!response.ok)
-                throw new Error(`HTTP ${response.status}`);
-            const job = await response.json();
-            if (job.state === "succeeded") {
-                option.available = true;
-                option.snapshotCount = Math.max(1, option.snapshotCount);
-                await openProvince(option.id, requestId);
-                render();
-                return;
-            }
-            if (job.state === "failed" || job.state === "halted") {
-                if (requestId !== selectionRequest)
-                    return;
-                pendingProvinceId = "";
-                pendingMessage = job.error?.message ?? "Yêu cầu thêm tỉnh đã dừng và cần quản trị viên kiểm tra.";
-                state.demo = "error";
-                render();
-                return;
-            }
-            if (requestId === selectionRequest) {
-                pendingMessage = job.state === "running" ? `Đang thu thập 6 nhóm chỉ số của ${option.name} theo thứ tự an toàn.` : `${option.name} đã được đưa vào hàng đợi. Chưa tạo bất kỳ batch TTHC nào.`;
-                state.demo = "queued";
-                render();
-            }
-            pollProvinceJob(jobId, option, requestId);
-        }
-        catch (error) {
-            if (requestId !== selectionRequest)
-                return;
-            pendingProvinceId = "";
-            console.error(error);
-            pendingMessage = "Chưa đọc được trạng thái thêm tỉnh. Vui lòng kiểm tra màn hình Vận hành.";
-            state.demo = "error";
-            render();
-        }
-    }, 3000);
-}
-async function requestProvinceSnapshot(option, requestId) {
-    const selected = period();
-    const response = await fetch("/api/v1/dashboard/requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ periodType: selected.type, year: selected.year, periodValue: selected.value ?? null, scope: "all", provinceCode: option.provinceCode }) });
-    if (!response.ok) {
-        const problem = await response.json().catch(() => ({}));
-        throw new Error(typeof problem.detail === "string" ? problem.detail : `HTTP ${response.status}`);
-    }
-    const result = await response.json();
-    if (requestId !== selectionRequest)
-        return;
-    if (result.state === "ready") {
-        option.available = true;
-        await openProvince(option.id, requestId);
-        return;
-    }
-    pendingMessage = result.message;
-    state.demo = result.circuitState === "open" ? "blocked" : "queued";
-    render();
-    if (result.circuitState !== "open" && result.jobId)
-        pollProvinceJob(result.jobId, option, requestId);
-}
 async function switchProvince(rootDepartmentId) {
     if (rootDepartmentId === data.province.id)
         return;
@@ -1013,7 +951,9 @@ async function switchProvince(rootDepartmentId) {
     try {
         const option = provinceOptions.find(item => item.id === rootDepartmentId);
         if (option && !option.available) {
-            await requestProvinceSnapshot(option, requestId);
+            pendingProvinceId = "";
+            pendingMessage = `Dữ liệu chi tiết của ${option.name} chưa được lịch hệ thống cập nhật. Việc lựa chọn tỉnh không tạo yêu cầu thu thập mới.`;
+            state.demo = "blocked";
         }
         else {
             await openProvince(rootDepartmentId, requestId);

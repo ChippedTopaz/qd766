@@ -1104,6 +1104,14 @@ def request_dashboard_collection(
     request: Request,
     session: DbSession,
 ) -> DashboardCollectionResponse:
+    if payload.scope == "all":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Dữ liệu tổng hợp toàn tỉnh do hệ thống tự động cập nhật; "
+                "người dùng không thể tạo yêu cầu thu thập phạm vi tất cả TTHC."
+            ),
+        )
     root_department_id = _root_department_for_province(session, payload.province_code)
     if root_department_id is None:
         raise HTTPException(status_code=409, detail="No root department is available for province")

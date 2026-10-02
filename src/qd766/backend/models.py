@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -239,6 +240,144 @@ class CollectionJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class UserAccount(Base):
+    __tablename__ = "user_accounts"
+    __table_args__ = (
+        CheckConstraint(
+            "plan IN ('free', 'paid', 'admin')", name="ck_user_account_plan"
+        ),
+        CheckConstraint("credit_balance >= 0", name="ck_user_credit_balance"),
+        CheckConstraint("credit_reserved >= 0", name="ck_user_credit_reserved"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    external_subject: Mapped[str] = mapped_column(String(240), unique=True)
+    display_name: Mapped[str] = mapped_column(Text)
+    plan: Mapped[str] = mapped_column(String(16), default="free")
+    credit_balance: Mapped[int] = mapped_column(Integer, default=0)
+    credit_reserved: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PaidDataRequest(Base):
+    __tablename__ = "paid_data_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('reserved', 'waiting', 'ready', 'refunded')",
+            name="ck_paid_data_request_state",
+        ),
+        CheckConstraint("credit_cost > 0", name="ck_paid_data_request_credit_cost"),
+        Index("ix_paid_request_account_dataset", "account_id", "dataset_key"),
+        Index(
+            "uq_paid_request_active_entitlement",
+            "account_id",
+            "dataset_key",
+            unique=True,
+            postgresql_where=text("state IN ('reserved', 'waiting', 'ready')"),
+            sqlite_where=text("state IN ('reserved', 'waiting', 'ready')"),
+        ),
+        Index("ix_paid_request_job_state", "collection_job_id", "state"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="RESTRICT"), index=True
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(240), unique=True)
+    dataset_key: Mapped[str] = mapped_column(String(240), index=True)
+    state: Mapped[str] = mapped_column(String(16), default="reserved")
+    credit_cost: Mapped[int] = mapped_column(Integer)
+    province_code: Mapped[str] = mapped_column(String(2))
+    root_department_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("departments.id", ondelete="RESTRICT"), index=True
+    )
+    formality_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("formalities.id", ondelete="RESTRICT"), index=True
+    )
+    period_type: Mapped[str] = mapped_column(String(16))
+    year: Mapped[int] = mapped_column(Integer)
+    period_value: Mapped[int | None] = mapped_column(Integer)
+    collection_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("collection_jobs.id", ondelete="RESTRICT"), index=True
+    )
+    snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("snapshots.id", ondelete="RESTRICT"), index=True
+    )
+    error: Mapped[dict[str, Any] | None] = mapped_column(JsonDocument)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CreditLedgerEntry(Base):
+    __tablename__ = "credit_ledger_entries"
+    __table_args__ = (
+        CheckConstraint(
+            "entry_type IN ('topup', 'reserve', 'charge', 'release', 'adjustment')",
+            name="ck_credit_ledger_entry_type",
+        ),
+        CheckConstraint("amount > 0", name="ck_credit_ledger_amount"),
+        Index("ix_credit_ledger_account_created", "account_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    event_key: Mapped[str] = mapped_column(String(240), unique=True)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="RESTRICT"), index=True
+    )
+    paid_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("paid_data_requests.id", ondelete="RESTRICT"), index=True
+    )
+    entry_type: Mapped[str] = mapped_column(String(16))
+    amount: Mapped[int] = mapped_column(Integer)
+    available_delta: Mapped[int] = mapped_column(Integer)
+    reserved_delta: Mapped[int] = mapped_column(Integer)
+    available_after: Mapped[int] = mapped_column(Integer)
+    reserved_after: Mapped[int] = mapped_column(Integer)
+    details: Mapped[dict[str, Any]] = mapped_column(JsonDocument, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class UserNotification(Base):
+    __tablename__ = "user_notifications"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('data-ready', 'data-failed')",
+            name="ck_user_notification_kind",
+        ),
+        UniqueConstraint("paid_request_id", "kind", name="uq_notification_request_kind"),
+        Index("ix_notification_account_read", "account_id", "read_at", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    paid_request_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("paid_data_requests.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(24))
+    title: Mapped[str] = mapped_column(Text)
+    message: Mapped[str] = mapped_column(Text)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
 
 

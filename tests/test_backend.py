@@ -230,9 +230,7 @@ class BackendTest(unittest.TestCase):
                 "scope": "all",
             },
         )
-        self.assertEqual(available_request.status_code, 202)
-        self.assertEqual(available_request.json()["state"], "ready")
-        self.assertIsNone(available_request.json()["jobId"])
+        self.assertEqual(available_request.status_code, 403)
         system_status = self.client.get("/api/v1/system-status").json()
         self.assertEqual(system_status["snapshotCount"], 1)
         self.assertEqual(system_status["dashboardCache"]["entries"], 2)
@@ -301,10 +299,9 @@ class BackendTest(unittest.TestCase):
                 "provinceCode": "80",
             },
         )
-        self.assertEqual(queued.status_code, 202)
+        self.assertEqual(queued.status_code, 403)
         with self.app.state.session_factory() as session:
-            job = session.scalar(select(CollectionJob))
-            self.assertEqual(job.request["rootDepartmentId"], TAY_NINH_ROOT_ID)
+            self.assertIsNone(session.scalar(select(CollectionJob)))
 
     def test_national_summary_overlays_province_score_and_rankings(self):
         with self.app.state.session_factory.begin() as session:
@@ -408,7 +405,7 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(latest.status_code, 200)
         self.assertEqual(latest.json()["provinceCount"], 2)
 
-    def test_new_province_can_enqueue_from_verified_root_catalog(self):
+    def test_user_cannot_enqueue_aggregate_province_collection(self):
         response = self.client.post(
             "/api/v1/dashboard/requests",
             json={
@@ -418,12 +415,10 @@ class BackendTest(unittest.TestCase):
                 "provinceCode": "01",
             },
         )
-        self.assertEqual(response.status_code, 202)
-        self.assertTrue(response.json()["created"])
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("hệ thống tự động", response.json()["detail"])
         with self.app.state.session_factory() as session:
-            job = session.scalar(select(CollectionJob))
-            self.assertEqual(job.request["rootDepartmentId"], HA_NOI_ROOT_ID)
-            self.assertEqual(job.request["scope"], "all")
+            self.assertIsNone(session.scalar(select(CollectionJob)))
 
     def test_conflicting_snapshot_is_rejected(self):
         with self.app.state.session_factory.begin() as session:
@@ -520,9 +515,18 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(enriched["formalityCode"], "2.000815")
         self.assertEqual(enriched["formalityName"], "Thủ tục kiểm thử hàng đợi")
 
-    def test_missing_dashboard_selection_enqueues_once_and_honors_open_circuit(self):
+    def test_missing_formality_selection_enqueues_once_and_honors_open_circuit(self):
+        formality_id = uuid.uuid4()
         with self.app.state.session_factory.begin() as session:
             store_normalized_snapshot(session, snapshot_payload())
+            session.add(
+                Formality(
+                    id=formality_id,
+                    code="2.000815",
+                    name="Thủ tục kiểm thử",
+                    attributes={},
+                )
+            )
             open_collection_circuit(
                 session,
                 reason="office-connectivity",
@@ -533,7 +537,8 @@ class BackendTest(unittest.TestCase):
             "periodType": "month",
             "year": 2026,
             "periodValue": 9,
-            "scope": "all",
+            "scope": "formality",
+            "formalityId": str(formality_id),
         }
         first = self.client.post("/api/v1/dashboard/requests", json=request)
         self.assertEqual(first.status_code, 202)
