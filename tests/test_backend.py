@@ -869,6 +869,37 @@ class BackendTest(unittest.TestCase):
         )
         self.assertIsNone(fresh)
 
+    def test_automatic_refresh_reuses_only_fresh_provinces(self):
+        now = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+        roots = [
+            ProvinceRoot("25", "Phú Thọ", uuid.UUID(ROOT_ID), "UBND tỉnh Phú Thọ", "H44", "fixture"),
+            ProvinceRoot("80", "Tây Ninh", uuid.UUID(TAY_NINH_ROOT_ID), "UBND tỉnh Tây Ninh", "H72", "fixture"),
+        ]
+        with self.app.state.session_factory.begin() as session:
+            store_normalized_snapshot(session, snapshot_payload())
+            store_normalized_snapshot(session, snapshot_payload(
+                root_id=TAY_NINH_ROOT_ID, root_name="UBND tỉnh Tây Ninh",
+                child_id=TAY_NINH_CHILD_ID,
+            ))
+            snapshots = list(session.scalars(select(Snapshot)))
+            for snapshot in snapshots:
+                snapshot.created_at = now - timedelta(
+                    hours=73 if str(snapshot.root_department_id) == ROOT_ID else 1
+                )
+            session.flush()
+            batch, _ = create_province_batch(
+                session, roots, PeriodSelection("month", 2026, 8),
+                catalog_version="fixture:freshness", refresh_key="auto-test",
+                fresh_after=now - timedelta(hours=72),
+            )
+            self.assertEqual(batch.available_items, 1)
+            items = list(session.scalars(select(ProvinceCollectionBatchItem).where(
+                ProvinceCollectionBatchItem.batch_id == batch.id
+            )))
+            by_root = {str(item.root_department_id): item.state for item in items}
+            self.assertEqual(by_root[ROOT_ID], "queued")
+            self.assertEqual(by_root[TAY_NINH_ROOT_ID], "skipped")
+
     def test_worker_halts_on_upstream_safety_signal(self):
         with self.app.state.session_factory.begin() as session:
             job, _ = enqueue_job(session, {"fixture": "rejected"}, priority=1)

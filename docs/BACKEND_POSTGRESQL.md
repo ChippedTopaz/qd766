@@ -367,6 +367,12 @@ tháng, quý) được luân phiên theo thời điểm hoàn tất cũ nhất, 
 hai luồng chi tiết gọi DVCQG đồng thời. Điểm tổng hợp 34 tỉnh vẫn được task
 National Summary cập nhật riêng mỗi giờ.
 
+Lịch làm mới kiểm tra snapshot hoàn chỉnh mới nhất của từng tỉnh, thay vì
+thời điểm batch hoàn tất (batch có thể đã dùng lại dữ liệu cũ). Kỳ thiếu tỉnh
+được bổ sung trước; kỳ đủ tỉnh dùng thời điểm snapshot cũ nhất để xét hạn.
+Batch tự động chỉ thu thập tỉnh thiếu dữ liệu hoặc đã quá 72 giờ, dùng lại
+các tỉnh còn mới. `--dry-run` chỉ đọc và không tạo batch.
+
 Dashboard tách riêng độ mới của hai lớp dữ liệu: `summaryStale` cho điểm/xếp
 hạng toàn quốc (ngưỡng hai giờ) và `detailsStale` cho snapshot chi tiết sáu
 nhóm (ngưỡng 72 giờ). Chỉ kỳ đang diễn ra mới hết hạn; tháng, quý hoặc năm đã

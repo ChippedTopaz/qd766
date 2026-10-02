@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from datetime import datetime
 from collections.abc import Iterable
 
 from sqlalchemy import select
@@ -28,6 +29,7 @@ def create_province_batch(
     *,
     catalog_version: str,
     refresh_key: str | None = None,
+    fresh_after: datetime | None = None,
 ) -> tuple[ProvinceCollectionBatch, bool]:
     """Create one resumable national batch and enqueue only its first missing province."""
     period.validate_collectable()
@@ -49,6 +51,8 @@ def create_province_batch(
     }
     if refresh_key is not None:
         identity["refreshKey"] = refresh_key
+    if fresh_after is not None:
+        identity["freshAfter"] = fresh_after.isoformat()
     canonical = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
     key = "province-batch:v1:" + hashlib.sha256(canonical).hexdigest()
     existing = session.scalar(
@@ -93,9 +97,13 @@ def create_province_batch(
     # A named refresh deliberately creates new immutable versions. Without a
     # refresh key, the original backfill behavior remains: existing snapshots
     # are skipped.
-    available = (
-        set() if refresh_key is not None else set(session.scalars(available_statement))
-    )
+    if fresh_after is not None:
+        available_statement = available_statement.where(Snapshot.created_at > fresh_after)
+        available = set(session.scalars(available_statement))
+    else:
+        available = (
+            set() if refresh_key is not None else set(session.scalars(available_statement))
+        )
     batch = ProvinceCollectionBatch(
         idempotency_key=key,
         state="queued",
