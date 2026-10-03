@@ -99,3 +99,14 @@ khỏi URL ngay đầu khởi chạy, kể cả màn hình chờ duyệt/lỗi; 
 không reload hoặc sửa cookie/session. Giữ bộ lọc tỉnh/kỳ/đơn vị/TTHC, scope all/formality,
 hash, history state và login=failed. TypeScript và test login URL/collection/F5 PASS.
 Chưa xác nhận bản này đã deploy Netlify và nghiệm thu URL sạch trên Google thật.
+# Ổn định task public — 03/10/2026
+
+Người quản trị xác nhận URL sạch và login main domain đạt. Task public chuyển từ
+wrapper PowerShell sang Python windowless trực tiếp, log UTF-8 v2 xoay dung lượng,
+không access log. Script restart kiểm tra config trước khi dừng, chỉ dọn listener
+8769 nếu xác minh đầy đủ launcher thuộc repo; không dừng worker/admin.
+109 kiểm thử backend PASS, hai script PowerShell syntax PASS, config thật PASS;
+pythonw --check --background-log exit 0 và log đọc được UTF-8.
+Chưa thay task Windows thật, chưa kiểm chứng stop/start không sót tiến trình trong
+task mới. Người quản trị cần register -ReplaceExisting (backup XML) rồi restart.
+Không sửa DNS, OAuth secret/callback, thu phí, credit hoặc dữ liệu PostgreSQL.

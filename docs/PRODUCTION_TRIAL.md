@@ -10,6 +10,23 @@ Không bật paid requests, credit thử nghiệm hoặc thanh toán.
 
 ## 1. Chạy tự động — thực hiện trong PowerShell mới tại repo
 
+Cập nhật ổn định 03/10: task chạy trực tiếp `pythonw.exe start_public_backend.py
+--background-log`, không qua PowerShell wrapper. Chế độ windowless ghi log UTF-8
+`public-backend-v2.log`, xoay tối đa 5 bản lưu khi đạt 10 MB; access log tắt.
+Log v1 cũ giữ nguyên. Dùng script restart kiểm tra cấu hình trước khi dừng, xác minh
+đúng launcher của tiến trình giữ cổng 8769 rồi mới dọn tiến trình con cũ nếu cần.
+
+Với task đã đăng ký từ bản trước, chạy từng lệnh riêng:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\register_public_backend_task.ps1 -ReplaceExisting
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\restart_public_backend.ps1
+```
+
+XML task cũ được backup trước khi thay. Chưa coi stop/start được xác minh chỉ bằng
+syntax/unit test: phải nghiệm thu task Running, health ok, callback thật mới và
+không còn listener cũ trên máy cơ quan sau restart.
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\register_public_backend_task.ps1
 ```
@@ -33,13 +50,13 @@ Invoke-RestMethod http://127.0.0.1:8769/api/v1/health/ready
 Get-ScheduledTask -TaskName "QD766 Public Backend" | Select-Object TaskName,State
 ```
 
-Kết quả kỳ vọng health `ok`, task `Running`. Log `.tmp-public-logs/public-backend.log`
-được lưu riêng; xoay log >10 MB lúc khởi chạy tiếp theo, không xóa log cũ.
+Kết quả kỳ vọng health `ok`, task `Running`. Log `.tmp-public-logs/public-backend-v2.log`
+được lưu riêng, mã hóa UTF-8, xoay theo dung lượng.
 Tự thử lại tối đa ba lần khi thoát lỗi; không hứa giám sát 24/7 hoặc tự sửa mất mạng.
 Task đang chạy có LastTaskResult 267009 có thể chỉ là “currently running”, không
 chỉ dựa vào LastTaskResult để kết luận failure.
 
-Restart: `Stop-ScheduledTask` rồi `Start-ScheduledTask` tên task mới. Không kill
+Restart: dùng `tools/restart_public_backend.ps1` thay vì chỉ stop/start task. Không kill
 mọi python.exe hoặc dừng các task backend/worker cũ. Nếu task lỗi, đọc log cuối;
 không gửi nội dung `.env.public` hoặc callback chứa code/state.
 

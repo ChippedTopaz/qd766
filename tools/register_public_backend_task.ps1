@@ -3,11 +3,11 @@ $ErrorActionPreference = 'Stop'
 $RepositoryRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $RepositoryRoot '.venv\Scripts\python.exe'
 $Launcher = Join-Path $PSScriptRoot 'start_public_backend.py'
-$StartScript = Join-Path $PSScriptRoot 'start_public_backend.ps1'
+$BackgroundPython = Join-Path $RepositoryRoot '.venv\Scripts\pythonw.exe'
 $TaskName = 'QD766 Public Backend'
 $CurrentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 Set-Location -LiteralPath $RepositoryRoot
-foreach ($path in @($Python, $Launcher, $StartScript)) {
+foreach ($path in @($Python, $Launcher, $BackgroundPython)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Missing public backend files.' }
 }
 & $Python $Launcher --check
@@ -25,8 +25,9 @@ $Principal = New-ScheduledTaskPrincipal -UserId $CurrentUser -LogonType Interact
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
-$Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $StartScript
-$Action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $Arguments -WorkingDirectory $RepositoryRoot
+# Direct windowless Python action: no PowerShell wrapper to leave a child server behind.
+$Arguments = '"{0}" --background-log' -f $Launcher
+$Action = New-ScheduledTaskAction -Execute $BackgroundPython -Argument $Arguments -WorkingDirectory $RepositoryRoot
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
 $Task = New-ScheduledTask -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings
 Register-ScheduledTask -TaskName $TaskName -InputObject $Task -Force | Out-Null
