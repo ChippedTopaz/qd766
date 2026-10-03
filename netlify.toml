@@ -5,8 +5,14 @@
 [build.environment]
   NODE_VERSION = "22"
 
-# Add a /api/* HTTPS backend proxy only after the separate public backend
-# is configured, secured and tested. Never point this at localhost.
+# Browser uses same-origin API/cookies. Only the protected 8769 tunnel is upstream.
+# Before testing Google on bochiso766.com, register its callback and update
+# .env.public GOOGLE_REDIRECT_URI; never expose office 8767 or its configuration.
+[[redirects]]
+  from = "/api/*"
+  to = "https://api.bochiso766.com/api/:splat"
+  status = 200
+  force = true
 
 [[headers]]
   for = "/*"

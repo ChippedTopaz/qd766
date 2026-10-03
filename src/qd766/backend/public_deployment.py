@@ -8,6 +8,7 @@ from .config import Settings
 PUBLIC_HOST = "api.bochiso766.com"
 PUBLIC_PORT = 8769
 CALLBACK = f"https://{PUBLIC_HOST}/api/v1/auth/google/callback"
+WEBSITE_CALLBACK = "https://bochiso766.com/api/v1/auth/google/callback"
 AUTH_KEYS = frozenset({"QD766_GOOGLE_CLIENT_ID", "QD766_GOOGLE_CLIENT_SECRET",
                        "QD766_GOOGLE_REDIRECT_URI"})
 
@@ -34,7 +35,7 @@ def public_settings(office: dict[str, str], public: dict[str, str]) -> Settings:
         raise ValueError("Google configuration is incomplete")
     if not public["QD766_GOOGLE_CLIENT_ID"].endswith(".apps.googleusercontent.com"):
         raise ValueError("A Google Web application client ID is required")
-    if public["QD766_GOOGLE_REDIRECT_URI"] != CALLBACK:
+    if public["QD766_GOOGLE_REDIRECT_URI"] not in {CALLBACK, WEBSITE_CALLBACK}:
         raise ValueError("Google callback must match the approved public HTTPS address")
     # Share only database connection settings, not operator/auth/rate/credit flags.
     url = office.get("QD766_DATABASE_URL")

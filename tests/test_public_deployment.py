@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from fastapi.testclient import TestClient
 from qd766.backend.app import create_app
 from qd766.backend.models import Base
-from qd766.backend.public_deployment import CALLBACK, read_config, public_settings
+from qd766.backend.public_deployment import CALLBACK, WEBSITE_CALLBACK, read_config, public_settings
 
 
 class PublicDeploymentTests(unittest.TestCase):
@@ -41,6 +41,15 @@ class PublicDeploymentTests(unittest.TestCase):
             with self.subTest(keys=list(config)):
                 with self.assertRaises(ValueError):
                     public_settings(self.office, config)
+
+    def test_main_website_callback_allowed_but_other_hosts_rejected(self):
+        settings = public_settings(self.office, dict(self.public, QD766_GOOGLE_REDIRECT_URI=WEBSITE_CALLBACK))
+        self.assertEqual(settings.google_redirect_uri, WEBSITE_CALLBACK)
+        for callback in [WEBSITE_CALLBACK.replace('bochiso766.com', 'evil.example'),
+                         WEBSITE_CALLBACK.replace('bochiso766.com', 'bochiso766.netlify.app'),
+                         WEBSITE_CALLBACK + '/', WEBSITE_CALLBACK.replace('https:', 'http:')]:
+            with self.assertRaises(ValueError):
+                public_settings(self.office, dict(self.public, QD766_GOOGLE_REDIRECT_URI=callback))
 
     def test_nonlocal_or_nonpostgres_database_rejected(self):
         for url in ["sqlite+pysqlite://", "postgresql+psycopg://user:secret@remote/qd766"]:

@@ -81,3 +81,13 @@ Check khởi chạy hiện BLOCKED vì chưa có cấu hình Google riêng; chư
 chưa triển khai D:\QD766\app, thêm task, sửa DNS, route tunnel hoặc Netlify.
 Google login thật, cookie HTTPS và kết nối DB của instance này chưa được nghiệm thu.
 Hướng dẫn: `docs/PUBLIC_BACKEND_ROLLOUT.md`. Không mở cổng 8767/8768 ra Internet.
+# Chuẩn bị production trial — 03/10/2026
+
+Quản trị đã xác nhận Google thật, gán Phú Thọ, xem kỳ/so sánh và đăng xuất tại
+api.bochiso766.com. Chuẩn bị task QD766 Public Backend riêng (at logon, hidden,
+log riêng, restart on failure, không tự start/stop), proxy API Netlify cùng origin
+và cho phép callback chính bochiso766.com ngoài callback api đã nghiệm thu.
+107 kiểm thử Python PASS; PowerShell syntax PASS; build và test Netlify PASS.
+Chưa đăng ký task mới, thay config secret/callback, DNS, Netlify deployment hoặc
+nghiệm thu cookie/session qua Netlify. Không bật credit/paid/payment.
+Thực hiện từng bước theo docs/PRODUCTION_TRIAL.md, giữ callback api để rollback.
