@@ -38,6 +38,7 @@ if(process.argv.includes('--restore')){
 }else{
   controls.get('#scope-select').handlers.change({target:{value:'formality'}});await settle();
   assert.match(root.innerHTML,/Thủ tục đã khai thác/);assert.doesNotMatch(root.innerHTML,/catalog-list/);
+  assert.match(root.innerHTML,/<div class="context-bottom"><label class="field saved-formality">/);
   controls.get('new').handlers.click();await settle();assert.match(root.innerHTML,/Khai thác dữ liệu TTHC/);
   controls.get('radio').handlers.change();await settle();assert.equal(calls.filter(c=>c.method==='POST').length,0);
   controls.get('submit').handlers.click();await settle();assert.match(root.innerHTML,/3 credit/);

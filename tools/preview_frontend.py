@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {"/api/v1/access-policy", "/api/v1/dashboard",
            "/api/v1/dashboard/selection", "/api/v1/dashboard/provinces",
+           "/api/v1/dashboard/formalities",
            "/api/v1/dashboard/province-rankings",
            "/api/v1/system-status", "/api/v1/collection-jobs",
            "/api/v1/formality-batches", "/api/v1/province-batches"}

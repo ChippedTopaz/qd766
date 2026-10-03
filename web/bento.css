@@ -84,3 +84,14 @@
 @media(max-width:1450px){.enterprise-mode .context-fields{grid-template-columns:repeat(12,minmax(0,1fr))}.enterprise-mode .context-fields .field.province{grid-column:span 4}.enterprise-mode .context-fields .field.unit{grid-column:span 8}.enterprise-mode .context-fields .field:nth-child(3){grid-column:span 3}.enterprise-mode .context-fields .field:nth-child(4){grid-column:span 3}.enterprise-mode .context-fields .field:nth-child(5){grid-column:span 2}.enterprise-mode .context-fields .field:last-child{grid-column:span 4}}
 @media(max-width:760px){.enterprise-mode .context-fields{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.enterprise-mode .context-fields .field.province,.enterprise-mode .context-fields .field.unit,.enterprise-mode .context-fields .field:last-child{grid-column:1/-1}.enterprise-mode .context-fields .field:nth-child(3),.enterprise-mode .context-fields .field:nth-child(4),.enterprise-mode .context-fields .field:nth-child(5){grid-column:span 1}.enterprise-mode .contextbar{padding:12px}.enterprise-mode .context-fields .field>span{font-size:8px;letter-spacing:0}.enterprise-mode .context-actions{gap:6px;flex-wrap:wrap}.enterprise-mode .nav{display:flex;overflow-x:auto;gap:4px}.enterprise-mode .nav button{flex:0 0 60px}.enterprise-mode .detail-columns{padding:12px}.enterprise-mode .panel-head,.enterprise-mode .panel-body{padding:16px}.enterprise-mode .detail-columns{grid-template-columns:minmax(0,1fr)}.enterprise-mode .ticket-grid,.enterprise-mode .quality-grid{grid-template-columns:minmax(0,1fr)}.enterprise-mode .page-head h1{font-size:23px}}
 @media print{.enterprise-mode{background:#fff}}
+/* Long tables own their scroll viewport: column headings never disappear. */
+.enterprise-mode .table-wrap,.enterprise-mode.bento-mode #group-detail .table-wrap{max-height:65vh;overflow:auto}
+.enterprise-mode .table-wrap th{position:sticky;top:0;z-index:2;box-shadow:0 1px 0 #dfe5f1}
+.ranking-modal{display:flex;flex-direction:column;overflow:hidden}
+.ranking-modal .modal-top{position:relative;flex-shrink:0;z-index:3;gap:12px}
+.ranking-report{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.ranking-report>h1,.ranking-report>p,.ranking-notes{flex-shrink:0}
+.ranking-scroll{flex:1;min-height:0;overflow:auto}
+.leadership-table th{position:sticky;top:0;z-index:2;box-shadow:0 1px 0 #cbd5e1}
+@media(max-width:760px){.ranking-modal .modal-top{flex-wrap:wrap}.ranking-report{padding:12px}.ranking-notes{font-size:10px}.ranking-report h1{font-size:14px}}
+@media print{.ranking-modal,.ranking-report,.ranking-scroll,.enterprise-mode .table-wrap,.enterprise-mode.bento-mode #group-detail .table-wrap{display:block;overflow:visible;max-height:none}.leadership-table th,.enterprise-mode .table-wrap th{position:static;box-shadow:none}}
