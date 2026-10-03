@@ -32,6 +32,14 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
                   redoc_url=None if resolved.public_read_only else "/redoc",
                   openapi_url=None if resolved.public_read_only else "/openapi.json")
     app.state.settings = resolved
+    if resolved.local_google_trial:
+        from starlette.responses import JSONResponse
+        @app.middleware("http")
+        async def local_google_loopback_only(request, call_next):
+            if (request.url.hostname != "127.0.0.1" or request.client.host not in {"127.0.0.1", "::1"}
+                    or request.headers.get("origin", "http://127.0.0.1:8771") != "http://127.0.0.1:8771"):
+                return JSONResponse({"detail": "Local Google trial is loopback-only"}, status_code=403)
+            return await call_next(request)
     app.middleware("http")(enforce_public_read_only)
 
     @app.get("/api/v1/access-policy", tags=["health"])
@@ -41,7 +49,8 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
                 "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": resolved.paid_requests_enabled,
                 "inviteRequired": resolved.invite_required,
                 "trialCreditManagement": resolved.trial_credit_management,
-                "localSimulation": bool(getattr(app.state, "local_credit_trial", False))}
+                "localSimulation": bool(getattr(app.state, "local_credit_trial", False)),
+                **({"localGoogleTrial": True} if resolved.local_google_trial else {})}
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
     app.state.dashboard_cache = SingleFlightTTLCache[str, dict](

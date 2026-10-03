@@ -31,6 +31,15 @@ def enabled(settings) -> bool:
 
 
 def validate_auth_settings(settings):
+    if settings.local_google_trial:
+        from sqlalchemy.engine import make_url
+        database = make_url(settings.database_url)
+        if (settings.google_redirect_uri != "http://127.0.0.1:8771/api/v1/auth/google/callback"
+                or database.drivername != "postgresql+psycopg"
+                or database.host not in {"127.0.0.1", "localhost", "::1"}
+                or database.database != "qd766_credit_test"
+                or not settings.require_login or not settings.public_read_only):
+            raise ValueError("Local Google trial requires fixed loopback callback and isolated test database")
     values = (settings.google_client_id, settings.google_client_secret, settings.google_redirect_uri)
     if any(values) and not all(values):
         raise ValueError("Google login requires client ID, secret and redirect URI together")
@@ -43,7 +52,7 @@ def validate_auth_settings(settings):
         local = uri.hostname in {"127.0.0.1", "localhost"}
         if uri.username or uri.password or uri.query or uri.fragment or uri.path != "/api/v1/auth/google/callback" or not uri.netloc:
             raise ValueError("Invalid Google redirect URI")
-        if uri.scheme != "https" and not (uri.scheme == "http" and local and not settings.public_read_only):
+        if uri.scheme != "https" and not (uri.scheme == "http" and local and (not settings.public_read_only or settings.local_google_trial)):
             raise ValueError("Public Google login requires HTTPS")
 
 

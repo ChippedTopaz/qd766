@@ -20,7 +20,7 @@ PUBLIC_READ_PATHS = frozenset({
 async def enforce_public_read_only(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
     if getattr(request.app.state, "local_credit_trial", False) and (
-            path == "/local-trial.html" or path.startswith("/api/v1/local-trial/")):
+            path in {"/local-trial.html", "/login-preview.html"} or path.startswith("/api/v1/local-trial/")):
         # Only the isolated SQLite simulator registers these handlers and its loopback guard.
         return await call_next(request)
     if path in AUTH_READ_PATHS or path in {"/api/v1/auth/logout", "/api/v1/auth/invite"}:

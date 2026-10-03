@@ -8,6 +8,7 @@ import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChar
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
 import { CollectionTracker, type TrackedCollection } from "./collection-tracker.js";
 import { cleanLoginSearch } from "./login-url.js";
+import { loginView } from "./login-view.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 import type TomSelectControl from "tom-select";
 
@@ -32,6 +33,7 @@ let paidRequestsEnabled=false;
 let loginRequired=false;
 let googleLoginEnabled=false;
 let localSimulation=false;
+let localGoogleTrial=false;
 let signedInUser:{name:string;provinceId:string|null;csrfToken:string;credits:number;reservedCredits?:number;canCollect?:boolean;role?:string;accessTier?:string;unitId?:string|null}|null=null;
 let data: AppData;
 let state: State;
@@ -347,6 +349,7 @@ function shell(content: string): void {
   const timingNotice=loaded?.delivery?.detailsAvailable===false?`<div class="period-notice" role="status"><strong>Chỉ có điểm tổng hợp tỉnh</strong><span>Kỳ này có đủ điểm 6 nhóm để so sánh tỉnh; chưa có chỉ tiêu thành phần hoặc điểm sở/ngành, xã/phường. Chọn kỳ không tạo yêu cầu thu thập.</span></div>`:state.demo==="normal"&&loaded?.delivery?.result==="national-summary"&&loaded.delivery.capturedAt!==loaded.delivery.detailsCapturedAt?`<div class="period-notice" role="status"><strong>Hai thời điểm cập nhật</strong><span>Điểm tỉnh: ${esc(dateTime(loaded.delivery.capturedAt))}. Chi tiết chỉ tiêu và điểm cơ quan trực thuộc: ${esc(dateTime(loaded.delivery.detailsCapturedAt))}. Số liệu thành phần có thể chưa khớp điểm tỉnh mới nhất.</span></div>`:"";
 root.innerHTML = `<div class="app-shell enterprise-mode ${["overview","formulas"].includes(state.screen)?"bento-mode":""}">${nav()}<div class="workspace">${context()}<main class="content">${state.screen==="formulas"?"":(state.screen==="overview"&&state.demo==="normal"?"":staleNotice+periodNotice+timingNotice)}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : state.modal==="collection"?collectionConfirmation():""}${completionMessage?`<div class="collection-toast" role="status"><strong>Hoàn tất</strong><span>${esc(completionMessage)}</span><button class="btn small" data-action="dismiss-completion">Đóng</button></div>`:""}</div>`;
   if(localSimulation)root.querySelector(".content")?.insertAdjacentHTML("afterbegin",'<div class="period-notice"><strong>THỬ NGHIỆM LOCAL · DỮ LIỆU MÔ PHỎNG</strong><span>Không gọi Cổng DVCQG, không trừ credit thật.</span><a class="btn small" href="/local-trial.html">Đổi tài khoản / thử kết quả job</a></div>');
+  if(localGoogleTrial)root.querySelector(".content")?.insertAdjacentHTML("afterbegin",'<div class="period-notice"><strong>BẢN THỬ GOOGLE LOCAL</strong><span>Google thật · Dữ liệu và credit mô phỏng · Không chạy worker lấy dữ liệu thật.</span></div>');
   if(paidRequestsEnabled&&signedInUser){
     root.querySelector(".context-actions")?.insertAdjacentHTML("afterbegin",`<span class="badge neutral">Credit khả dụng: ${int(signedInUser.credits)} · Đang giữ: ${int(signedInUser.reservedCredits??0)}</span>`);
     const scopeSelect=root.querySelector<HTMLSelectElement>("#scope-select");
@@ -1105,8 +1108,9 @@ async function start(): Promise<void> {
     const policyResponse=await fetch("/api/v1/access-policy");
     if(productionSite&&!policyResponse.ok)throw new Error("Website chưa kết nối được backend HTTPS máy cơ quan.");
     if(policyResponse.ok){
-      const policy=await policyResponse.json() as {publicReadOnly:boolean;loginRequired?:boolean;googleLoginEnabled?:boolean;paidRequestsEnabled?:boolean;inviteRequired?:boolean;localSimulation?:boolean};
+      const policy=await policyResponse.json() as {publicReadOnly:boolean;loginRequired?:boolean;googleLoginEnabled?:boolean;paidRequestsEnabled?:boolean;inviteRequired?:boolean;localSimulation?:boolean;localGoogleTrial?:boolean};
       localSimulation=Boolean(policy.localSimulation);
+      localGoogleTrial=Boolean(policy.localGoogleTrial);
       invitationOnly=Boolean(policy.inviteRequired);
       if(productionSite&&policy.publicReadOnly!==true)throw new Error("Backend chưa bật chế độ truy cập công khai an toàn.");
       publicReadOnly=Boolean(policy.publicReadOnly);loginRequired=Boolean(policy.loginRequired);googleLoginEnabled=Boolean(policy.googleLoginEnabled);
@@ -1118,11 +1122,9 @@ async function start(): Promise<void> {
       else if(meResponse.status!==401&&meResponse.status!==403)throw new Error("Chưa kiểm tra được phiên đăng nhập. Vui lòng thử lại.");
       if(loginRequired&&(!signedInUser||(!signedInUser.provinceId&&signedInUser.role!=="admin"))){
         if(localSimulation){location.assign("/local-trial.html");return;}
-        if(new URLSearchParams(location.search).get("login")==="invite-required"){
-          root.innerHTML='<main class="content"><div class="empty-state"><h2>Dùng thử theo lời mời</h2><p>Hãy mở link mời của quản trị viên và đăng nhập bằng đúng tài khoản Google được mời.</p><a class="btn" href="/api/v1/auth/google/start">Đăng nhập lại</a></div></main>';return;
-        }
-        root.innerHTML=`<main class="content"><div class="empty-state"><h2>${signedInUser?"Tài khoản đang chờ duyệt":"Đăng nhập QĐ766"}</h2><p>${signedInUser?"Quản trị viên cần gán tỉnh/cơ quan cho tài khoản trước khi tra cứu.":"Đăng nhập Google để xem dữ liệu của tỉnh/cơ quan được phân quyền."}</p>${!signedInUser&&googleLoginEnabled?`<a class="btn primary" href="/api/v1/auth/google/start">Đăng nhập Google</a>`:""}${signedInUser?`<button class="btn" data-action="logout">Đăng xuất</button>`:""}${new URLSearchParams(location.search).get("login")==="failed"?`<p>Đăng nhập không thành công hoặc phiên xác nhận đã hết hạn. Vui lòng thử lại.</p>`:""}</div></main>`;
-        if(invitationOnly)root.querySelector(".empty-state")?.insertAdjacentHTML("beforeend","<p>Giai đoạn dùng thử chỉ dành cho người có link mời của quản trị viên.</p>");
+        root.innerHTML=loginView({pending:Boolean(signedInUser),name:signedInUser?.name??"",local:localGoogleTrial,
+          failed:new URLSearchParams(location.search).get("login")==="failed",
+          inviteRequired:invitationOnly,googleEnabled:googleLoginEnabled});
         bind();return;
       }
     }

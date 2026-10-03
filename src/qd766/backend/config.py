@@ -62,6 +62,7 @@ class Settings:
     formality_credit_cost: int = 0
     trial_credits_enabled: bool = False
     trial_credit_management: bool = False
+    local_google_trial: bool = False  # Explicit launcher only; never inherited from environment.
     google_client_id: str = ""
     google_client_secret: str = field(default="", repr=False)
     google_redirect_uri: str = ""
