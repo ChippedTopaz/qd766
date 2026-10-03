@@ -180,6 +180,54 @@ class LocalCreditTrialTests(unittest.TestCase):
         with self.app.state.session_factory() as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)),0)
 
+    def test_insufficient_credit_batch_is_atomic_and_does_not_add_jobs(self):
+        for month in range(1,9):
+            selection=dict(self.selection,periodType="month",periodValue=month)
+            self.assertEqual(self.submit(quote=self.quote(selection=selection).json()["quote"]).status_code,202)
+        selection=dict(self.selection,formalityIds=[item.id for item in mock_catalog().formalities])
+        quote=self.quote(selection=selection).json()
+        self.assertEqual((quote["availableCredits"],quote["totalCredits"]),(6,9))
+        self.assertEqual(self.submit(quote=quote["quote"]).status_code,409)
+        me=self.clients["a"].get("/api/v1/auth/me").json()
+        self.assertEqual((me["credits"],me["reservedCredits"]),(6,24))
+        with self.app.state.session_factory() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)),8)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),8)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CreditLedgerEntry).where(CreditLedgerEntry.entry_type=="reserve")),8)
+
+    def test_revoke_new_collection_permission_does_not_drop_pending_request(self):
+        self.assertEqual(self.submit().status_code,202)
+        self.assertEqual(self.grant(amount=0,allowed=False).status_code,200)
+        self.assertEqual(self.quote().status_code,403)
+        self.assertEqual(self.outcome("success").status_code,200)
+        me=self.clients["a"].get("/api/v1/auth/me").json()
+        self.assertEqual((me["credits"],me["reservedCredits"]),(27,0))
+        view=self.clients["a"].get(f"/api/v1/dashboard/selection?scope=formality&period_type=year&year=2026&formality_id={self.formality}")
+        self.assertEqual(view.status_code,200)
+
+    def test_agency_paid_data_stays_scoped_and_shared_cache_is_not_redacted(self):
+        path=f"/api/v1/dashboard/selection?scope=formality&period_type=year&year=2026&formality_id={self.formality}"
+        self.assertEqual(self.clients["agency"].get(path).status_code,403)
+        self.assertEqual(self.submit("agency").status_code,202)
+        self.assertEqual(self.outcome("success").status_code,200)
+        snapshot=self.clients["agency"].get(path).json()["snapshot"]
+        self.assertIsNone(snapshot["provinceAggregatedScore"])
+        for dataset in snapshot["datasets"]:
+            self.assertIsNone(dataset["root"]["apiScore"])
+            self.assertEqual(dataset["root"]["metrics"],[])
+            for child in dataset["children"]:
+                if child["departmentId"]==str(identifier("department:commune")):
+                    self.assertTrue(child["metrics"])
+                else:
+                    self.assertEqual(child["metrics"],[])
+                    self.assertEqual(child["parameters"],{})
+        # Other accounts cannot open the shared result before buying access.
+        self.assertEqual(self.clients["b"].get(path).status_code,403)
+        self.assertEqual(self.submit("b").status_code,202)
+        province_snapshot=self.clients["b"].get(path).json()["snapshot"]
+        self.assertEqual(province_snapshot["provinceAggregatedScore"],70)
+        self.assertTrue(province_snapshot["datasets"][0]["root"]["metrics"])
+
     def test_revoked_permission_keeps_previously_purchased_library(self):
         self.submit();self.outcome("success");self.grant(amount=0,allowed=False)
         self.assertEqual(self.quote().status_code,403)
