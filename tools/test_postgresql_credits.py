@@ -1,11 +1,12 @@
 """Offline concurrency checks in qd766_credit_test only; never use production DB."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 from threading import Barrier
 import uuid
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import URL, make_url
@@ -13,8 +14,10 @@ from sqlalchemy.orm import sessionmaker
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from qd766.backend.models import Base, CollectionJob, CreditLedgerEntry, Department, Formality, PaidDataRequest, Snapshot, UserAccount
+from qd766.backend.models import Base, CollectionControl, CollectionJob, CreditLedgerEntry, Department, Formality, PaidDataRequest, Snapshot, UserAccount, UserNotification
 from qd766.backend.paid_requests import create_paid_data_request, refund_paid_requests_for_job, settle_paid_requests_for_job, top_up_credits
+from qd766.backend.local_credit_trial import mock_snapshot
+from qd766.backend import worker
 
 TEST_DATABASE = "qd766_credit_test"
 
@@ -161,6 +164,92 @@ def run_checks(url):
                 account = db.get(UserAccount, a)
                 assert (account.credit_balance, account.credit_reserved) == (21 if i == 0 else 24, 0)
         print("PASS=concurrent_retry_preserves_refunds_and_shares_new_job", flush=True)
+
+        class SimulatedWorkerCrash(BaseException):
+            """Abrupt stop: bypass worker's normal exception/retry handler."""
+
+        def processor(job_id, request):
+            snapshot = mock_snapshot(request)
+            for dataset in snapshot["datasets"]:
+                dataset["root"]["departmentId"] = str(root)
+            return snapshot
+
+        def expire_crashed_lease(job_id):
+            # Advance only test DB lease timestamps, not wall clock or production.
+            with factory.begin() as db:
+                expired = datetime.now(timezone.utc) - timedelta(seconds=120)
+                db.get(CollectionJob, job_id).locked_at = expired
+                db.get(CollectionControl, "dvcqg").lease_locked_at = expired
+
+        def count(db, model, *conditions):
+            return db.scalar(select(func.count()).select_from(model).where(*conditions))
+
+        def assert_holds(month, expected_snapshots):
+            with factory() as db:
+                assert count(db, Snapshot, Snapshot.period_value == month) == expected_snapshots
+                assert count(db, CreditLedgerEntry, CreditLedgerEntry.entry_type == "charge") == (19 if month == 5 else 13)
+                for i, a in enumerate(accounts):
+                    account = db.get(UserAccount, a)
+                    balance = (15 if i == 0 else 18) if month == 5 else (18 if i == 0 else 21)
+                    assert (account.credit_balance, account.credit_reserved) == (balance, 3)
+
+        interrupted = parallel(4)
+        def stop_while_collecting(job_id, request):
+            raise SimulatedWorkerCrash()
+        try:
+            worker.run_one_job(factory, stop_while_collecting, worker_id="test-crashed-collector", lease_seconds=60)
+            raise AssertionError("Expected simulated crash")
+        except SimulatedWorkerCrash:
+            pass
+        assert_holds(4, 0)
+        blocked = worker.run_one_job(factory, processor, worker_id="test-recovery", lease_seconds=60)
+        assert blocked.state == "busy"
+        expire_crashed_lease(interrupted[0][1])
+        recovered = worker.run_one_job(factory, processor, worker_id="test-recovery", lease_seconds=60)
+        assert recovered.state == "succeeded" and recovered.job_id == interrupted[0][1]
+        with factory() as db:
+            assert count(db, Snapshot, Snapshot.period_value == 4) == 1
+            assert count(db, PaidDataRequest, PaidDataRequest.collection_job_id == recovered.job_id,
+                         PaidDataRequest.state == "ready") == 6
+            assert db.get(CollectionJob, recovered.job_id).attempts == 2
+        print("PASS=crash_during_collection_holds_credit_then_recovers_after_lease", flush=True)
+
+        interrupted = parallel(5)
+        real_settle = worker.settle_paid_requests_for_job
+        def stop_after_settlement(db, job, snapshot):
+            real_settle(db, job, snapshot)
+            # Snapshot, ledger and notifications are flushed but not committed.
+            db.flush()
+            raise SimulatedWorkerCrash()
+        with patch.object(worker, "settle_paid_requests_for_job", stop_after_settlement):
+            try:
+                worker.run_one_job(factory, processor, worker_id="test-crashed-writer", lease_seconds=60)
+                raise AssertionError("Expected simulated crash")
+            except SimulatedWorkerCrash:
+                pass
+        assert_holds(5, 0)
+        with factory() as db:
+            assert count(db, UserNotification) == 25  # 19 success + 6 prior refunds
+        expire_crashed_lease(interrupted[0][1])
+        recovered = worker.run_one_job(factory, processor, worker_id="test-recovered-writer", lease_seconds=60)
+        assert recovered.state == "succeeded" and recovered.job_id == interrupted[0][1]
+        with factory() as db:
+            assert count(db, Snapshot, Snapshot.period_value == 5) == 1
+            assert count(db, CreditLedgerEntry, CreditLedgerEntry.entry_type == "charge") == 25
+            assert count(db, UserNotification) == 31
+            for i, a in enumerate(accounts):
+                account = db.get(UserAccount, a)
+                assert (account.credit_balance, account.credit_reserved) == (15 if i == 0 else 18, 0)
+        print("PASS=crash_before_commit_rolls_back_snapshot_credits_notifications", flush=True)
+
+        # The completed result is intentionally discarded, like an acknowledgement
+        # lost after commit. Restarting a worker must not process/charge it again.
+        assert worker.run_one_job(factory, processor, worker_id="test-after-lost-ack", lease_seconds=60) is None
+        with factory() as db:
+            assert job_count(db) == 6
+            assert count(db, CreditLedgerEntry, CreditLedgerEntry.entry_type == "charge") == 25
+            assert count(db, UserNotification) == 31
+        print("PASS=restart_after_committed_success_does_not_charge_twice", flush=True)
         print("POSTGRESQL_CREDIT_TEST=PASS NO_DVCQG_CALLS NO_PRODUCTION_DB", flush=True)
     finally:
         engine.dispose()
