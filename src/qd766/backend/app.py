@@ -14,11 +14,14 @@ from .database import create_database_engine, create_session_factory
 from .routes import router
 from .access_policy import enforce_public_read_only
 from .auth import enabled, validate_auth_settings, router as auth_router
+from .user_collection import router as user_collection_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings.from_env()
     validate_auth_settings(resolved)
+    if resolved.paid_requests_enabled and (not resolved.require_login or resolved.formality_credit_cost <= 0):
+        raise ValueError("TTHC user collection requires authenticated deployment and configured positive credit cost")
     if resolved.public_read_only and "*" in resolved.cors_origins:
         raise ValueError("Public preview requires explicit CORS origins, not '*'")
     engine = create_database_engine(resolved)
@@ -32,7 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def access_policy() -> dict:
         return {"publicReadOnly": resolved.public_read_only,
                 "loginRequired": resolved.require_login,
-                "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": False}
+                "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": resolved.paid_requests_enabled}
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
     app.state.dashboard_cache = SingleFlightTTLCache[str, dict](
@@ -56,6 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["*"],
         )
     app.include_router(auth_router)
+    app.include_router(user_collection_router)
     app.include_router(router)
     web_root = Path(__file__).resolve().parents[3] / "web"
     if web_root.is_dir():

@@ -83,6 +83,7 @@ def create_paid_data_request(
     period_value: int | None,
     credit_cost: int,
     idempotency_token: str,
+    allow_trial: bool = False,
 ) -> tuple[PaidDataRequest, bool]:
     if credit_cost <= 0:
         raise ValueError("Credit cost must be positive")
@@ -90,7 +91,7 @@ def create_paid_data_request(
     if len(province_code) != 2 or not province_code.isdigit():
         raise ValueError("Province code must contain two digits")
     account = _locked_account(session, account_id)
-    if not account.active or account.plan not in {"paid", "admin"}:
+    if not account.active or (account.plan not in {"paid", "admin"} and not allow_trial):
         raise PaidPlanRequired("A paid account is required")
 
     idempotency_key = _paid_idempotency_key(account.id, idempotency_token)
@@ -223,6 +224,21 @@ def refund_paid_requests_for_job(
     return len(requests)
 
 
+def refund_blocked_paid_requests(session: Session) -> int:
+    """Release holds when the circuit blocks queued requests; never alter jobs/circuit."""
+    control=session.get(CollectionControl,"dvcqg")
+    if control is None or control.circuit_state != "open":
+        return 0
+    pending=list(session.scalars(select(PaidDataRequest).where(
+        PaidDataRequest.state.in_(("reserved","waiting"))).order_by(PaidDataRequest.account_id,PaidDataRequest.id).with_for_update(skip_locked=True)))
+    for paid in pending:
+        account=_locked_account(session,paid.account_id)
+        session.refresh(paid)
+        if paid.state in {"reserved","waiting"}:
+            _refund_request(session,paid,account,{"kind":"circuit-blocked"})
+    return len(pending)
+
+
 def _settle_request(
     session: Session,
     paid_request: PaidDataRequest,
@@ -346,6 +362,7 @@ def _locked_account(session: Session, account_id: uuid.UUID) -> UserAccount:
         select(UserAccount)
         .where(UserAccount.id == account_id)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if account is None:
         raise PaidRequestError("Account not found")

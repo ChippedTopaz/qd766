@@ -105,6 +105,8 @@ def run_one_job(
     retry_delay_seconds: int = 300,
 ) -> WorkerResult | None:
     with factory.begin() as session:
+        from .paid_requests import refund_blocked_paid_requests
+        refund_blocked_paid_requests(session)
         lease_state = acquire_collection_lease(
             session,
             worker_id,

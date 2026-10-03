@@ -42,7 +42,7 @@ if ($RestoreBackup) {
     RestoreAssets $RestoreBackup
     exit 0
 }
-$assets = @('styles.css', 'bento.css')
+$assets = @('styles.css', 'bento.css', 'collection.css')
 $assets += Get-ChildItem -LiteralPath (Join-Path $repo 'web\dist') -Filter '*.js' | ForEach-Object { 'dist\' + $_.Name }
 $assets += @('vendor\tom-select\tom-select.complete.min.js', 'vendor\tom-select\tom-select.default.min.css', 'vendor\exceljs\exceljs.min.js', 'vendor\exceljs\LICENSE', 'index.html')
 foreach ($relative in $assets) {

@@ -44,6 +44,7 @@ from .models import (
     NationalSummarySnapshot,
     ProvinceCollectionBatch,
     ProvinceCollectionBatchItem,
+    PaidDataRequest,
     Snapshot,
 )
 from .schemas import (
@@ -358,6 +359,13 @@ def preview_province_catalog(
     available_ids = {
         str(item) for item in session.scalars(available_statement) if item is not None
     }
+    account_id=getattr(request.state,"authorized_account_id",None)
+    if account_id is not None:
+        owned=select(PaidDataRequest.formality_id).where(PaidDataRequest.account_id==account_id,
+            PaidDataRequest.root_department_id==root_department_id,PaidDataRequest.period_type==period_type,
+            PaidDataRequest.year==year,PaidDataRequest.state=="ready")
+        owned=owned.where(PaidDataRequest.period_value.is_(None) if period_value is None else PaidDataRequest.period_value==period_value)
+        available_ids={str(item) for item in session.scalars(owned)}
     available_count = sum(item.id in available_ids for item in selected)
     page = selected[offset : offset + limit]
     response.headers["X-QD766-Catalog-Cache"] = cache_result
@@ -1298,6 +1306,17 @@ def list_snapshots(
     if scope is not None:
         statement = statement.where(Snapshot.scope == scope)
     return list(session.scalars(statement))
+
+
+@router.get("/dashboard/formalities", tags=["dashboard"])
+def office_formality_library(session:DbSession,root_department_id:uuid.UUID,
+    period_type:str=Query(pattern="^(month|quarter|year)$"),year:int=Query(ge=2000,le=2200),period_value:int|None=None):
+    # Office-only endpoint: public access middleware never exposes this global library.
+    statement=select(Formality).join(Snapshot,Snapshot.formality_id==Formality.id).where(
+        Snapshot.root_department_id==root_department_id,Snapshot.scope=="formality",Snapshot.state=="complete",
+        Snapshot.period_type==period_type,Snapshot.year==year)
+    statement=statement.where(Snapshot.period_value.is_(None) if period_value is None else Snapshot.period_value==period_value)
+    return {"items":[{"id":str(item.id),"code":item.code,"name":item.name} for item in session.scalars(statement.distinct().order_by(Formality.code))]}
 
 
 @router.get("/formalities", response_model=list[FormalityResponse], tags=["formalities"])

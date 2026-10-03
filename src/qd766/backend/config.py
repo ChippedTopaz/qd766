@@ -57,6 +57,9 @@ def _database_url_from_env() -> str:
 class Settings:
     public_read_only: bool = False
     require_login: bool = False
+    paid_requests_enabled: bool = False
+    formality_credit_cost: int = 0
+    trial_credits_enabled: bool = False
     google_client_id: str = ""
     google_client_secret: str = field(default="", repr=False)
     google_redirect_uri: str = ""
@@ -86,6 +89,9 @@ class Settings:
         return cls(
             public_read_only=_as_bool(os.getenv("QD766_PUBLIC_READ_ONLY")),
             require_login=_as_bool(os.getenv("QD766_REQUIRE_LOGIN")),
+            paid_requests_enabled=_as_bool(os.getenv("QD766_PAID_REQUESTS_ENABLED")),
+            formality_credit_cost=int(os.getenv("QD766_FORMALITY_CREDIT_COST", "0")),
+            trial_credits_enabled=_as_bool(os.getenv("QD766_TRIAL_CREDITS_ENABLED")),
             google_client_id=os.getenv("QD766_GOOGLE_CLIENT_ID", ""),
             google_client_secret=os.getenv("QD766_GOOGLE_CLIENT_SECRET", ""),
             google_redirect_uri=os.getenv("QD766_GOOGLE_REDIRECT_URI", ""),
