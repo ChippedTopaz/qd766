@@ -13,6 +13,7 @@
     "test:analytics": "npm run build && node web/tests/analytics-integrity.test.mjs",
     "test:summary-ui": "npm run build && node web/tests/summary-only-ui.test.mjs",
     "test:bento": "npm run build && node web/tests/bento.test.mjs",
+    "test:formulas": "npm run build && node web/tests/formula-reference.test.mjs && node web/tests/summary-only-ui.test.mjs",
     "test:excel": "npm run build && node web/tests/excel-export.test.mjs",
     "test:leadership": "npm run build && node web/tests/leadership-report.test.mjs",
     "test:progress": "npm run build && node web/tests/progress-scoring.test.mjs",

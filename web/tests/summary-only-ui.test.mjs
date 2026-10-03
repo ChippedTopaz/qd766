@@ -18,7 +18,7 @@ for(const period of data.periods){
 }
 const appRoot={innerHTML:""};
 const button=(nav)=>({dataset:{nav},handlers:{},addEventListener(kind,callback){this.handlers[kind]=callback;}});
-const navs=[button("overview"),button("time"),button("quality")];
+const navs=[button("overview"),button("time"),button("quality"),button("formulas")];
 const exportButton=button("");
 const trendButtons=data.groupOrder.map(id=>({...button(""),dataset:{trendToggle:id},attrs:{},setAttribute(key,value){this.attrs[key]=value;}}));
 const trendSeries=data.groupOrder.map(id=>({dataset:{trendSeries:id},attrs:{},setAttribute(key,value){this.attrs[key]=value;},removeAttribute(key){delete this.attrs[key];}}));
@@ -63,5 +63,10 @@ assert.doesNotMatch(appRoot.innerHTML,/Hiện có một kỳ tháng/);
 exportButton.handlers.click();
 assert.match(appRoot.innerHTML,/data-export-excel="details" disabled/);
 assert.match(appRoot.innerHTML,/data-export-excel="scores" >/);
+const callsBeforeFormulas=calls.length;
+navs.find(n=>n.dataset.nav==="formulas").handlers.click();
+assert.match(appRoot.innerHTML,/Công thức tính Bộ chỉ số 766/);
+assert.equal((appRoot.innerHTML.match(/class="formula-card"/g)||[]).length,21);
+assert.equal(calls.length,callsBeforeFormulas);
 assert(calls.every(call=>call.method==="GET"&&!call.url.includes("requests")&&!call.url.includes("jobs")));
 console.log("SUMMARY_ONLY_UI_OK: actual renderer, history table, detail export disabled, GET-only");

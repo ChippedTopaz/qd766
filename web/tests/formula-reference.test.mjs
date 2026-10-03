@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import { formulaGroups, renderFormulaReference, referenceNotice } from '../dist/formula-reference.js';
+import { analyzeOnlineScore } from '../dist/online-scoring.js';
+const items=formulaGroups.flatMap(g=>g.items);
+assert.equal(formulaGroups.length,6);
+assert.equal(formulaGroups.reduce((s,g)=>s+g.maximum,0),100);
+assert.equal(items.length,21); // 20 document rows; 4.5 has two different ratios.
+assert.equal(new Set(items.map(f=>f.id)).size,21);
+const targets=Object.fromEntries(items.filter(f=>f.target).map(f=>[f.id,f.target]));
+assert.deepEqual(targets,{'3.1':80,'3.3':50,'3.5':80,'4.2':80,'4.3':80,'5.4':90});
+assert.match(items.find(f=>f.id==='3.3').multiplier,/hệ số đồng bộ/);
+assert.match(items.find(f=>f.id==='3.6').caution,/mâu thuẫn đơn vị/);
+assert.match(items.find(f=>f.id==='1.4').rules.join(' '),/chia 12.*chia 4/);
+assert.match(items.find(f=>f.id==='2.2').rules.join(' '),/ngày làm việc hoặc tháng/);
+assert.equal(items.find(f=>f.id==='3.2').target,undefined);
+assert.equal(analyzeOnlineScore({apiScore:8.56,parameters:{authorityCount:89,partialCount:31,fullCount:21,onlineDossierCount:518,onlineServiceTotal:1881,channelOnlineSum:591643,channelTotalSum:600057}}),null);
+const html=renderFormulaReference();
+assert.equal((html.match(/class="formula-card"/g)||[]).length,21);
+assert.equal((html.match(/href="#formula-/g)||[]).length,6);
+assert.match(html,/chưa cung cấp điểm tối đa từng chỉ tiêu/);
+assert.match(html,/do quản trị viên cung cấp/);
+assert.doesNotMatch(html,/<script|fetch\(/);
+assert.match(referenceNotice('provide-online-tree'),/ngừng đối chiếu/);
+console.log('FORMULA_REFERENCE_OK: 6 groups, 21 ratios, exact thresholds, source ambiguities, no inferred online scores');

@@ -1,10 +1,11 @@
 import { allUnitTotals, buildSuggestions, buildUnitView, immediatePeers, peerStats, previousAvailablePeriod, similarVolumePeers, snapshotFor, snapshotForUnit, snapshotKey } from "./analytics.js";
-import { analyzeOnlineScore, ONLINE_SCORING_PROFILE } from "./online-scoring.js";
+import { analyzeOnlineScore } from "./online-scoring.js";
 import { analyzeProgressScore } from "./progress-scoring.js";
 import { analysisExcelFilename, buildAnalysisWorkbook } from "./excel-export.js";
 import { buildLeadershipReport, buildLeadershipWorkbook, leadershipColors, leadershipUpdatedLabel } from "./leadership-report.js";
 import { parameterLabels } from "./parameter-labels.js";
 import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
+import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
 const root = document.querySelector("#app");
 if (!root)
     throw new Error("Thiếu app root");
@@ -12,6 +13,7 @@ const screens = [
     { id: "overview", label: "Tổng quan", icon: "⌂" }, { id: "time", label: "Theo thời gian", icon: "↗" },
     { id: "peers", label: "Trong tỉnh", icon: "≋" }, { id: "procedure", label: "Theo TTHC", icon: "▦" },
     { id: "suggestions", label: "Gợi ý", icon: "◇" }, { id: "quality", label: "Chất lượng dữ liệu", icon: "✓" },
+    { id: "formulas", label: "Công thức tính", icon: "∑" },
     { id: "operations", label: "Vận hành", icon: "⚙" },
 ];
 let publicReadOnly = false;
@@ -119,9 +121,11 @@ const unitOptions = () => {
     return groups.map(group => `<optgroup label="${group.label}">${group.items.sort(byName).map(item => `<option value="${esc(item.departmentId)}" ${item.departmentId === state.unitId ? "selected" : ""}>${esc(item.departmentName)}</option>`).join("")}</optgroup>`).join("");
 };
 function nav() {
-    return `<aside class="sidebar"><div class="brand"><span class="brand-mark">766</span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item => !publicReadOnly || !["procedure", "operations", "suggestions"].includes(item.id)).map((item) => `<button data-nav="${item.id}" class="${state.screen === item.id ? "active" : ""}" aria-current="${state.screen === item.id ? "page" : "false"}"><span class="nav-icon" aria-hidden="true">${icon(({ overview: "shield", time: "chart", peers: "monitor", procedure: "document", suggestions: "star", quality: "shield", operations: "clock" })[item.id])}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
+    return `<aside class="sidebar"><div class="brand"><span class="brand-mark">766</span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item => !publicReadOnly || !["procedure", "operations", "suggestions"].includes(item.id)).map((item) => `<button data-nav="${item.id}" class="${state.screen === item.id ? "active" : ""}" aria-current="${state.screen === item.id ? "page" : "false"}"><span class="nav-icon" aria-hidden="true">${icon(({ overview: "shield", time: "chart", peers: "monitor", procedure: "document", suggestions: "star", quality: "shield", operations: "clock", formulas: "document" })[item.id])}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
 }
 function context() {
+    if (state.screen === "formulas")
+        return `<header class="contextbar formula-context"><strong>Sổ tay Bộ chỉ số 766</strong><span>Tra cứu công thức · Không phụ thuộc tỉnh hoặc kỳ đang chọn</span></header>`;
     const selectedPeriod = period();
     const sameType = data.periods.filter(item => item.type === selectedPeriod.type && item.year === selectedPeriod.year);
     const years = [...new Set(data.periods.map(item => item.year))].sort((a, b) => b - a);
@@ -140,7 +144,7 @@ function shell(content) {
     searchableSelects.forEach(control => control.destroy());
     searchableSelects = [];
     const timingNotice = loaded?.delivery?.detailsAvailable === false ? `<div class="period-notice" role="status"><strong>Chỉ có điểm tổng hợp tỉnh</strong><span>Kỳ này có đủ điểm 6 nhóm để so sánh tỉnh; chưa có chỉ tiêu thành phần hoặc điểm sở/ngành, xã/phường. Chọn kỳ không tạo yêu cầu thu thập.</span></div>` : state.demo === "normal" && loaded?.delivery?.result === "national-summary" && loaded.delivery.capturedAt !== loaded.delivery.detailsCapturedAt ? `<div class="period-notice" role="status"><strong>Hai thời điểm cập nhật</strong><span>Điểm tỉnh: ${esc(dateTime(loaded.delivery.capturedAt))}. Chi tiết chỉ tiêu và điểm cơ quan trực thuộc: ${esc(dateTime(loaded.delivery.detailsCapturedAt))}. Số liệu thành phần có thể chưa khớp điểm tỉnh mới nhất.</span></div>` : "";
-    root.innerHTML = `<div class="app-shell ${state.screen === "overview" ? "bento-mode" : ""}">${nav()}<div class="workspace">${context()}<main class="content">${formalityNotice}${completedNotice}${state.screen === "overview" && state.demo === "normal" ? "" : staleNotice + periodNotice + timingNotice}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : ""}</div>`;
+    root.innerHTML = `<div class="app-shell ${["overview", "formulas"].includes(state.screen) ? "bento-mode" : ""}">${nav()}<div class="workspace">${context()}<main class="content">${state.screen === "formulas" ? "" : formalityNotice + completedNotice + (state.screen === "overview" && state.demo === "normal" ? "" : staleNotice + periodNotice + timingNotice)}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : ""}</div>`;
     bind();
 }
 function initSearchableSelects() {
@@ -184,6 +188,8 @@ function unavailable(kind) {
     return `${title("Chưa đủ dữ liệu lịch sử", "Hệ thống chưa có chuỗi kỳ đồng nhất để so sánh.")}<div class="empty-state"><h2>Cần tối thiểu hai kỳ cùng loại</h2><p>Hiện có Tháng 8/2026, Quý III/2026 và Năm 2026. Ba kỳ này khác độ dài nên không được ghép thành một xu hướng.</p><button class="btn" data-state="normal">Quay lại báo cáo</button></div>`;
 }
 function render() {
+    if (state.screen === "formulas")
+        return shell(renderFormulaReference());
     if (state.screen === "operations")
         return shell(operations());
     if (state.demo !== "normal")
@@ -270,17 +276,10 @@ function groupComparisonSummary(view) {
     }).join("");
     return `<section class="panel group-comparison" id="group-detail"><div class="panel-head"><div><p class="eyebrow">Tổng hợp 6 nhóm chỉ tiêu</p><h2>Điểm số và biến động theo kỳ</h2><p>${esc(view.name)} · ${esc(period().label)}${previousPeriod ? ` so với ${esc(previousPeriod.label)}` : " · chưa có kỳ trước cùng loại"}</p></div></div><div class="detail-columns"><div class="detail-metrics-card"><h3>Điểm 6 nhóm chỉ tiêu</h3><div class="table-wrap"><table class="summary-table"><thead><tr><th>Tên nhóm chỉ tiêu</th><th>Điểm số</th><th>Điểm kỳ trước</th><th>Tăng/giảm so với kỳ trước</th><th>Tăng/giảm thứ hạng</th></tr></thead><tbody>${rows}</tbody></table></div></div>${totalPeerComparison(view)}</div></section>`;
 }
-function onlineAnalysis(entity) {
-    const analysis = analyzeOnlineScore(entity);
-    if (!analysis)
-        return null;
-    const rows = analysis.components.map(component => `<tr class="selectable-row ${state.selectedMetric === `online:${component.id}` ? "selected" : ""}" data-metric-detail="online:${component.id}"><td><button class="row-link">${esc(component.name)}</button><small class="metric-note">Mục tiêu tính đủ điểm: ${pct(component.targetPercent)}</small></td><td class="num">${int(component.numerator)}</td><td class="num">${int(component.denominator)}</td><td class="num">${pct(component.ratio)}</td><td class="num">${n(component.score)}</td><td class="num">${n(component.maxScore)}</td><td class="num lost">${n(component.missingScore)}</td></tr>`);
-    const status = analysis.matchesApi === true ? "Khớp với điểm Cổng công bố" : analysis.matchesApi === false ? "Có chênh lệch, cần rà soát công thức" : "Chưa có điểm API để đối chiếu";
-    const tone = analysis.matchesApi === false ? "warn" : "";
-    const difference = analysis.difference === null ? "" : ` · chênh ${n(Math.abs(analysis.difference), 3)} điểm`;
-    const notice = `<div class="banner ${tone} formula-banner"><span>∑</span><div><strong>${esc(analysis.profileLabel)} · ${esc(status)}</strong><p>Điểm tính lại ${n(analysis.calculatedScore)} / 12${difference}. Điểm Cổng DVCQG vẫn là giá trị chính thức; cấu hình công thức có thể cập nhật mà không thay đổi dữ liệu nguồn đã lưu.</p></div></div>`;
-    const catalog = `<div class="indicator-catalog"><h4>6 chỉ tiêu nghiệp vụ của nhóm</h4>${ONLINE_SCORING_PROFILE.declaredIndicators.map(item => `<div class="indicator-item"><span class="badge neutral">${esc(item.scope)}</span><div><strong>${esc(item.name)}</strong><small>${esc(item.dataStatus)}</small></div></div>`).join("")}</div>`;
-    return { rows, notice: notice + catalog, catalog };
+function onlineAnalysis(_entity) {
+    // Retired inferred 2–4–6 scoring: the supplied reference does not allocate maxima.
+    // Preserve raw parameters and official API scores in the existing table.
+    return null;
 }
 function progressDetail(entity) {
     const analysis = analyzeProgressScore(entity);
@@ -294,7 +293,7 @@ function progressDetail(entity) {
         ? "Không tính tỷ lệ và điểm khi tổng hồ sơ tiếp nhận bằng 0."
         : `${int(analysis.totalOnTime)} / ${int(analysis.totalReceived)} = ${progressPercent(analysis.onTimeRatio)}; ${progressPercent(analysis.onTimeRatio)} × ${n(analysis.maxScore)} = ${n(analysis.calculatedScore)} điểm.`;
     const averageDays = analysis.averageProcessingDays === null ? "N/A" : `${n(analysis.averageProcessingDays)} ngày`;
-    return `<h3>Kết quả và công thức tính điểm</h3><div class="progress-kpis"><article><span>Tổng hồ sơ tiếp nhận</span><strong class="num">${int(analysis.totalReceived)}</strong><small>hồ sơ</small></article><article><span>Giải quyết đúng hạn</span><strong class="num positive">${int(analysis.totalOnTime)}</strong><small>${progressPercent(analysis.onTimeRatio)}</small></article><article><span>Hồ sơ quá hạn</span><strong class="num negative">${int(analysis.totalOverdue)}</strong><small>${progressPercent(analysis.overdueRatio)}${analysis.overdueDerived ? " · suy ra từ tổng và đúng hạn" : ""}</small></article><article><span>Giải quyết trung bình</span><strong class="num">${averageDays}</strong><small>hai chữ số thập phân</small></article></div><div class="banner ${tone} formula-banner progress-formula"><span>∑</span><div><strong>${esc(analysis.profileLabel)} · ${esc(status)}</strong><p>${esc(formula)}${difference} Điểm ghi nhận được tính bằng tỷ lệ đúng hạn nhân điểm tối đa.</p></div></div><div class="table-wrap"><table class="metric-table progress-table"><thead><tr><th>Nội dung</th><th>Số lượng</th><th>Tỷ lệ</th><th>Vai trò</th></tr></thead><tbody><tr><td>Tổng hồ sơ tiếp nhận</td><td class="num">${int(analysis.totalReceived)} hồ sơ</td><td class="num">—</td><td>Mẫu số tính tỷ lệ đúng hạn</td></tr><tr class="selectable-row ${state.selectedMetric === "progress:on-time" ? "selected" : ""}" data-metric-detail="progress:on-time"><td><button class="row-link">Hồ sơ giải quyết đúng hạn</button></td><td class="num">${int(analysis.totalOnTime)} hồ sơ</td><td class="num positive">${progressPercent(analysis.onTimeRatio)}</td><td>Tử số tính tỷ lệ và điểm</td></tr><tr><td>Hồ sơ quá hạn</td><td class="num">${int(analysis.totalOverdue)} hồ sơ</td><td class="num negative">${progressPercent(analysis.overdueRatio)}</td><td>Chỉ số theo dõi bổ sung</td></tr><tr><td>Số ngày giải quyết trung bình</td><td class="num">${averageDays}</td><td class="num">—</td><td>Chỉ số thời gian tham khảo</td></tr></tbody><tfoot><tr><td>Điểm ghi nhận</td><td colspan="2" class="num">${n(analysis.calculatedScore)} / ${n(analysis.maxScore)} điểm</td><td class="lost">Còn ${n(analysis.missingScore)} điểm chưa đạt</td></tr></tfoot></table></div>`;
+    return `<h3>Kết quả và công thức tính điểm</h3><div class="progress-kpis"><article><span>Tổng hồ sơ tiếp nhận</span><strong class="num">${int(analysis.totalReceived)}</strong><small>hồ sơ</small></article><article><span>Giải quyết đúng hạn</span><strong class="num positive">${int(analysis.totalOnTime)}</strong><small>${progressPercent(analysis.onTimeRatio)}</small></article><article><span>${analysis.overdueDerived ? "Hồ sơ ngoài nhóm đúng hạn" : "Hồ sơ quá hạn"}</span><strong class="num negative">${int(analysis.totalOverdue)}</strong><small>${progressPercent(analysis.overdueRatio)}${analysis.overdueDerived ? " · phần còn lại, chưa xác nhận đều quá hạn" : ""}</small></article><article><span>Giải quyết trung bình</span><strong class="num">${averageDays}</strong><small>hai chữ số thập phân</small></article></div><div class="banner ${tone} formula-banner progress-formula"><span>∑</span><div><strong>${esc(analysis.profileLabel)} · ${esc(status)}</strong><p>${esc(formula)}${difference} Phép nhân tỷ lệ đúng hạn với điểm tối đa là cách đối chiếu hiện tại; tài liệu mới chưa xác nhận phân bổ điểm riêng. Điểm nguồn trong phần tiêu đề được giữ nguyên.</p></div></div><div class="table-wrap"><table class="metric-table progress-table"><thead><tr><th>Nội dung</th><th>Số lượng</th><th>Tỷ lệ</th><th>Vai trò</th></tr></thead><tbody><tr><td>Tổng hồ sơ tiếp nhận</td><td class="num">${int(analysis.totalReceived)} hồ sơ</td><td class="num">—</td><td>Mẫu số tính tỷ lệ đúng hạn</td></tr><tr class="selectable-row ${state.selectedMetric === "progress:on-time" ? "selected" : ""}" data-metric-detail="progress:on-time"><td><button class="row-link">Hồ sơ giải quyết đúng hạn</button></td><td class="num">${int(analysis.totalOnTime)} hồ sơ</td><td class="num positive">${progressPercent(analysis.onTimeRatio)}</td><td>Tử số tính tỷ lệ và điểm</td></tr><tr><td>${analysis.overdueDerived ? "Hồ sơ ngoài nhóm đúng hạn" : "Hồ sơ quá hạn"}</td><td class="num">${int(analysis.totalOverdue)} hồ sơ</td><td class="num negative">${progressPercent(analysis.overdueRatio)}</td><td>Chỉ số theo dõi bổ sung</td></tr><tr><td>Thời gian trung bình từ trường API (ngày)</td><td class="num">${averageDays}</td><td class="num">—</td><td>Chỉ số thời gian tham khảo</td></tr></tbody><tfoot><tr><td>Điểm tính đối chiếu</td><td colspan="2" class="num">${n(analysis.calculatedScore)} / ${n(analysis.maxScore)} điểm</td><td>Chưa xác nhận quy đổi điểm trong tài liệu mới</td></tr></tfoot></table></div>`;
 }
 function metricPoint(entity, key) {
     if (key === "progress:on-time") {
@@ -380,8 +379,8 @@ function overviewGroupDetail(view) {
         : "Nhóm này chưa có số liệu thành phần để hiển thị.";
     const heading = `<div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary"><button class="text-button" data-action="close-group-detail">← Xem lại 6 nhóm</button>${state.selectedMetric ? `<button class="text-button" data-action="clear-metric-detail">← So sánh cả nhóm</button>` : ""}<strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${detailRank ? `Hạng ${detailRank.rank}/${detailRank.total}` : "Chưa xếp hạng"}</span></div></div>`;
     if (progress)
-        return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card progress-detail">${progress}</div>${comparison}</div></section>`;
-    return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card"><h3>Kết quả các chỉ tiêu thành phần</h3>${calculated?.notice ?? ""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="7">${esc(emptyDetailMessage)}</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div>${comparison}</div></section>`;
+        return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card progress-detail">${referenceNotice(group.id)}${progress}</div>${comparison}</div></section>`;
+    return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card"><h3>Kết quả các chỉ tiêu thành phần</h3>${referenceNotice(group.id)}${calculated?.notice ?? ""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="7">${esc(emptyDetailMessage)}</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div>${comparison}</div></section>`;
 }
 function miniTicket(item, good) { return `<div class="mini-ticket"><i class="ticket-dot ${good ? "good" : ""}"></i><div><strong>${esc(item.finding)}</strong><p>${esc(item.evidence)} ${esc(item.action)}</p></div></div>`; }
 function time() {
@@ -437,12 +436,12 @@ function diagnostic(group) {
         return `<div class="empty-state"><h2>${esc(group.label)}</h2><p>Nguồn không trả dữ liệu cho TTHC này.</p></div>`;
     const progress = group.id === "dvc-progress-tree" ? progressDetail(entity) : null;
     if (progress)
-        return `<section class="panel" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>Tính điểm từ tỷ lệ hồ sơ giải quyết đúng hạn; tỷ lệ quá hạn và thời gian xử lý được hiển thị để phân tích.</p></div><span class="badge good">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div><div class="panel-body progress-detail">${progress}</div></section>`;
+        return `<section class="panel" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>Tính điểm từ tỷ lệ hồ sơ giải quyết đúng hạn; tỷ lệ quá hạn và thời gian xử lý được hiển thị để phân tích.</p></div><span class="badge good">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div><div class="panel-body progress-detail">${referenceNotice(group.id)}${progress}</div></section>`;
     const calculated = group.id === "provide-online-tree" ? onlineAnalysis(entity) : null;
     const rows = calculated ? calculated.rows.join("") : entity.metrics.length ? entity.metrics.map(m => `<tr><td>${esc(m.name)}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiScore !== null && m.apiMaxScore !== null ? n(Math.max(0, m.apiMaxScore - m.apiScore)) : "N/A"}</td></tr>`).join("") : Object.entries(entity.parameters).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Chỉ số nghiệp vụ")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`).join("");
     const lost = entity.apiScore !== null && entity.apiMaxScore !== null ? Math.max(0, entity.apiMaxScore - entity.apiScore) : null;
     const description = calculated ? "Ba chỉ tiêu thành phần được tính lại để giải thích điểm; điểm Cổng công bố vẫn là giá trị chính thức." : group.dataset?.schemaKind === "parameters" ? "Hiển thị các số liệu nghiệp vụ thành phần; chưa có đủ dữ liệu để phân rã điểm." : "Kết quả chi tiết theo chỉ tiêu thành phần.";
-    return `<section class="panel" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>${description}</p></div><span class="badge ${calculated ? "good" : "info"}">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div>${calculated?.notice ?? ""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows || `<tr><td colspan="7">Chưa có số liệu chi tiết.</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></section>`;
+    return `<section class="panel" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>${description}</p></div><span class="badge ${calculated ? "good" : "info"}">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div>${referenceNotice(group.id)}${calculated?.notice ?? ""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows || `<tr><td colspan="7">Chưa có số liệu chi tiết.</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></section>`;
 }
 function suggestions() {
     const list = buildSuggestions(unit());
@@ -645,7 +644,10 @@ function bind() {
         else
             window.alert("Chưa đăng xuất được. Vui lòng thử lại.");
     });
-    document.querySelectorAll("[data-nav]").forEach(el => el.addEventListener("click", () => { const destination = el.dataset.nav; state.screen = destination; if (destination === "operations") {
+    document.querySelectorAll("[data-nav]").forEach(el => el.addEventListener("click", () => { const destination = el.dataset.nav; state.screen = destination; if (destination === "formulas") {
+        render();
+    }
+    else if (destination === "operations") {
         state.demo = "normal";
         render();
         void loadOperations();
