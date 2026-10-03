@@ -1,5 +1,17 @@
 # Checkpoint chuẩn bị chạy thử production — 02/10/2026
 
+## Lời mời và quản trị — 03/10/2026
+
+- Đã thêm invite-only public, vai admin riêng và hai tầng quyền tỉnh/cơ quan.
+- Đã thêm `/admin.html`, API quản trị có session/CSRF, nhật ký, công cụ bootstrap
+  chính xác Google account `vietnt89@gmail.com`, migration `20261003_0010`.
+- Chưa áp dụng lên DB thật hoặc restart; làm theo `INVITE_ONLY_TRIAL.md` với
+  backup/hash trước. Tài khoản thử cũ phải có lời mời; chỉ owner bootstrap miễn.
+- Credit/thu phí và quyền circuit/tạo job public vẫn tắt. Không mở thêm cào dữ liệu.
+- 119 kiểm thử backend đạt; TypeScript, gói Netlify và dọn URL OAuth đạt.
+  SQL migration PostgreSQL đã kiểm tra offline; Google thật, migration thật và
+  đồng thời PostgreSQL chưa kiểm chứng ở thay đổi này.
+
 ## Cập nhật kiểm chứng ngày 03/10/2026
 
 - Audit SELECT-only PostgreSQL: đợt năm 2026 `8b023c82-022e-45f0-94aa-323e10cc3334`

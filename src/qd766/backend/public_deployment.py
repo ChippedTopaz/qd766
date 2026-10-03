@@ -52,7 +52,7 @@ def public_settings(office: dict[str, str], public: dict[str, str]) -> Settings:
     if parsed.drivername != "postgresql+psycopg" or parsed.host not in {"127.0.0.1", "localhost"}:
         raise ValueError("Public instance must use office loopback PostgreSQL")
     settings = Settings(database_url=parsed.render_as_string(hide_password=False),
-        public_read_only=True, require_login=True,
+        public_read_only=True, require_login=True, invite_required=True,
         paid_requests_enabled=False, trial_credits_enabled=False, formality_credit_cost=0,
         sql_echo=False, cors_origins=(),
         google_client_id=public["QD766_GOOGLE_CLIENT_ID"],

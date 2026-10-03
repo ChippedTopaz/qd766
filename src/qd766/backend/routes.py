@@ -983,7 +983,7 @@ def dashboard_province_rankings(
     authorized_root = getattr(request.state, "authorized_root_id", None)
     if authorized_root is not None:
         for province in ordered:
-            if province["rootDepartmentId"] != str(authorized_root):
+            if province["rootDepartmentId"] != str(authorized_root) or getattr(request.state, "authorized_unit_id", None) is not None:
                 for group in province["groups"].values():
                     group["parameters"] = {}
                     group["metrics"] = {}
@@ -1060,7 +1060,8 @@ def dashboard(
     )
     response.headers["X-QD766-Cache"] = cache_result
     response.headers["Cache-Control"] = "private, max-age=30"
-    return payload
+    from .agency_scope import restrict_agency
+    return restrict_agency(payload, getattr(request.state, "authorized_unit_id", None))
 
 
 @router.get("/dashboard/selection", tags=["dashboard"])
@@ -1145,7 +1146,8 @@ def dashboard_selection(
     )
     response.headers["X-QD766-Cache"] = cache_result
     response.headers["Cache-Control"] = "private, max-age=30"
-    return payload
+    from .agency_scope import restrict_agency
+    return restrict_agency(payload, getattr(request.state, "authorized_unit_id", None))
 
 
 @router.post(

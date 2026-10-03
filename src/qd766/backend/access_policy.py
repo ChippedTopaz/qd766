@@ -19,10 +19,23 @@ PUBLIC_READ_PATHS = frozenset({
 
 async def enforce_public_read_only(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
-    if path in AUTH_READ_PATHS or path == "/api/v1/auth/logout":
+    if path in AUTH_READ_PATHS or path in {"/api/v1/auth/logout", "/api/v1/auth/invite"}:
         allowed = request.method == "GET" if path in AUTH_READ_PATHS else request.method == "POST"
         if not allowed:
             return JSONResponse(status_code=405, content={"detail": "Method not allowed"})
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+    if path.startswith("/api/v1/admin/"):
+        # Admin handlers authenticate and check CSRF independently, including on office instances.
+        from .admin import administrator
+        from fastapi import HTTPException
+        try:
+            with request.app.state.session_factory() as db:
+                administrator(request, db, write=request.method not in {"GET", "HEAD"})
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -42,7 +55,7 @@ async def enforce_public_read_only(request: Request, call_next):
             allowed=(request.method in {"GET","HEAD"} and path!="/api/v1/me/collection-quote") or (
                 request.method=="POST" and path in {"/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/notifications/read"})
     else:
-        allowed = allowed and (path in {"/", "/index.html", "/styles.css", "/bento.css", "/collection.css"}
+        allowed = allowed and (path in {"/", "/index.html", "/admin.html", "/admin.css", "/styles.css", "/bento.css", "/collection.css"}
             or path.startswith("/dist/") and path.endswith(".js")
             or path.startswith("/vendor/") and path.endswith((".js", ".css")))
     if not allowed:
@@ -52,6 +65,12 @@ async def enforce_public_read_only(request: Request, call_next):
             _, account = current_session(db, request.cookies.get(SESSION_COOKIE))
         if account is None:
             return JSONResponse(status_code=401, content={"detail": "Vui lòng đăng nhập Google."})
+        if request.app.state.settings.invite_required and not account.trial_admitted:
+            return JSONResponse(status_code=403, content={"detail": "Tài khoản chưa được mời dùng thử."})
+        if account.role == "admin" and account.trial_admitted:
+            response = await call_next(request)
+            response.headers["Cache-Control"] = "no-store"
+            return response
         if account.root_department_id is None:
             return JSONResponse(status_code=403, content={"detail": "Tài khoản đang chờ quản trị viên gán tỉnh/cơ quan."})
         root_id = str(account.root_department_id)
@@ -61,6 +80,10 @@ async def enforce_public_read_only(request: Request, call_next):
             return JSONResponse(status_code=403, content={"detail": "Sử dụng bảng so sánh điểm tỉnh thay cho dữ liệu tổng hợp thô."})
         request.state.authorized_root_id = account.root_department_id
         request.state.authorized_account_id = account.id
+        if account.access_tier == "agency":
+            if account.unit_department_id is None:
+                return JSONResponse(status_code=403, content={"detail": "Tài khoản chưa được gán cơ quan."})
+            request.state.authorized_unit_id = account.unit_department_id
         if catalog_path:
             from qd766.province_roots import load_province_roots
             code=path.split("/")[-2]

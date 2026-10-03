@@ -1,0 +1,68 @@
+"use strict";
+const root = document.querySelector("#admin");
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let csrf = "", accounts = [], directory = { provinces: [], units: [] }, editing = null;
+const get = (id) => document.getElementById(id);
+async function api(path, body) {
+    const response = await fetch(`/api/v1/${path}`, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json", "X-QD766-CSRF": csrf }, body: JSON.stringify(body) });
+    const value = await response.json();
+    if (!response.ok)
+        throw new Error(typeof value.detail === "string" ? value.detail : "Không thực hiện được yêu cầu.");
+    return value;
+}
+function message(value) { get("message").textContent = value; }
+async function run(action) { try {
+    await action();
+}
+catch (error) {
+    message(error instanceof Error ? error.message : String(error));
+} }
+function options(items) { return items.map(i => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join(""); }
+async function loadUnits(unit) { directory = await api(`admin/directory?provinceId=${encodeURIComponent(get("province").value)}`); get("unit").innerHTML = options(directory.units); if (unit)
+    get("unit").value = unit; }
+function toggleTier() { get("unit-label").hidden = get("tier").value !== "agency"; }
+function assignment() { const accessTier = get("tier").value; return { provinceId: get("province").value, accessTier, unitId: accessTier === "agency" ? get("unit").value : null }; }
+function showAccounts() { const search = get("search").value.toLocaleLowerCase("vi"); get("accounts").innerHTML = accounts.filter(a => `${a.email} ${a.name}`.toLocaleLowerCase("vi").includes(search)).map(a => `<tr><td>${esc(a.name)}<br><small>${esc(a.email)}</small></td><td>${a.role === "admin" ? "Quản trị" : a.accessTier === "agency" ? "Cơ quan" : "Cả tỉnh"}</td><td>${esc(directory.provinces.find(p => p.id === a.provinceId)?.name ?? "Chưa gán")}</td><td><span class="pill">${!a.active ? "Đã khóa" : a.admitted ? "Được mời" : "Chưa được mời"}</span></td><td>${a.role !== "admin" ? `<button data-edit="${a.id}">Phân quyền / khóa</button>` : ""}</td></tr>`).join(""); }
+async function refresh() { accounts = await api("admin/accounts"); showAccounts(); const invitations = await api("admin/invitations"); const labels = { available: "Chưa dùng", used: "Đã dùng", expired: "Hết hạn", revoked: "Đã thu hồi" }; get("invitations").innerHTML = invitations.map(i => `<tr><td>${esc(i.email ?? "Người có link")}</td><td>${esc(labels[i.state])}</td><td>${new Date(i.expiresAt).toLocaleString("vi-VN")}</td><td>${i.state === "available" ? `<button data-revoke="${i.id}">Thu hồi</button>` : ""}</td></tr>`).join(""); const audit = await api("admin/audit"); get("audit").innerHTML = audit.map(a => `<tr><td>${esc(a.action)}</td><td>${new Date(a.at).toLocaleString("vi-VN")}</td></tr>`).join(""); }
+async function start() {
+    try {
+        const me = await api("auth/me");
+        if (me.role !== "admin")
+            throw new Error("Chỉ tài khoản quản trị được truy cập.");
+        csrf = me.csrfToken;
+        directory = await api("admin/directory");
+        root.innerHTML = `<header><div><h1>Quản trị dùng thử</h1><p>${esc(me.name)} · Lời mời và phân quyền QĐ766</p></div><a class="button" href="/">Về Tổng quan</a></header><p id="message" role="status"></p><section><h2 id="form-title">Tạo lời mời</h2><p>Link dùng một lần. Nên gắn email để chỉ đúng người được mời có thể sử dụng. Không có email: người có link có thể nhận quyền.</p><form id="form"><div class="form-grid"><label>Tỉnh/thành phố<select id="province" required>${options(directory.provinces)}</select></label><label>Phạm vi xem<select id="tier"><option value="province">Cả tỉnh và cơ quan thuộc tỉnh</option><option value="agency">Chỉ cơ quan được gán</option></select></label><label id="unit-label" hidden>Cơ quan<select id="unit"></select></label><label id="email-label">Email người được mời (tùy chọn)<input id="email" type="email" maxlength="320"></label><label id="days-label">Hạn lời mời (ngày)<input id="days" type="number" min="1" max="30" value="7" required></label><label id="active-label" hidden>Trạng thái<select id="active"><option value="true">Đang hoạt động</option><option value="false">Khóa tài khoản</option></select></label></div><div class="actions"><button id="save" class="primary">Tạo link mời</button><button id="cancel" type="button" hidden>Hủy chỉnh sửa</button></div></form><p id="invite-result"></p></section><section><h2>Tài khoản</h2><input id="search" placeholder="Tìm tên hoặc email…" aria-label="Tìm tài khoản"><div class="scroll"><table><thead><tr><th>Người dùng</th><th>Quyền</th><th>Tỉnh</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="accounts"></tbody></table></div></section><section><h2>Lời mời đã tạo</h2><div class="scroll"><table><thead><tr><th>Người nhận</th><th>Trạng thái</th><th>Hết hạn</th><th>Thao tác</th></tr></thead><tbody id="invitations"></tbody></table></div></section><section><h2>Nhật ký quản trị</h2><div class="scroll"><table><thead><tr><th>Hành động</th><th>Thời điểm</th></tr></thead><tbody id="audit"></tbody></table></div></section>`;
+        await loadUnits();
+        await refresh();
+        get("tier").addEventListener("change", toggleTier);
+        get("province").addEventListener("change", () => void run(() => loadUnits()));
+        get("search").addEventListener("input", showAccounts);
+        get("cancel").addEventListener("click", () => { editing = null; get("form-title").textContent = "Tạo lời mời"; get("save").textContent = "Tạo link mời"; get("cancel").hidden = true; get("active-label").hidden = true; get("email-label").hidden = false; get("days-label").hidden = false; });
+        get("form").addEventListener("submit", event => { event.preventDefault(); void run(async () => { const button = get("save"); button.disabled = true; try {
+            if (editing) {
+                await api(`admin/accounts/${editing}`, { ...assignment(), active: get("active").value === "true" });
+                message("Đã lưu quyền; phiên cũ đã được thu hồi. Người dùng cần đăng nhập lại.");
+            }
+            else {
+                const invite = await api("admin/invitations", { ...assignment(), email: get("email").value || null, days: Number(get("days").value) });
+                const link = `${location.origin}/#invite=${invite.token}`;
+                get("invite-result").innerHTML = `<strong>Link chỉ hiển thị lần này:</strong> <a href="${esc(link)}">${esc(link)}</a> <button id="copy" type="button">Sao chép</button>`;
+                get("copy").addEventListener("click", () => void run(async () => { await navigator.clipboard.writeText(link); message("Đã sao chép link mời."); }));
+                message("Đã tạo lời mời. Chỉ gửi riêng cho người cần dùng thử.");
+            }
+            await refresh();
+        }
+        finally {
+            button.disabled = false;
+        } }); });
+        root.addEventListener("click", event => { const button = event.target.closest("button"); if (button?.dataset.edit) {
+            void run(async () => { const a = accounts.find(a => a.id === button.dataset.edit); editing = a.id; get("province").value = a.provinceId ?? ""; get("tier").value = a.accessTier; get("active").value = String(a.active); await loadUnits(a.unitId); toggleTier(); get("form-title").textContent = `Phân quyền: ${a.name}`; get("save").textContent = "Lưu quyền"; get("cancel").hidden = false; get("active-label").hidden = false; get("email-label").hidden = true; get("days-label").hidden = true; get("invite-result").textContent = ""; get("form").scrollIntoView({ behavior: "smooth" }); });
+        } if (button?.dataset.revoke)
+            void run(async () => { await api(`admin/invitations/${button.dataset.revoke}/revoke`, {}); message("Đã thu hồi lời mời."); await refresh(); }); });
+    }
+    catch (error) {
+        root.innerHTML = `<section><h1>Không thể mở quản trị</h1><p>${esc(error instanceof Error ? error.message : error)}</p><a class="button" href="/">Về trang chủ</a></section>`;
+    }
+}
+void start();
+//# sourceMappingURL=admin.js.map

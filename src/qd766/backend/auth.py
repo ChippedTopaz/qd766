@@ -7,16 +7,18 @@ from urllib.parse import urlencode, urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from starlette.responses import RedirectResponse
+from starlette.responses import RedirectResponse, JSONResponse
 
-from .models import LoginAttempt, LoginSession, UserAccount
+from .models import AdminAudit, LoginAttempt, LoginSession, TrialInvitation, UserAccount
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 SESSION_COOKIE = "qd766_session"
 FLOW_COOKIE = "qd766_login_flow"
+INVITE_COOKIE = "qd766_invite"
 SESSION_SECONDS = 8 * 3600
 
 
@@ -34,6 +36,8 @@ def validate_auth_settings(settings):
         raise ValueError("Google login requires client ID, secret and redirect URI together")
     if settings.require_login and (not enabled(settings) or not settings.public_read_only):
         raise ValueError("Login-required instance must enable public read-only boundary and configure Google")
+    if settings.invite_required and not settings.require_login:
+        raise ValueError("Invite-only deployment requires authenticated access")
     if enabled(settings):
         uri = urlsplit(settings.google_redirect_uri)
         local = uri.hostname in {"127.0.0.1", "localhost"}
@@ -58,6 +62,26 @@ def current_session(db, token: str | None):
     if account is None or not account.active:
         return None, None
     return session, account
+
+
+class InviteToken(BaseModel):
+    token: str = Field(min_length=40, max_length=100)
+
+
+@router.post("/invite")
+def accept_invite(payload: InviteToken, request: Request):
+    # The frontend reads a URL fragment: the invitation token is never in HTTP URLs.
+    now = datetime.now(timezone.utc)
+    with request.app.state.session_factory() as db:
+        invitation = db.scalar(select(TrialInvitation).where(
+            TrialInvitation.token_hash == digest(payload.token), TrialInvitation.used_at.is_(None),
+            TrialInvitation.revoked_at.is_(None), TrialInvitation.expires_at > now))
+        if invitation is None:
+            raise HTTPException(403, "Lời mời đã hết hạn, đã dùng hoặc đã được thu hồi.")
+    response = JSONResponse({"accepted": True})
+    response.set_cookie(INVITE_COOKIE, payload.token, max_age=600, **cookie_options(request.app.state.settings))
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def verify_google_identity(code: str, verifier: str, nonce: str, settings) -> dict:
@@ -106,7 +130,13 @@ def google_start(request: Request):
     now = datetime.now(timezone.utc)
     with request.app.state.session_factory.begin() as db:
         db.execute(delete(LoginAttempt).where(LoginAttempt.expires_at <= now))
-        db.add(LoginAttempt(state_hash=digest(state), binding_hash=digest(binding), nonce=nonce, verifier=verifier, expires_at=now + timedelta(minutes=10)))
+        invitation = None
+        invite_token = request.cookies.get(INVITE_COOKIE, "")
+        if 40 <= len(invite_token) <= 100:
+            invitation = db.scalar(select(TrialInvitation.id).where(TrialInvitation.token_hash == digest(invite_token),
+                TrialInvitation.used_at.is_(None), TrialInvitation.revoked_at.is_(None), TrialInvitation.expires_at > now))
+        db.add(LoginAttempt(state_hash=digest(state), binding_hash=digest(binding), nonce=nonce, verifier=verifier,
+            invitation_id=invitation, expires_at=now + timedelta(minutes=10)))
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
     params = {"client_id": settings.google_client_id, "redirect_uri": settings.google_redirect_uri,
               "response_type": "code", "scope": "openid email profile", "state": state, "nonce": nonce,
@@ -144,6 +174,20 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
         return response
     with request.app.state.session_factory.begin() as db:
         subject = "google:" + identity["sub"]
+        existing = db.scalar(select(UserAccount).where(UserAccount.external_subject == subject).with_for_update())
+        if existing is not None and not existing.active:
+            return response
+        needs_invite = settings.invite_required and (existing is None or not existing.trial_admitted)
+        invitation = None
+        if needs_invite:
+            # Atomic one-use claim; rolls back with account/session creation on errors.
+            invitation = db.scalar(update(TrialInvitation).where(TrialInvitation.id == attempt.invitation_id,
+                TrialInvitation.used_at.is_(None), TrialInvitation.revoked_at.is_(None), TrialInvitation.expires_at > now,
+                (TrialInvitation.recipient_email.is_(None) | (TrialInvitation.recipient_email == identity["email"].lower()))
+            ).values(used_at=now).returning(TrialInvitation))
+            if invitation is None:
+                response.headers["location"] = "/?login=invite-required"
+                return response
         insert = sqlite_insert if db.bind.dialect.name == "sqlite" else pg_insert
         db.execute(insert(UserAccount).values(external_subject=subject,
             display_name=str(identity.get("name") or identity["email"])[:160], email=identity["email"],
@@ -153,6 +197,14 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
             return response
         account.email = identity["email"]
         account.display_name = str(identity.get("name") or identity["email"])[:160]
+        if invitation is not None:
+            account.trial_admitted = True
+            account.root_department_id = invitation.root_department_id
+            account.access_tier = invitation.access_tier
+            account.unit_department_id = invitation.unit_department_id
+            invitation.used_by = account.id
+            db.add(AdminAudit(actor_id=invitation.created_by, action="invitation.redeemed",
+                details={"invitationId": str(invitation.id), "accountId": str(account.id)}))
         old = request.cookies.get(SESSION_COOKIE)
         if old:
             db.execute(delete(LoginSession).where(LoginSession.token_hash == digest(old)))
@@ -162,6 +214,7 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
     response = RedirectResponse("/", status_code=303)
     response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_SECONDS, **cookie_options(settings))
     response.delete_cookie(FLOW_COOKIE, **cookie_options(settings))
+    response.delete_cookie(INVITE_COOKIE, **cookie_options(settings))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -172,9 +225,13 @@ def me(request: Request):
         session, account = current_session(db, request.cookies.get(SESSION_COOKIE)) if request.cookies.get(SESSION_COOKIE) else (None, None)
         if not account:
             raise HTTPException(401, "Chưa đăng nhập.")
+        if request.app.state.settings.invite_required and not account.trial_admitted:
+            raise HTTPException(403, "Tài khoản chưa được mời dùng thử.")
         return {"id": str(account.id), "name": account.display_name, "email": account.email,
                 "plan": account.plan, "provinceId": str(account.root_department_id) if account.root_department_id else None,
-                "credits": account.credit_balance, "csrfToken": session.csrf_token}
+                "credits": account.credit_balance, "csrfToken": session.csrf_token,
+                "role": account.role, "accessTier": account.access_tier,
+                "unitId": str(account.unit_department_id) if account.unit_department_id else None}
 
 
 @router.post("/logout")

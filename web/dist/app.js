@@ -387,6 +387,10 @@ const unitOptions = () => {
     return groups.map(group => `<optgroup label="${group.label}">${group.items.sort(byName).map(item => `<option value="${esc(item.departmentId)}" ${item.departmentId === state.unitId ? "selected" : ""}>${esc(item.departmentName)}</option>`).join("")}</optgroup>`).join("");
 };
 function nav() {
+    const html = baseNav();
+    return signedInUser?.role === "admin" ? html.replace("</nav>", '<a class="btn" href="/admin.html">Quản trị dùng thử</a></nav>') : html;
+}
+function baseNav() {
     return `<aside class="sidebar"><div class="brand"><span class="brand-mark">766</span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item => !publicReadOnly || !["procedure", "operations", "suggestions"].includes(item.id)).map((item) => `<button data-nav="${item.id}" class="${state.screen === item.id ? "active" : ""}" aria-current="${state.screen === item.id ? "page" : "false"}"><span class="nav-icon" aria-hidden="true">${icon(({ overview: "shield", time: "chart", peers: "monitor", procedure: "document", suggestions: "star", quality: "shield", operations: "clock", formulas: "document" })[item.id])}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
 }
 function context() {
@@ -1373,12 +1377,23 @@ async function start() {
     if (cleanSearch !== null)
         history.replaceState(history.state ?? null, "", `${location.pathname}${cleanSearch}${location.hash ?? ""}`);
     const productionSite = document.querySelector('meta[name="qd766-deployment"]')?.getAttribute("content") === "public";
+    let invitationOnly = false;
     try {
+        const invitation = new URLSearchParams(location.hash.slice(1)).get("invite");
+        if (invitation) {
+            history.replaceState(history.state ?? null, "", `${location.pathname}${location.search}`);
+            const accepted = await fetch("/api/v1/auth/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: invitation }) });
+            if (!accepted.ok)
+                throw new Error("Lời mời đã hết hạn, đã dùng hoặc đã được thu hồi. Hãy liên hệ quản trị viên.");
+            location.assign("/api/v1/auth/google/start");
+            return;
+        }
         const policyResponse = await fetch("/api/v1/access-policy");
         if (productionSite && !policyResponse.ok)
             throw new Error("Website chưa kết nối được backend HTTPS máy cơ quan.");
         if (policyResponse.ok) {
             const policy = await policyResponse.json();
+            invitationOnly = Boolean(policy.inviteRequired);
             if (productionSite && policy.publicReadOnly !== true)
                 throw new Error("Backend chưa bật chế độ truy cập công khai an toàn.");
             publicReadOnly = Boolean(policy.publicReadOnly);
@@ -1390,10 +1405,16 @@ async function start() {
             const meResponse = await fetch("/api/v1/auth/me");
             if (meResponse.ok)
                 signedInUser = await meResponse.json();
-            else if (meResponse.status !== 401)
+            else if (meResponse.status !== 401 && meResponse.status !== 403)
                 throw new Error("Chưa kiểm tra được phiên đăng nhập. Vui lòng thử lại.");
-            if (loginRequired && (!signedInUser || !signedInUser.provinceId)) {
+            if (loginRequired && (!signedInUser || (!signedInUser.provinceId && signedInUser.role !== "admin"))) {
+                if (new URLSearchParams(location.search).get("login") === "invite-required") {
+                    root.innerHTML = '<main class="content"><div class="empty-state"><h2>Dùng thử theo lời mời</h2><p>Hãy mở link mời của quản trị viên và đăng nhập bằng đúng tài khoản Google được mời.</p><a class="btn" href="/api/v1/auth/google/start">Đăng nhập lại</a></div></main>';
+                    return;
+                }
                 root.innerHTML = `<main class="content"><div class="empty-state"><h2>${signedInUser ? "Tài khoản đang chờ duyệt" : "Đăng nhập QĐ766"}</h2><p>${signedInUser ? "Quản trị viên cần gán tỉnh/cơ quan cho tài khoản trước khi tra cứu." : "Đăng nhập Google để xem dữ liệu của tỉnh/cơ quan được phân quyền."}</p>${!signedInUser && googleLoginEnabled ? `<a class="btn primary" href="/api/v1/auth/google/start">Đăng nhập Google</a>` : ""}${signedInUser ? `<button class="btn" data-action="logout">Đăng xuất</button>` : ""}${new URLSearchParams(location.search).get("login") === "failed" ? `<p>Đăng nhập không thành công hoặc phiên xác nhận đã hết hạn. Vui lòng thử lại.</p>` : ""}</div></main>`;
+                if (invitationOnly)
+                    root.querySelector(".empty-state")?.insertAdjacentHTML("beforeend", "<p>Giai đoạn dùng thử chỉ dành cho người có link mời của quản trị viên.</p>");
                 bind();
                 return;
             }
@@ -1423,7 +1444,7 @@ async function start() {
         if (rememberedPeriod)
             state.periodId = rememberedPeriod.id;
         const rememberedUnit = remembered.get("unit");
-        if (rememberedUnit && (rememberedUnit === data.province.id || data.units.some(item => item.departmentId === rememberedUnit)))
+        if (rememberedUnit && data.units.some(item => item.departmentId === rememberedUnit))
             state.unitId = rememberedUnit;
         document.title = `Phân tích Bộ chỉ số 766 · ${data.province.name.replace(/^UBND\s+/i, "")}`;
         render();

@@ -51,7 +51,7 @@ def main():
         return 1
     if args.check:
         app.state.engine.dispose()
-        report("PUBLIC_CONFIG=PASS LOGIN_REQUIRED=True ADMIN_API_BLOCKED=True PAID_REQUESTS=False")
+        report("PUBLIC_CONFIG=PASS LOGIN_REQUIRED=True INVITE_REQUIRED=True ADMIN_ROLE_REQUIRED=True OPERATOR_API_BLOCKED=True PAID_REQUESTS=False")
         report("Database connectivity and real Google login are NOT verified by this check.")
         return 0
     report(f"PUBLIC_BACKEND_LOCAL=http://127.0.0.1:{PUBLIC_PORT} LOGIN_REQUIRED=True")

@@ -25,6 +25,7 @@ class PublicDeploymentTests(unittest.TestCase):
         with patch.dict(os.environ, self.office):
             settings = public_settings(self.office, self.public)
         self.assertTrue(settings.public_read_only and settings.require_login)
+        self.assertTrue(settings.invite_required)
         self.assertFalse(settings.paid_requests_enabled or settings.trial_credits_enabled or settings.sql_echo)
         self.assertEqual(settings.formality_credit_cost, 0)
         self.assertEqual(settings.cors_origins, ())

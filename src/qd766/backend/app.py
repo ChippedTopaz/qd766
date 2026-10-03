@@ -15,6 +15,7 @@ from .routes import router
 from .access_policy import enforce_public_read_only
 from .auth import enabled, validate_auth_settings, router as auth_router
 from .user_collection import router as user_collection_router
+from .admin import router as admin_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -35,7 +36,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def access_policy() -> dict:
         return {"publicReadOnly": resolved.public_read_only,
                 "loginRequired": resolved.require_login,
-                "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": resolved.paid_requests_enabled}
+                "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": resolved.paid_requests_enabled,
+                "inviteRequired": resolved.invite_required}
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
     app.state.dashboard_cache = SingleFlightTTLCache[str, dict](
@@ -59,6 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["*"],
         )
     app.include_router(auth_router)
+    app.include_router(admin_router)
     app.include_router(user_collection_router)
     app.include_router(router)
     web_root = Path(__file__).resolve().parents[3] / "web"

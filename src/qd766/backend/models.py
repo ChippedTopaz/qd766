@@ -251,11 +251,18 @@ class UserAccount(Base):
         ),
         CheckConstraint("credit_balance >= 0", name="ck_user_credit_balance"),
         CheckConstraint("credit_reserved >= 0", name="ck_user_credit_reserved"),
+        CheckConstraint("role IN ('user', 'admin')", name="ck_account_role"),
+        CheckConstraint("access_tier IN ('province', 'agency')", name="ck_account_access_tier"),
+        CheckConstraint("access_tier != 'agency' OR (unit_department_id IS NOT NULL AND root_department_id IS NOT NULL)", name="ck_account_unit_scope"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     external_subject: Mapped[str] = mapped_column(String(240), unique=True)
     email: Mapped[str | None] = mapped_column(String(320))
+    role: Mapped[str] = mapped_column(String(16), default="user", server_default="user")
+    trial_admitted: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    access_tier: Mapped[str] = mapped_column(String(16), default="province", server_default="province")
+    unit_department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("departments.id", ondelete="RESTRICT"))
     root_department_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("departments.id", ondelete="RESTRICT"), index=True
     )
@@ -280,6 +287,34 @@ class LoginAttempt(Base):
     verifier: Mapped[str] = mapped_column(String(100))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invitation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("trial_invitations.id", ondelete="SET NULL"))
+
+
+class TrialInvitation(Base):
+    __tablename__ = "trial_invitations"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    recipient_email: Mapped[str | None] = mapped_column(String(320))
+    root_department_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("departments.id", ondelete="RESTRICT"))
+    access_tier: Mapped[str] = mapped_column(String(16))
+    unit_department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("departments.id", ondelete="RESTRICT"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    used_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (CheckConstraint("access_tier IN ('province', 'agency')", name="ck_invite_tier"),
+        CheckConstraint("access_tier != 'agency' OR unit_department_id IS NOT NULL", name="ck_invite_unit"))
+
+
+class AdminAudit(Base):
+    __tablename__ = "admin_audits"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    action: Mapped[str] = mapped_column(String(80))
+    details: Mapped[dict[str, Any]] = mapped_column(JsonDocument, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class LoginSession(Base):

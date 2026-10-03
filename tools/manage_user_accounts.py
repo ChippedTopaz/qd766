@@ -38,6 +38,8 @@ def main():
                 if root is None or db.get(Department, root.root_department_id) is None:
                     parser.error("Use a verified province code already stored in this database")
                 account.root_department_id = root.root_department_id
+                account.access_tier = "province"
+                account.unit_department_id = None
             else:
                 account.active = False
             # Assignment or disable revokes old sessions; user must log in again.

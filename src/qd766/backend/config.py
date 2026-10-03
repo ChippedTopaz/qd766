@@ -57,6 +57,7 @@ def _database_url_from_env() -> str:
 class Settings:
     public_read_only: bool = False
     require_login: bool = False
+    invite_required: bool = False
     paid_requests_enabled: bool = False
     formality_credit_cost: int = 0
     trial_credits_enabled: bool = False
@@ -89,6 +90,7 @@ class Settings:
         return cls(
             public_read_only=_as_bool(os.getenv("QD766_PUBLIC_READ_ONLY")),
             require_login=_as_bool(os.getenv("QD766_REQUIRE_LOGIN")),
+            invite_required=_as_bool(os.getenv("QD766_INVITE_REQUIRED")),
             paid_requests_enabled=_as_bool(os.getenv("QD766_PAID_REQUESTS_ENABLED")),
             formality_credit_cost=int(os.getenv("QD766_FORMALITY_CREDIT_COST", "0")),
             trial_credits_enabled=_as_bool(os.getenv("QD766_TRIAL_CREDITS_ENABLED")),
