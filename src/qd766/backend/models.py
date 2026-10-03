@@ -279,6 +279,15 @@ class UserAccount(Base):
     )
 
 
+class AccountCollectionPermission(Base):
+    """Separate capability: province/agency scope and paid plan do not imply collection permission."""
+    __tablename__ = "account_collection_permissions"
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="CASCADE"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class LoginAttempt(Base):
     __tablename__ = "login_attempts"
     state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)

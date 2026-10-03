@@ -31,7 +31,8 @@ let publicReadOnly=false;
 let paidRequestsEnabled=false;
 let loginRequired=false;
 let googleLoginEnabled=false;
-let signedInUser:{name:string;provinceId:string|null;csrfToken:string;credits:number;role?:string;accessTier?:string;unitId?:string|null}|null=null;
+let localSimulation=false;
+let signedInUser:{name:string;provinceId:string|null;csrfToken:string;credits:number;reservedCredits?:number;canCollect?:boolean;role?:string;accessTier?:string;unitId?:string|null}|null=null;
 let data: AppData;
 let state: State;
 let selectionRequest=0;
@@ -102,14 +103,14 @@ function collectionNotices():string{
   return count||unreadNotifications?`<button class="collection-status-pill" data-action="request-history">${count?`${count} yêu cầu đang xử lý`:""}${count&&unreadNotifications?" · ":""}${unreadNotifications?`${unreadNotifications} thông báo mới`:""} · Xem yêu cầu</button>`:"";
 }
 
-const canAcquire=()=>paidRequestsEnabled||!publicReadOnly;
+const canAcquire=()=>paidRequestsEnabled?Boolean(signedInUser?.canCollect):!publicReadOnly;
 const libraryParams=()=>{
   const selected=period();const params=new URLSearchParams({period_type:selected.type,year:String(selected.year)});
   if(selected.value!=null)params.set("period_value",String(selected.value));
   return params;
 };
 async function loadLibrary():Promise<void>{
-  if(!canAcquire())return;
+  if(!paidRequestsEnabled&&!canAcquire())return;
   const revision=++libraryRequest,rootId=data.province.id,periodId=state.periodId;
   library=[];libraryError="";libraryLoading=true;
   try{
@@ -134,13 +135,13 @@ async function loadMyRequests(markRead=false):Promise<void>{
     const response=await fetch(paidRequestsEnabled?"/api/v1/me/formality-requests":"/api/v1/collection-jobs?limit=100");
     if(!response.ok)throw new Error("Chưa đọc được lịch sử yêu cầu.");
     if(paidRequestsEnabled){
-      const body=await response.json() as {items:MyRequest[];availableCredits:number;unreadNotifications?:number};
+      const body=await response.json() as {items:MyRequest[];availableCredits:number;reservedCredits:number;unreadNotifications?:number};
       unreadNotifications=body.unreadNotifications??0;
       const previous=new Map(myRequests.map(item=>[item.id,item.state]));
       myRequests=body.items;
       const completed=myRequests.find(item=>item.state==="ready"&&["waiting","reserved","running"].includes(previous.get(item.id)??""));
       if(completed){announceCollectionComplete(`${data.province.name} · ${requestPeriod(completed)} · ${completed.code}`);void loadLibrary();}
-      if(signedInUser)signedInUser.credits=body.availableCredits;
+      if(signedInUser){signedInUser.credits=body.availableCredits;signedInUser.reservedCredits=body.reservedCredits;}
       if(markRead&&unreadNotifications){
         const acknowledged=await fetch("/api/v1/me/notifications/read",{method:"POST",headers:{"Content-Type":"application/json","X-QD766-CSRF":signedInUser?.csrfToken??""},body:JSON.stringify({requestIds:myRequests.map(item=>item.id)})});
         if(acknowledged.ok)unreadNotifications=0;
@@ -213,7 +214,7 @@ async function confirmCollection():Promise<void>{
   try{
     const response=await fetch("/api/v1/me/formality-requests",{method:"POST",headers:{"Content-Type":"application/json","X-QD766-CSRF":signedInUser?.csrfToken??""},body:JSON.stringify({quote:creditQuote.quote,token:confirmationToken})});
     const body=await response.json();if(!response.ok)throw new Error(body.detail??"Chưa gửi được yêu cầu.");
-    if(signedInUser)signedInUser.credits=body.availableCredits;
+    if(signedInUser){signedInUser.credits=body.availableCredits;signedInUser.reservedCredits=body.reservedCredits;}
     state.modal="none";collectionTab="history";catalogPreview.selectedId=null;
     acquisitionMessage="Yêu cầu đã được lưu. Dữ liệu hoàn tất sẽ xuất hiện trong Thủ tục đã khai thác.";
     void loadLibrary();await loadMyRequests();
@@ -311,7 +312,9 @@ const unitOptions = () => {
 
 function nav(): string {
   const html=baseNav();
-  return signedInUser?.role==="admin"?html.replace("</nav>",`<button type="button" data-action="open-admin" title="Quản trị dùng thử"><span class="nav-icon" aria-hidden="true">${icon("shield")}</span><span>Quản trị dùng thử</span></button></nav>`):html;
+  const collection=publicReadOnly&&paidRequestsEnabled&&canAcquire()?`<button type="button" data-nav="procedure" class="${state.screen==="procedure"?"active":""}"><span class="nav-icon" aria-hidden="true">${icon("document")}</span><span>Theo TTHC</span></button>`:"";
+  const admin=signedInUser?.role==="admin"?`<button type="button" data-action="open-admin" title="Quản trị dùng thử"><span class="nav-icon" aria-hidden="true">${icon("shield")}</span><span>Quản trị dùng thử</span></button>`:"";
+  return html.replace("</nav>",collection+admin+"</nav>");
 }
 function baseNav(): string {
 return `<aside class="sidebar"><div class="brand"><span class="brand-mark">766</span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item=>!publicReadOnly||!["procedure","operations","suggestions"].includes(item.id)).map((item)=>`<button data-nav="${item.id}" class="${state.screen===item.id?"active":""}" aria-current="${state.screen===item.id?"page":"false"}"><span class="nav-icon" aria-hidden="true">${icon(({overview:"shield",time:"chart",peers:"monitor",procedure:"document",suggestions:"star",quality:"shield",operations:"clock",formulas:"document"})[item.id])}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
@@ -343,6 +346,15 @@ function shell(content: string): void {
   searchableSelects=[];
   const timingNotice=loaded?.delivery?.detailsAvailable===false?`<div class="period-notice" role="status"><strong>Chỉ có điểm tổng hợp tỉnh</strong><span>Kỳ này có đủ điểm 6 nhóm để so sánh tỉnh; chưa có chỉ tiêu thành phần hoặc điểm sở/ngành, xã/phường. Chọn kỳ không tạo yêu cầu thu thập.</span></div>`:state.demo==="normal"&&loaded?.delivery?.result==="national-summary"&&loaded.delivery.capturedAt!==loaded.delivery.detailsCapturedAt?`<div class="period-notice" role="status"><strong>Hai thời điểm cập nhật</strong><span>Điểm tỉnh: ${esc(dateTime(loaded.delivery.capturedAt))}. Chi tiết chỉ tiêu và điểm cơ quan trực thuộc: ${esc(dateTime(loaded.delivery.detailsCapturedAt))}. Số liệu thành phần có thể chưa khớp điểm tỉnh mới nhất.</span></div>`:"";
 root.innerHTML = `<div class="app-shell enterprise-mode ${["overview","formulas"].includes(state.screen)?"bento-mode":""}">${nav()}<div class="workspace">${context()}<main class="content">${state.screen==="formulas"?"":(state.screen==="overview"&&state.demo==="normal"?"":staleNotice+periodNotice+timingNotice)}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : state.modal==="collection"?collectionConfirmation():""}${completionMessage?`<div class="collection-toast" role="status"><strong>Hoàn tất</strong><span>${esc(completionMessage)}</span><button class="btn small" data-action="dismiss-completion">Đóng</button></div>`:""}</div>`;
+  if(localSimulation)root.querySelector(".content")?.insertAdjacentHTML("afterbegin",'<div class="period-notice"><strong>THỬ NGHIỆM LOCAL · DỮ LIỆU MÔ PHỎNG</strong><span>Không gọi Cổng DVCQG, không trừ credit thật.</span><a class="btn small" href="/local-trial.html">Đổi tài khoản / thử kết quả job</a></div>');
+  if(paidRequestsEnabled&&signedInUser){
+    root.querySelector(".context-actions")?.insertAdjacentHTML("afterbegin",`<span class="badge neutral">Credit khả dụng: ${int(signedInUser.credits)} · Đang giữ: ${int(signedInUser.reservedCredits??0)}</span>`);
+    const scopeSelect=root.querySelector<HTMLSelectElement>("#scope-select");
+    if(scopeSelect&&!scopeSelect.querySelector('option[value="formality"]')){
+      scopeSelect.insertAdjacentHTML("beforeend",'<option value="formality">Theo TTHC · đã khai thác</option>');
+      scopeSelect.value=state.scope;
+    }
+  }
   bind();
   if(queryCaret){
     const query=document.querySelector<HTMLInputElement>("#catalog-query");
@@ -1093,7 +1105,8 @@ async function start(): Promise<void> {
     const policyResponse=await fetch("/api/v1/access-policy");
     if(productionSite&&!policyResponse.ok)throw new Error("Website chưa kết nối được backend HTTPS máy cơ quan.");
     if(policyResponse.ok){
-      const policy=await policyResponse.json() as {publicReadOnly:boolean;loginRequired?:boolean;googleLoginEnabled?:boolean;paidRequestsEnabled?:boolean;inviteRequired?:boolean};
+      const policy=await policyResponse.json() as {publicReadOnly:boolean;loginRequired?:boolean;googleLoginEnabled?:boolean;paidRequestsEnabled?:boolean;inviteRequired?:boolean;localSimulation?:boolean};
+      localSimulation=Boolean(policy.localSimulation);
       invitationOnly=Boolean(policy.inviteRequired);
       if(productionSite&&policy.publicReadOnly!==true)throw new Error("Backend chưa bật chế độ truy cập công khai an toàn.");
       publicReadOnly=Boolean(policy.publicReadOnly);loginRequired=Boolean(policy.loginRequired);googleLoginEnabled=Boolean(policy.googleLoginEnabled);
@@ -1104,6 +1117,7 @@ async function start(): Promise<void> {
       if(meResponse.ok)signedInUser=await meResponse.json() as typeof signedInUser;
       else if(meResponse.status!==401&&meResponse.status!==403)throw new Error("Chưa kiểm tra được phiên đăng nhập. Vui lòng thử lại.");
       if(loginRequired&&(!signedInUser||(!signedInUser.provinceId&&signedInUser.role!=="admin"))){
+        if(localSimulation){location.assign("/local-trial.html");return;}
         if(new URLSearchParams(location.search).get("login")==="invite-required"){
           root.innerHTML='<main class="content"><div class="empty-state"><h2>Dùng thử theo lời mời</h2><p>Hãy mở link mời của quản trị viên và đăng nhập bằng đúng tài khoản Google được mời.</p><a class="btn" href="/api/v1/auth/google/start">Đăng nhập lại</a></div></main>';return;
         }
@@ -1134,7 +1148,7 @@ async function start(): Promise<void> {
     if(rememberedUnit&&data.units.some(item=>item.departmentId===rememberedUnit))state.unitId=rememberedUnit;
     document.title=`Phân tích Bộ chỉ số 766 · ${data.province.name.replace(/^UBND\s+/i,"")}`;
     render();
-    if(canAcquire()){
+    if(paidRequestsEnabled||canAcquire()){
       await loadLibrary();
       if(remembered.get("scope")==="formality"){
         const saved=library.find(item=>item.id===remembered.get("formality"));

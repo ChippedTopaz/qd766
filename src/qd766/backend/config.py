@@ -61,6 +61,7 @@ class Settings:
     paid_requests_enabled: bool = False
     formality_credit_cost: int = 0
     trial_credits_enabled: bool = False
+    trial_credit_management: bool = False
     google_client_id: str = ""
     google_client_secret: str = field(default="", repr=False)
     google_redirect_uri: str = ""

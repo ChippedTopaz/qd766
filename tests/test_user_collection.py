@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
 from qd766.backend import create_app
 from qd766.backend.config import Settings
-from qd766.backend.models import Base,Department,Formality,Snapshot,UserAccount,LoginSession,CollectionJob,PaidDataRequest,CreditLedgerEntry,CollectionControl
+from qd766.backend.models import AccountCollectionPermission,Base,Department,Formality,Snapshot,UserAccount,LoginSession,CollectionJob,PaidDataRequest,CreditLedgerEntry,CollectionControl
 from qd766.backend.auth import digest
 from qd766.backend.paid_requests import top_up_credits,settle_paid_requests_for_job,refund_blocked_paid_requests
 from qd766.province_roots import load_province_roots
@@ -28,6 +28,7 @@ class UserCollectionTest(unittest.TestCase):
             for n,aid in enumerate(self.ids):
                 db.add(UserAccount(id=aid,external_subject=f'test-{n}',display_name=f'User {n}',plan='free',root_department_id=self.root.root_department_id))
                 db.flush();top_up_credits(db,aid,10,event_key=f'top-{n}')
+                db.add(AccountCollectionPermission(account_id=aid,enabled=True))
                 db.add(LoginSession(token_hash=digest(f'session-{n}'),account_id=aid,csrf_token=f'csrf-{n}',expires_at=datetime.now(timezone.utc)+timedelta(hours=1)))
         self.clients=[TestClient(self.app),TestClient(self.app)]
         for n,c in enumerate(self.clients):c.cookies.set('qd766_session',f'session-{n}')

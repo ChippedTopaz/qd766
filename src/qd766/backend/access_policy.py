@@ -19,6 +19,10 @@ PUBLIC_READ_PATHS = frozenset({
 
 async def enforce_public_read_only(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
+    if getattr(request.app.state, "local_credit_trial", False) and (
+            path == "/local-trial.html" or path.startswith("/api/v1/local-trial/")):
+        # Only the isolated SQLite simulator registers these handlers and its loopback guard.
+        return await call_next(request)
     if path in AUTH_READ_PATHS or path in {"/api/v1/auth/logout", "/api/v1/auth/invite"}:
         allowed = request.method == "GET" if path in AUTH_READ_PATHS else request.method == "POST"
         if not allowed:
@@ -67,7 +71,7 @@ async def enforce_public_read_only(request: Request, call_next):
             return JSONResponse(status_code=401, content={"detail": "Vui lòng đăng nhập Google."})
         if request.app.state.settings.invite_required and not account.trial_admitted:
             return JSONResponse(status_code=403, content={"detail": "Tài khoản chưa được mời dùng thử."})
-        if account.role == "admin" and account.trial_admitted:
+        if account.role == "admin" and account.trial_admitted and not (user_path or catalog_path or private_selection):
             response = await call_next(request)
             response.headers["Cache-Control"] = "no-store"
             return response

@@ -122,3 +122,10 @@ pythonw --check --background-log exit 0 và log đọc được UTF-8.
 Chưa thay task Windows thật, chưa kiểm chứng stop/start không sót tiến trình trong
 task mới. Người quản trị cần register -ReplaceExisting (backup XML) rồi restart.
 Không sửa DNS, OAuth secret/callback, thu phí, credit hoặc dữ liệu PostgreSQL.
+
+# Credit — chỉ thử local, chưa triển khai
+
+Theo chỉ đạo quản trị, bổ sung quyền khai thác TTHC riêng, giao diện cấp credit và
+sổ giao dịch; kiểm thử qua bản mô phỏng loopback 8770, SQLite riêng. Migration 0011
+chỉ được chuẩn bị, chưa áp dụng vào production. Không push/deploy Netlify, restart
+public backend, bật thanh toán hoặc cào DVCQG. Hướng dẫn: LOCAL_CREDIT_TRIAL.md.

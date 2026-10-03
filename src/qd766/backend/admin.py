@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 
 from .auth import SESSION_COOKIE, current_session, digest
-from .models import AdminAudit, Department, Dataset, Entity, LoginSession, Snapshot, TrialInvitation, UserAccount
+from .models import AccountCollectionPermission, AdminAudit, CreditLedgerEntry, Department, Dataset, Entity, LoginSession, Snapshot, TrialInvitation, UserAccount
 
 router = APIRouter(prefix="/api/v1/admin", tags=["trial administration"])
 
@@ -78,8 +78,11 @@ def directory(request: Request, provinceId: uuid.UUID | None = None):
 def accounts(request: Request):
     with request.app.state.session_factory() as db:
         administrator(request, db)
+        from .collection_permissions import can_collect
         return [{"id": str(a.id), "email": a.email, "name": a.display_name, "role": a.role,
                  "admitted": a.trial_admitted, "active": a.active, "accessTier": a.access_tier,
+                 "canCollect": request.app.state.settings.paid_requests_enabled and can_collect(db, a.id),
+                 "credits": a.credit_balance, "reservedCredits": a.credit_reserved,
                  "provinceId": str(a.root_department_id) if a.root_department_id else None,
                  "unitId": str(a.unit_department_id) if a.unit_department_id else None}
                 for a in db.scalars(select(UserAccount).order_by(UserAccount.created_at.desc()).limit(500))]
@@ -156,3 +159,71 @@ def audit_log(request: Request):
         administrator(request, db)
         return [{"action": a.action, "details": a.details, "at": a.created_at.isoformat()}
                 for a in db.scalars(select(AdminAudit).order_by(AdminAudit.created_at.desc()).limit(100))]
+
+
+class TrialCreditChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operationId: uuid.UUID
+    canCollect: bool
+    amount: int = Field(default=0, ge=0, le=100000)
+    reason: str = Field(min_length=3, max_length=240)
+
+
+def trial_credit_enabled(request):
+    if not request.app.state.settings.trial_credit_management:
+        raise HTTPException(403, "Quản lý credit thử nghiệm chưa được mở ở môi trường này.")
+
+
+@router.post("/accounts/{account_id}/trial-credit")
+def grant_trial_credit(account_id: uuid.UUID, payload: TrialCreditChange, request: Request):
+    trial_credit_enabled(request)
+    from .paid_requests import _locked_account, top_up_credits
+    with request.app.state.session_factory.begin() as db:
+        actor = administrator(request, db, write=True)
+        if db.get(UserAccount, account_id) is None:
+            raise HTTPException(404, "Không tìm thấy tài khoản.")
+        target = _locked_account(db, account_id)
+        if not target.active or not target.trial_admitted or target.root_department_id is None:
+            raise HTTPException(409, "Chỉ cấp quyền/credit cho tài khoản đang hoạt động và đã được mời, gán tỉnh.")
+        event = f"trial-grant:{actor.id}:{target.id}:{payload.operationId}"
+        details = {"adminId": str(actor.id), "reason": payload.reason, "canCollect": payload.canCollect}
+        prior_audit = db.scalar(select(AdminAudit).where(AdminAudit.actor_id == actor.id,
+            AdminAudit.action == "trial-credit.updated",
+            AdminAudit.details["operationId"].as_string() == str(payload.operationId)))
+        if prior_audit is not None:
+            prior = prior_audit.details
+            if (prior.get("accountId") != str(target.id) or prior.get("amount") != payload.amount
+                    or prior.get("canCollect") != payload.canCollect or prior.get("reason") != payload.reason):
+                raise HTTPException(409, "Mã giao dịch đã dùng với nội dung khác.")
+            return {"availableCredits": target.credit_balance, "reservedCredits": target.credit_reserved, "replayed": True}
+        existing = db.scalar(select(CreditLedgerEntry).where(CreditLedgerEntry.event_key == event))
+        if existing is not None:
+            if existing.amount != payload.amount or existing.details != details:
+                raise HTTPException(409, "Mã giao dịch đã dùng với nội dung khác.")
+            return {"availableCredits": target.credit_balance, "reservedCredits": target.credit_reserved, "replayed": True}
+        permission = db.get(AccountCollectionPermission, target.id)
+        if permission is None:
+            permission = AccountCollectionPermission(account_id=target.id)
+            db.add(permission)
+        permission.enabled = payload.canCollect
+        permission.granted_by = actor.id
+        if payload.amount:
+            top_up_credits(db, target.id, payload.amount, event_key=event, details=details)
+        audit(db, actor, "trial-credit.updated", accountId=str(target.id), operationId=str(payload.operationId),
+              amount=payload.amount, canCollect=payload.canCollect, reason=payload.reason)
+        return {"availableCredits": target.credit_balance, "reservedCredits": target.credit_reserved, "replayed": False}
+
+
+@router.get("/accounts/{account_id}/credits")
+def credit_ledger(account_id: uuid.UUID, request: Request):
+    trial_credit_enabled(request)
+    with request.app.state.session_factory() as db:
+        administrator(request, db)
+        account = db.get(UserAccount, account_id)
+        if account is None:
+            raise HTTPException(404, "Không tìm thấy tài khoản.")
+        return {"availableCredits": account.credit_balance, "reservedCredits": account.credit_reserved,
+                "items": [{"type": row.entry_type, "amount": row.amount, "availableAfter": row.available_after,
+                           "reservedAfter": row.reserved_after, "at": row.created_at.isoformat(), "details": row.details}
+                          for row in db.scalars(select(CreditLedgerEntry).where(CreditLedgerEntry.account_id == account_id)
+                            .order_by(CreditLedgerEntry.created_at.desc(), CreditLedgerEntry.id.desc()).limit(100))]}

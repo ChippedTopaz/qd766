@@ -39,12 +39,17 @@ class NotificationRead(BaseModel):
     model_config=ConfigDict(extra="forbid")
     requestIds:list[uuid.UUID]=Field(max_length=200)
 
-def account_for(request:Request,db:Session):
+def account_for(request:Request,db:Session,*,require_collect:bool=False):
     if not request.app.state.settings.paid_requests_enabled:
         raise HTTPException(403,"Khai thác theo tài khoản chưa được mở.")
     login,account=current_session(db,request.cookies.get(SESSION_COOKIE))
     if account is None:raise HTTPException(401,"Vui lòng đăng nhập.")
     if account.root_department_id is None:raise HTTPException(403,"Tài khoản chưa được gán tỉnh.")
+    if request.app.state.settings.invite_required and not account.trial_admitted:
+        raise HTTPException(403,"Tài khoản chưa được mời dùng thử.")
+    if require_collect:
+        from .collection_permissions import can_collect
+        if not can_collect(db,account.id):raise HTTPException(403,"Tài khoản chưa được cấp quyền khai thác TTHC.")
     if request.method=="POST" and not hmac.compare_digest(request.headers.get("X-QD766-CSRF",""),login.csrf_token):
         raise HTTPException(403,"Xác nhận phiên không hợp lệ.")
     return account
@@ -91,7 +96,7 @@ def decode_quote(request,token):
 
 @router.post("/collection-quote")
 def quote(selection:Selection,request:Request,db:Db):
-    account=account_for(request,db)
+    account=account_for(request,db,require_collect=True)
     if account.plan not in {"paid","admin"} and not request.app.state.settings.trial_credits_enabled:
         raise HTTPException(403,"Tài khoản chưa được phép khai thác theo credit.")
     root,items=resolve_items(request,account,selection)
@@ -107,7 +112,7 @@ def quote(selection:Selection,request:Request,db:Db):
 
 @router.post("/formality-requests",status_code=202)
 def create_requests(payload:Confirmation,request:Request,db:Db):
-    account=account_for(request,db);claims=decode_quote(request,payload.quote)
+    account=account_for(request,db,require_collect=True);claims=decode_quote(request,payload.quote)
     if claims["account"]!=str(account.id) or claims["root"]!=str(account.root_department_id):raise HTTPException(403,"Xác nhận không thuộc tài khoản này.")
     if claims["unitCost"]!=request.app.state.settings.formality_credit_cost:raise HTTPException(409,"Chi phí đã thay đổi; hãy xác nhận lại.")
     selection=Selection.model_validate(claims["selection"])
@@ -115,6 +120,8 @@ def create_requests(payload:Confirmation,request:Request,db:Db):
     # Serialize account mutations, and never charge more than the displayed quote.
     from .paid_requests import _locked_account
     account=_locked_account(db,account.id)
+    from .collection_permissions import can_collect
+    if not account.active or not can_collect(db,account.id):raise HTTPException(403,"Quyền khai thác đã được thu hồi.")
     total=sum(0 if entitlement(db,account,selection.periodType,selection.year,selection.periodValue,uuid.UUID(item.id)) else claims["unitCost"] for item in items)
     if total>claims["maximumCost"]:raise HTTPException(409,"Quyền khai thác đã thay đổi; hãy xác nhận chi phí lại.")
     rows=[]

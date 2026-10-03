@@ -227,10 +227,13 @@ def me(request: Request):
             raise HTTPException(401, "Chưa đăng nhập.")
         if request.app.state.settings.invite_required and not account.trial_admitted:
             raise HTTPException(403, "Tài khoản chưa được mời dùng thử.")
+        from .collection_permissions import can_collect
+        collection_allowed = request.app.state.settings.paid_requests_enabled and can_collect(db, account.id)
         return {"id": str(account.id), "name": account.display_name, "email": account.email,
                 "plan": account.plan, "provinceId": str(account.root_department_id) if account.root_department_id else None,
                 "credits": account.credit_balance, "csrfToken": session.csrf_token,
-                "role": account.role, "accessTier": account.access_tier,
+                "role": account.role, "accessTier": account.access_tier, "canCollect": collection_allowed,
+                "reservedCredits": account.credit_reserved,
                 "unitId": str(account.unit_department_id) if account.unit_department_id else None}
 
 
