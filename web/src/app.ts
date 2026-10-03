@@ -311,7 +311,7 @@ const unitOptions = () => {
 
 function nav(): string {
   const html=baseNav();
-  return signedInUser?.role==="admin"?html.replace("</nav>",'<a class="btn" href="/admin.html">Quản trị dùng thử</a></nav>'):html;
+  return signedInUser?.role==="admin"?html.replace("</nav>",`<button type="button" data-action="open-admin" title="Quản trị dùng thử"><span class="nav-icon" aria-hidden="true">${icon("shield")}</span><span>Quản trị dùng thử</span></button></nav>`):html;
 }
 function baseNav(): string {
 return `<aside class="sidebar"><div class="brand"><span class="brand-mark">766</span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item=>!publicReadOnly||!["procedure","operations","suggestions"].includes(item.id)).map((item)=>`<button data-nav="${item.id}" class="${state.screen===item.id?"active":""}" aria-current="${state.screen===item.id?"page":"false"}"><span class="nav-icon" aria-hidden="true">${icon(({overview:"shield",time:"chart",peers:"monitor",procedure:"document",suggestions:"star",quality:"shield",operations:"clock",formulas:"document"})[item.id])}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
@@ -799,6 +799,9 @@ function bind(): void {
         column+=cell.colSpan;
       });
     });
+  });
+  document.querySelector<HTMLElement>("[data-action=open-admin]")?.addEventListener("click",()=>{
+    if(signedInUser?.role==="admin")window.location.assign("/admin.html");
   });
   document.querySelector<HTMLElement>("[data-action=logout]")?.addEventListener("click",async()=>{
     if(!signedInUser)return;

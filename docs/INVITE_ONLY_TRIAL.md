@@ -7,6 +7,19 @@ cấp quyền quản trị thật và chưa khởi động lại production**. K
 trước khi hoàn thành migration và bootstrap bên dưới. Không dùng `update_qd766.ps1`
 thay thế quy trình này: lệnh đó còn đẩy GitHub và thay bản office.
 
+### Kết quả cập nhật từ quản trị viên ngày 03/10/2026
+
+- Đã sao lưu `qd766-20261003-153409.dump`, công cụ migration báo
+  `TRIAL_SCHEMA_READY`, bootstrap báo `ADMIN_READY` cho account
+  `550f03c9-ad9b-4308-91a2-50ba8df0171e`.
+- Người dùng xác nhận đăng nhập được quản trị trên production và tạo được
+  link mời; đã gửi người thử. Đây là cập nhật thay thế trạng thái chuẩn bị ở
+  đoạn trên. Chưa có xác nhận người nhận đã dùng link thành công hoặc đã
+  nghiệm thu hai tầng quyền trên production.
+- Mục quản trị đã chỉnh thành mục sidebar cùng kiểu với các mục điều hướng,
+  chỉ hiện cho admin. Sidebar public vẫn ẩn khai thác TTHC/gợi ý/vận hành khi
+  các tính năng tương ứng chưa mở; không mở lại API vận hành vì thay thiết kế.
+
 ## Quy tắc
 
 - Public 8769 bắt buộc lời mời; người chưa được mời không có tài khoản mới hoặc
