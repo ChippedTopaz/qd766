@@ -6,6 +6,7 @@ import { buildLeadershipReport, buildLeadershipWorkbook, leadershipColors, leade
 import { parameterLabels } from "./parameter-labels.js";
 import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
+import { CollectionTracker } from "./collection-tracker.js";
 const root = document.querySelector("#app");
 if (!root)
     throw new Error("Thiếu app root");
@@ -35,6 +36,40 @@ const benchmarkLoading = new Set();
 let catalogPreview = { loading: false, error: null, level: "", field: "", query: "", fields: [], selected: 0, available: 0, missing: 0, items: [], selectedId: null, offset: 0, mode: "single" };
 let catalogPreviewRequest = 0;
 let catalogSearchTimer = 0;
+let submittingCollection = false;
+const selectionKey = () => `${data.province.id}:${snapshotKey(state.periodId, state.scope, data.formality.id)}`;
+const collectionTracker = new CollectionTracker((request, complete) => {
+    if (complete) {
+        announceCollectionComplete(request.label);
+        if (request.key === selectionKey()) {
+            if (request.kind === "job") {
+                delete data.snapshots[snapshotKey(state.periodId, state.scope, data.formality.id)];
+                void loadSelection();
+                return;
+            }
+            state.demo = "ready";
+            void loadCatalogPreview();
+            return;
+        }
+    }
+    if (request.key === selectionKey() && !["normal", "ready"].includes(state.demo)) {
+        pendingMessage = request.message;
+        state.demo = ["failed", "halted", "cancelled", "canceled"].includes(request.state) ? "error" : "queued";
+    }
+    render();
+}, async (url) => {
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!response.ok)
+        throw new Error(`HTTP ${response.status}`);
+    return response.json();
+}, (callback, delay) => window.setTimeout(callback, delay));
+function collectionNotices() {
+    const labels = { queued: "Đang chờ", running: "Đang xử lý", blocked: "Chờ kết nối nguồn", succeeded: "Hoàn thành", failed: "Thất bại", halted: "Đã dừng", cancelled: "Đã hủy", canceled: "Đã hủy", unavailable: "Chưa đọc được tiến độ" };
+    return [...collectionTracker.requests.values()].slice(-5).map(request => `<div class="period-notice ${request.state === "succeeded" ? "success" : ""}" role="status"><strong>${esc(labels[request.state] ?? request.state)}</strong><span>${esc(request.label)} · ${esc(request.message)}</span></div>`).join("");
+}
+function collectionLabel() {
+    return `${data.province.name} · ${period().label} · ${catalogPreview.mode === "filtered" ? `${int(catalogPreview.selected)} TTHC sau lọc` : `${data.formality.code} · ${data.formality.name}`}`;
+}
 const catalogProvinceCode = () => data.province.code ?? provinceOptions.find(item => item.id === data.province.id)?.provinceCode ?? "";
 const initialPeriodFor = (loaded) => [...loaded.periods].reverse().find(item => item.type === "year" && Boolean(loaded.snapshots[`${item.id}:all`])) ?? [...loaded.periods].reverse().find(item => Boolean(loaded.snapshots[`${item.id}:all`]));
 function normalizeLoadedData(loaded) {
@@ -42,7 +77,10 @@ function normalizeLoadedData(loaded) {
         for (const item of loaded.periods) {
             const legacyKey = `${item.id}:formality`;
             if (loaded.snapshots[legacyKey]) {
-                loaded.snapshots[snapshotKey(item.id, "formality", loaded.formality.id)] = loaded.snapshots[legacyKey];
+                const legacy = loaded.snapshots[legacyKey];
+                // Legacy dashboard keys may refer to a different TTHC than the default selector.
+                if (legacy.formalityId)
+                    loaded.snapshots[snapshotKey(item.id, "formality", legacy.formalityId)] = legacy;
                 delete loaded.snapshots[legacyKey];
             }
         }
@@ -130,10 +168,10 @@ function context() {
     const sameType = data.periods.filter(item => item.type === selectedPeriod.type && item.year === selectedPeriod.year);
     const years = [...new Set(data.periods.map(item => item.year))].sort((a, b) => b - a);
     const formalityScopeLabel = catalogPreview.mode === "single" && catalogPreview.selectedId ? `${data.formality.code} · ${data.formality.name}` : catalogPreview.mode === "filtered" && catalogPreview.selected ? `${int(catalogPreview.selected)} TTHC sau lọc` : "Theo thủ tục hành chính";
-    const canSubmit = state.scope === "formality" && state.demo === "ready" && (catalogPreview.mode === "filtered" ? catalogPreview.selected > 0 : Boolean(catalogPreview.selectedId));
+    const canSubmit = !publicReadOnly && !submittingCollection && !collectionTracker.hasActive(selectionKey()) && state.scope === "formality" && ["ready", "normal"].includes(state.demo) && (catalogPreview.mode === "filtered" ? catalogPreview.selected > 0 : Boolean(catalogPreview.selectedId));
     const selectedProvinceId = pendingProvinceId || data.province.id;
     const provinceItems = (provinceOptions.length ? provinceOptions : [{ id: data.province.id, name: data.province.name, departmentCode: null, provinceCode: data.province.code ?? null, snapshotCount: 0, latestSnapshotAt: null, available: true }]).slice().sort((left, right) => alphabet.compare(displayProvinceName(left.name), displayProvinceName(right.name))).map(item => `<option value="${esc(item.id)}" ${item.id === selectedProvinceId ? "selected" : ""}>${esc(displayProvinceName(item.name))}${item.available ? "" : " · chưa có dữ liệu"}</option>`).join("");
-    return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type === "month" ? "selected" : ""}>Tháng</option><option value="quarter" ${selectedPeriod.type === "quarter" ? "selected" : ""}>Quý</option><option value="year" ${selectedPeriod.type === "year" ? "selected" : ""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item => `<option value="${item.id}" ${item.id === state.periodId ? "selected" : ""}>${item.type === "month" ? `Tháng ${item.value}` : item.type === "quarter" ? `Quý ${item.value}` : "Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year => `<option value="${year}" ${year === selectedPeriod.year ? "selected" : ""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope === "all" ? "selected" : ""}>Tất cả thủ tục hành chính</option>${publicReadOnly ? "" : `<option value="formality" ${state.scope === "formality" ? "selected" : ""}>${esc(formalityScopeLabel)}</option>`}</select></label></div><div class="context-actions">${signedInUser ? `<span class="muted">${esc(signedInUser.name)}</span><button class="btn" data-action="logout">Đăng xuất</button>` : googleLoginEnabled ? `<a class="btn" href="/api/v1/auth/google/start">Đăng nhập Google</a>` : ""}${canSubmit ? `<button class="btn primary" data-action="submit-statistics">Thống kê</button>` : ""}<button class="btn" data-action="open-quality">${data.snapshots[snapshotKey(state.periodId, state.scope, data.formality.id)]?.delivery?.detailsAvailable === false ? "● Chỉ có điểm tổng hợp" : "● Chất lượng dữ liệu"}</button><button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></header>`;
+    return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type === "month" ? "selected" : ""}>Tháng</option><option value="quarter" ${selectedPeriod.type === "quarter" ? "selected" : ""}>Quý</option><option value="year" ${selectedPeriod.type === "year" ? "selected" : ""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item => `<option value="${item.id}" ${item.id === state.periodId ? "selected" : ""}>${item.type === "month" ? `Tháng ${item.value}` : item.type === "quarter" ? `Quý ${item.value}` : "Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year => `<option value="${year}" ${year === selectedPeriod.year ? "selected" : ""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope === "all" ? "selected" : ""}>Tất cả thủ tục hành chính</option>${publicReadOnly ? "" : `<option value="formality" ${state.scope === "formality" ? "selected" : ""}>${esc(formalityScopeLabel)}</option>`}</select></label></div><div class="context-actions">${signedInUser ? `<span class="muted">${esc(signedInUser.name)}</span><button class="btn" data-action="logout">Đăng xuất</button>` : googleLoginEnabled ? `<a class="btn" href="/api/v1/auth/google/start">Đăng nhập Google</a>` : ""}${canSubmit ? `<button class="btn primary" data-action="submit-statistics">Lấy dữ liệu</button>` : ""}<button class="btn" data-action="open-quality">${data.snapshots[snapshotKey(state.periodId, state.scope, data.formality.id)]?.delivery?.detailsAvailable === false ? "● Chỉ có điểm tổng hợp" : "● Chất lượng dữ liệu"}</button><button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></header>`;
 }
 function shell(content) {
     const loaded = data.snapshots[snapshotKey(state.periodId, state.scope, data.formality.id)];
@@ -144,7 +182,7 @@ function shell(content) {
     searchableSelects.forEach(control => control.destroy());
     searchableSelects = [];
     const timingNotice = loaded?.delivery?.detailsAvailable === false ? `<div class="period-notice" role="status"><strong>Chỉ có điểm tổng hợp tỉnh</strong><span>Kỳ này có đủ điểm 6 nhóm để so sánh tỉnh; chưa có chỉ tiêu thành phần hoặc điểm sở/ngành, xã/phường. Chọn kỳ không tạo yêu cầu thu thập.</span></div>` : state.demo === "normal" && loaded?.delivery?.result === "national-summary" && loaded.delivery.capturedAt !== loaded.delivery.detailsCapturedAt ? `<div class="period-notice" role="status"><strong>Hai thời điểm cập nhật</strong><span>Điểm tỉnh: ${esc(dateTime(loaded.delivery.capturedAt))}. Chi tiết chỉ tiêu và điểm cơ quan trực thuộc: ${esc(dateTime(loaded.delivery.detailsCapturedAt))}. Số liệu thành phần có thể chưa khớp điểm tỉnh mới nhất.</span></div>` : "";
-    root.innerHTML = `<div class="app-shell enterprise-mode ${["overview", "formulas"].includes(state.screen) ? "bento-mode" : ""}">${nav()}<div class="workspace">${context()}<main class="content">${state.screen === "formulas" ? "" : formalityNotice + completedNotice + (state.screen === "overview" && state.demo === "normal" ? "" : staleNotice + periodNotice + timingNotice)}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : ""}</div>`;
+    root.innerHTML = `<div class="app-shell enterprise-mode ${["overview", "formulas"].includes(state.screen) ? "bento-mode" : ""}">${nav()}<div class="workspace">${context()}<main class="content">${collectionNotices()}${state.screen === "formulas" ? "" : formalityNotice + completedNotice + (state.screen === "overview" && state.demo === "normal" ? "" : staleNotice + periodNotice + timingNotice)}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : ""}</div>`;
     bind();
 }
 function initSearchableSelects() {
@@ -473,9 +511,9 @@ function catalogReady() {
     const rows = catalogPreview.items.map(item => `<label class="catalog-row ${item.id === catalogPreview.selectedId && catalogPreview.mode === "single" ? "selected" : ""}">${catalogPreview.mode === "single" ? `<input type="radio" name="catalog-formality" value="${esc(item.id)}" ${item.id === catalogPreview.selectedId ? "checked" : ""}>` : `<span class="catalog-batch-mark">✓</span>`}<span><strong>${esc(item.code)}</strong><small>${esc(item.name)}</small><em>${esc(item.field || "Chưa phân loại")} · ${item.executionLevels.includes("ward") ? "Cấp xã" : item.executionLevels.includes("province") ? "Cấp tỉnh" : ""}</em></span><span class="badge ${item.available ? "good" : "neutral"}">${item.available ? "Đã có dữ liệu" : "Cần thống kê"}</span></label>`).join("");
     const first = catalogPreview.selected ? catalogPreview.offset + 1 : 0;
     const last = Math.min(catalogPreview.offset + catalogPreview.items.length, catalogPreview.selected);
-    const canSubmit = catalogPreview.mode === "filtered" ? catalogPreview.selected > 0 : Boolean(selected);
+    const canSubmit = !publicReadOnly && !submittingCollection && !collectionTracker.hasActive(selectionKey()) && (catalogPreview.mode === "filtered" ? catalogPreview.selected > 0 : Boolean(selected));
     const selectionText = catalogPreview.mode === "filtered" ? `<strong>${int(catalogPreview.selected)} TTHC sau lọc</strong><span>${int(catalogPreview.available)} đã có · ${int(catalogPreview.missing)} cần thu thập tuần tự</span>` : selected ? `<strong>${esc(selected.code)}</strong><span>${esc(selected.name)}</span>` : `<strong>Chưa chọn TTHC</strong><span>Chọn một dòng trong danh sách để tiếp tục.</span>`;
-    return `${title("Chọn thủ tục hành chính", "Lọc và xem trước phạm vi trước khi tạo yêu cầu thống kê.", "Thay đổi bộ lọc không tạo job và không gọi DVCQG.")}<section class="panel catalog-panel"><div class="catalog-mode"><button class="${catalogPreview.mode === "single" ? "active" : ""}" data-catalog-mode="single">Một TTHC</button><button class="${catalogPreview.mode === "filtered" ? "active" : ""}" data-catalog-mode="filtered">Toàn bộ kết quả sau lọc</button></div><div class="catalog-filters"><label class="field"><span>Cấp thực hiện</span><select id="catalog-level"><option value="">Cấp tỉnh và cấp xã</option><option value="province" ${catalogPreview.level === "province" ? "selected" : ""}>Cấp tỉnh</option><option value="ward" ${catalogPreview.level === "ward" ? "selected" : ""}>Cấp xã</option></select></label><label class="field"><span>Lĩnh vực</span><select id="catalog-field"><option value="">Tất cả lĩnh vực</option>${catalogPreview.fields.map(field => `<option value="${esc(field)}" ${field === catalogPreview.field ? "selected" : ""}>${esc(field)}</option>`).join("")}</select></label><label class="field catalog-search"><span>Tìm mã hoặc tên TTHC</span><input id="catalog-query" type="search" value="${esc(catalogPreview.query)}" placeholder="Ví dụ: 2.000815 hoặc từ khóa"></label></div><div class="catalog-summary"><article><span>Kết quả sau lọc</span><strong>${int(catalogPreview.selected)}</strong></article><article><span>Đã có trong PostgreSQL</span><strong>${int(catalogPreview.available)}</strong></article><article><span>Cần thống kê mới</span><strong>${int(catalogPreview.missing)}</strong></article></div>${catalogPreview.loading ? `<div class="empty-state"><h2>Đang đọc danh mục…</h2></div>` : catalogPreview.error ? `<div class="banner warn"><span>!</span><div><strong>Chưa đọc được danh mục</strong><p>${esc(catalogPreview.error)}</p></div></div>` : `<div class="catalog-list">${rows || `<div class="empty-state"><h2>Không tìm thấy TTHC phù hợp</h2><p>Hãy thay đổi cấp thực hiện, lĩnh vực hoặc từ khóa.</p></div>`}</div><div class="catalog-pagination"><span>Hiển thị ${int(first)}–${int(last)} trong ${int(catalogPreview.selected)} TTHC</span><div><button class="btn small" data-action="catalog-prev" ${catalogPreview.offset === 0 ? "disabled" : ""}>Trang trước</button><button class="btn small" data-action="catalog-next" ${last >= catalogPreview.selected ? "disabled" : ""}>Trang sau</button></div></div>`}<div class="catalog-submit"><div>${selectionText}</div><button class="btn primary" data-action="submit-statistics" ${canSubmit ? "" : "disabled"}>${catalogPreview.mode === "filtered" ? "Thống kê toàn bộ" : "Thống kê"}</button></div></section>`;
+    return `${title("Chọn thủ tục hành chính", "Lọc và xem trước phạm vi trước khi tạo yêu cầu thống kê.", "Thay đổi bộ lọc không tạo job và không gọi DVCQG.")}<section class="panel catalog-panel"><div class="catalog-mode"><button class="${catalogPreview.mode === "single" ? "active" : ""}" data-catalog-mode="single">Một TTHC</button><button class="${catalogPreview.mode === "filtered" ? "active" : ""}" data-catalog-mode="filtered">Toàn bộ kết quả sau lọc</button></div><div class="catalog-filters"><label class="field"><span>Cấp thực hiện</span><select id="catalog-level"><option value="">Cấp tỉnh và cấp xã</option><option value="province" ${catalogPreview.level === "province" ? "selected" : ""}>Cấp tỉnh</option><option value="ward" ${catalogPreview.level === "ward" ? "selected" : ""}>Cấp xã</option></select></label><label class="field"><span>Lĩnh vực</span><select id="catalog-field"><option value="">Tất cả lĩnh vực</option>${catalogPreview.fields.map(field => `<option value="${esc(field)}" ${field === catalogPreview.field ? "selected" : ""}>${esc(field)}</option>`).join("")}</select></label><label class="field catalog-search"><span>Tìm mã hoặc tên TTHC</span><input id="catalog-query" type="search" value="${esc(catalogPreview.query)}" placeholder="Ví dụ: 2.000815 hoặc từ khóa"></label></div><div class="catalog-summary"><article><span>Kết quả sau lọc</span><strong>${int(catalogPreview.selected)}</strong></article><article><span>Đã có trong PostgreSQL</span><strong>${int(catalogPreview.available)}</strong></article><article><span>Cần thống kê mới</span><strong>${int(catalogPreview.missing)}</strong></article></div>${catalogPreview.loading ? `<div class="empty-state"><h2>Đang đọc danh mục…</h2></div>` : catalogPreview.error ? `<div class="banner warn"><span>!</span><div><strong>Chưa đọc được danh mục</strong><p>${esc(catalogPreview.error)}</p></div></div>` : `<div class="catalog-list">${rows || `<div class="empty-state"><h2>Không tìm thấy TTHC phù hợp</h2><p>Hãy thay đổi cấp thực hiện, lĩnh vực hoặc từ khóa.</p></div>`}</div><div class="catalog-pagination"><span>Hiển thị ${int(first)}–${int(last)} trong ${int(catalogPreview.selected)} TTHC</span><div><button class="btn small" data-action="catalog-prev" ${catalogPreview.offset === 0 ? "disabled" : ""}>Trang trước</button><button class="btn small" data-action="catalog-next" ${last >= catalogPreview.selected ? "disabled" : ""}>Trang sau</button></div></div>`}<div class="catalog-submit"><div>${selectionText}</div><button class="btn primary" data-action="submit-statistics" ${canSubmit ? "" : "disabled"}>${catalogPreview.mode === "filtered" ? "Lấy dữ liệu sau lọc" : "Lấy dữ liệu"}</button></div></section>`;
 }
 function operationPeriod(job) {
     const selected = job.request.period;
@@ -808,104 +846,66 @@ async function loadProvinceBenchmarks() {
     if ((changed || state.modal === "brief") && state.periodId === requestedPeriodId && state.demo === "normal")
         render();
 }
-function announceCollectionComplete() {
-    completionMessage = "Dữ liệu theo thủ tục hành chính đã được thống kê xong và sẵn sàng để xem.";
-    if ("Notification" in window && Notification.permission === "granted") {
-        new Notification("QD766 · Thống kê hoàn tất", { body: completionMessage });
-    }
-}
-function pollCollectionJob(jobId, requestId, requestedKey) {
-    window.setTimeout(async () => {
-        try {
-            const response = await fetch(`/api/v1/collection-jobs/${encodeURIComponent(jobId)}`);
-            if (!response.ok)
-                throw new Error(`HTTP ${response.status}`);
-            const job = await response.json();
-            if (job.state === "succeeded") {
-                announceCollectionComplete();
-                const currentKey = snapshotKey(period().id, state.scope, data.formality.id);
-                if (currentKey === requestedKey)
-                    await loadSelection();
-                else
-                    render();
-                return;
-            }
-            if (job.state === "failed" || job.state === "halted") {
-                if (requestId !== selectionRequest)
-                    return;
-                pendingMessage = job.error?.message ?? "Yêu cầu cập nhật dữ liệu đã dừng và cần quản trị viên kiểm tra.";
-                state.demo = "error";
-                render();
-                return;
-            }
-            if (requestId === selectionRequest) {
-                pendingMessage = job.state === "running" ? "Hệ thống đang thu thập tuần tự và kiểm tra dữ liệu." : "Yêu cầu đang chờ đến lượt xử lý.";
-                state.demo = "queued";
-                render();
-            }
-            pollCollectionJob(jobId, requestId, requestedKey);
-        }
-        catch (error) {
-            if (requestId !== selectionRequest)
-                return;
-            console.error(error);
-            pendingMessage = "Chưa đọc được trạng thái hàng đợi. Vui lòng kiểm tra lại.";
-            state.demo = "error";
-            render();
-        }
-    }, 3000);
+function announceCollectionComplete(label) {
+    completionMessage = `${label}: dữ liệu đã được lưu và sẵn sàng để xem.`;
+    if ("Notification" in window && Notification.permission === "granted")
+        new Notification("QD766 · Lấy dữ liệu hoàn tất", { body: completionMessage });
 }
 async function requestCollection(requestId) {
-    const selected = period();
-    const requestBody = { periodType: selected.type, year: selected.year, periodValue: selected.value ?? null, scope: state.scope, provinceCode: catalogProvinceCode() };
-    if (state.scope === "formality" && data.formality.id) {
-        requestBody.formalityId = data.formality.id;
-        requestBody.formalityCode = data.formality.code;
-    }
+    if (publicReadOnly || state.scope !== "formality" || !data.formality.id)
+        throw new Error("Chỉ cho phép lấy dữ liệu theo TTHC.");
+    const selected = period(), requestedKey = selectionKey(), label = collectionLabel();
+    const requestBody = { periodType: selected.type, year: selected.year, periodValue: selected.value ?? null, scope: "formality", provinceCode: catalogProvinceCode(), formalityId: data.formality.id, formalityCode: data.formality.code };
     const response = await fetch("/api/v1/dashboard/requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) });
     if (!response.ok) {
         const problem = await response.json().catch(() => ({}));
         throw new Error(typeof problem.detail === "string" ? problem.detail : `HTTP ${response.status}`);
     }
     const result = await response.json();
-    if (requestId !== selectionRequest)
-        return;
     if (result.state === "ready") {
-        await loadSelection();
+        announceCollectionComplete(label);
+        if (requestedKey === selectionKey()) {
+            delete data.snapshots[snapshotKey(selected.id, "formality", data.formality.id)];
+            await loadSelection();
+        }
+        else
+            render();
         return;
     }
-    pendingMessage = result.message;
-    state.demo = result.circuitState === "open" ? "blocked" : "queued";
-    render();
-    if (result.circuitState !== "open" && result.jobId) {
-        pollCollectionJob(result.jobId, requestId, snapshotKey(selected.id, state.scope, data.formality.id));
+    if (requestId === selectionRequest && requestedKey === selectionKey()) {
+        pendingMessage = result.message;
+        state.demo = result.circuitState === "open" ? "blocked" : "queued";
     }
+    if (result.jobId)
+        collectionTracker.track({ id: result.jobId, kind: "job", key: requestedKey, label, state: result.circuitState === "open" ? "blocked" : "queued", message: result.message });
+    else
+        render();
 }
 async function submitStatistics() {
-    if (state.scope !== "formality")
+    if (publicReadOnly || submittingCollection || collectionTracker.hasActive(selectionKey()) || catalogPreview.loading || catalogPreview.error || state.scope !== "formality")
         return;
-    if (catalogPreview.mode === "filtered") {
-        if (!catalogPreview.selected)
-            return;
-        await requestFilteredBatch();
+    if (catalogPreview.mode === "filtered" ? !catalogPreview.selected : !catalogPreview.selectedId)
         return;
-    }
-    if (!catalogPreview.selectedId)
-        return;
+    submittingCollection = true;
     const requestId = ++selectionRequest;
     completionMessage = "";
-    pendingMessage = "Đang gửi yêu cầu thống kê...";
+    pendingMessage = "Đang gửi yêu cầu lấy dữ liệu...";
     state.demo = "loading";
     render();
     try {
-        await requestCollection(requestId);
+        if (catalogPreview.mode === "filtered")
+            await requestFilteredBatch(requestId);
+        else
+            await requestCollection(requestId);
     }
     catch (error) {
         if (requestId !== selectionRequest)
             return;
-        console.error(error);
         pendingMessage = error instanceof Error ? error.message : String(error);
         state.demo = "error";
+    }
+    finally {
+        submittingCollection = false;
         render();
     }
 }
@@ -916,11 +916,8 @@ function batchPeriod(batch) {
         return `Quý ${batch.periodValue}/${batch.year}`;
     return `Năm ${batch.year}`;
 }
-async function requestFilteredBatch() {
-    const requestId = ++selectionRequest;
-    const selected = period();
-    state.demo = "loading";
-    render();
+async function requestFilteredBatch(requestId) {
+    const selected = period(), requestedKey = selectionKey(), label = collectionLabel();
     const payload = { provinceCode: catalogProvinceCode(), periodType: selected.type, year: selected.year, periodValue: selected.value ?? null, includeInternal: true };
     if (catalogPreview.level)
         payload.level = catalogPreview.level;
@@ -928,79 +925,28 @@ async function requestFilteredBatch() {
         payload.field = catalogPreview.field;
     if (catalogPreview.query.trim())
         payload.query = catalogPreview.query.trim();
-    try {
-        const response = await fetch("/api/v1/formality-batches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-        if (!response.ok) {
-            const problem = await response.json().catch(() => ({}));
-            throw new Error(typeof problem.detail === "string" ? problem.detail : `HTTP ${response.status}`);
-        }
-        const batch = await response.json();
-        if (requestId !== selectionRequest)
-            return;
-        if (batch.state === "succeeded") {
-            announceCollectionComplete();
+    const response = await fetch("/api/v1/formality-batches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    if (!response.ok) {
+        const problem = await response.json().catch(() => ({}));
+        throw new Error(typeof problem.detail === "string" ? problem.detail : `HTTP ${response.status}`);
+    }
+    const batch = await response.json();
+    if (batch.state === "succeeded") {
+        announceCollectionComplete(label);
+        if (requestedKey === selectionKey()) {
             state.demo = "ready";
             await loadCatalogPreview();
-            return;
         }
-        pendingMessage = `Batch gồm ${int(batch.totalItems)} TTHC đã được lưu. ${int(batch.availableItems)} TTHC đã có dữ liệu; hệ thống đang xử lý tuần tự phần còn thiếu.`;
+        else
+            render();
+        return;
+    }
+    const message = `Yêu cầu gồm ${int(batch.totalItems)} TTHC đã được lưu; sẽ thông báo khi xử lý xong.`;
+    if (requestId === selectionRequest && requestedKey === selectionKey()) {
+        pendingMessage = message;
         state.demo = "queued";
-        render();
-        pollFormalityBatch(batch.id, requestId);
     }
-    catch (error) {
-        if (requestId !== selectionRequest)
-            return;
-        console.error(error);
-        pendingMessage = error instanceof Error ? error.message : String(error);
-        state.demo = "error";
-        render();
-    }
-}
-function pollFormalityBatch(batchId, requestId) {
-    window.setTimeout(async () => {
-        try {
-            const response = await fetch(`/api/v1/formality-batches/${encodeURIComponent(batchId)}`);
-            if (!response.ok)
-                throw new Error(`HTTP ${response.status}`);
-            const batch = await response.json();
-            const finished = batch.availableItems + batch.completedItems;
-            if (batch.state === "succeeded") {
-                completionMessage = `Đã hoàn tất thống kê ${int(batch.totalItems)} TTHC; ${int(batch.availableItems)} TTHC được dùng lại từ PostgreSQL.`;
-                if ("Notification" in window && Notification.permission === "granted")
-                    new Notification("QD766 · Batch thống kê hoàn tất", { body: completionMessage });
-                if (requestId === selectionRequest) {
-                    state.demo = "ready";
-                    await loadCatalogPreview();
-                }
-                else
-                    render();
-                return;
-            }
-            if (batch.state === "failed" || batch.state === "halted") {
-                if (requestId === selectionRequest) {
-                    pendingMessage = `Batch đã dừng tại ${int(finished)}/${int(batch.totalItems)} TTHC. Tiến độ đã được lưu để tiếp tục sau.`;
-                    state.demo = "blocked";
-                    render();
-                }
-                return;
-            }
-            if (requestId === selectionRequest) {
-                pendingMessage = `Đã hoàn thành ${int(finished)}/${int(batch.totalItems)} TTHC. Hệ thống chỉ xử lý một TTHC tại một thời điểm.`;
-                state.demo = "queued";
-                render();
-            }
-            pollFormalityBatch(batchId, requestId);
-        }
-        catch (error) {
-            if (requestId === selectionRequest) {
-                console.error(error);
-                pendingMessage = "Chưa đọc được tiến độ batch. Có thể kiểm tra lại trong màn hình Vận hành.";
-                state.demo = "error";
-                render();
-            }
-        }
-    }, 3000);
+    collectionTracker.track({ id: batch.id, kind: "batch", key: requestedKey, label, state: batch.state, message });
 }
 async function loadCatalogPreview() {
     const requestId = ++catalogPreviewRequest;
