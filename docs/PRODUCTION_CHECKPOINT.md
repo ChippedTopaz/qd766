@@ -1,5 +1,30 @@
 # Checkpoint chuẩn bị chạy thử production — 02/10/2026
 
+## Cập nhật kiểm chứng ngày 03/10/2026
+
+- Audit SELECT-only PostgreSQL: đợt năm 2026 `8b023c82-022e-45f0-94aa-323e10cc3334`
+  đã succeeded, 34/34 tỉnh succeeded. Kho chi tiết năm có 34 tỉnh, mỗi tỉnh 6
+  dataset. Không suy ra mọi cơ quan đều có đủ điểm từ số lượng dataset.
+- Tổng hợp toàn quốc đủ 15 kỳ: tháng 1–10, quý 1–4, năm 2026; mỗi kỳ 34 tỉnh,
+  6 nhóm và completeness complete. Kỳ hiện tại cập nhật gần nhất khoảng
+  12:16 ngày 03/10/2026 giờ Việt Nam.
+- Kiểm tra hợp đồng HTTP trên PostgreSQL đạt 15 kỳ Phú Thọ: mỗi kỳ 6 nhóm,
+  34 tỉnh trong bảng so sánh; hiện tất cả 15 kỳ đều có bản chi tiết Phú Thọ.
+- Các bảng account/login/paid request/ledger/notification đã có trong DB thật.
+  Luồng thư viện cá nhân, xác nhận giá, entitlement và credit đã được nối API;
+  99 kiểm thử backend đạt. Chưa nghiệm thu Google thật hoặc giao dịch đồng thời
+  PostgreSQL. Các đoạn “chưa có entitlement API/chưa migration” dưới đây là
+  checkpoint lịch sử, được thay thế bởi kết quả này.
+- Cấu hình instance office hiện chưa bật public/login/paid, chưa có bộ cấu hình
+  Google hay thư viện xác minh Google. Không tự public instance office.
+- Công cụ `tools/audit_trial_readiness.py --year 2026` kiểm tra chỉ đọc, không
+  hiển thị secret hoặc địa chỉ kết nối; không tạo job/tài khoản/giao dịch.
+
+**Bước cần quản trị chốt:** HTTPS backend riêng cho người thử, OAuth client Google,
+giá credit được duyệt. Sau đó mới cấu hình instance có hàng rào public, gán tỉnh,
+cấp credit thử có sổ giao dịch và nghiệm thu bằng hai tài khoản thật.
+Không bật thanh toán ở giai đoạn này.
+
 ## Đã chốt
 
 - Mẫu báo cáo lãnh đạo xếp hạng cùng cấp được người dùng tạm chấp nhận.
