@@ -13,7 +13,9 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {"/api/v1/access-policy", "/api/v1/dashboard",
            "/api/v1/dashboard/selection", "/api/v1/dashboard/provinces",
-           "/api/v1/dashboard/province-rankings"}
+           "/api/v1/dashboard/province-rankings",
+           "/api/v1/system-status", "/api/v1/collection-jobs",
+           "/api/v1/formality-batches", "/api/v1/province-batches"}
 
 
 class Preview(http.server.SimpleHTTPRequestHandler):
@@ -24,7 +26,7 @@ class Preview(http.server.SimpleHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path.startswith("/api/"):
             if path not in ALLOWED:
-                self.send_error(403, "Preview only allows dashboard reads")
+                self.send_error(403, "Preview only allows approved read endpoints")
                 return
             try:
                 # Never inherit an outbound proxy for this loopback-only read.
