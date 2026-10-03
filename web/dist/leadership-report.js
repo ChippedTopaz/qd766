@@ -74,7 +74,7 @@ export function buildLeadershipWorkbook(WorkbookClass, report) {
         sheet.getRow(row).height = 15;
         sheet.getCell(row, 1).font = { name: "Calibri", size: 11, bold: row === 1 };
     }
-    const headers = ["STT", report.nameHeader, ...report.groupLabels.flatMap(label => [label, `Hạng\n${label}`]), "Tổng điểm"];
+    const headers = ["STT", report.nameHeader, ...report.groupLabels.flatMap(label => [label, "Hạng"]), "Tổng điểm"];
     const header = sheet.getRow(6);
     header.values = headers;
     header.height = 54;

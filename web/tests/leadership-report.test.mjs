@@ -52,6 +52,8 @@ for(const WorkbookClass of [ExcelJS.Workbook,globalThis.ExcelJS.Workbook]){
   const reopened=new ExcelJS.Workbook();await reopened.xlsx.load(buffer);
   const sheet=reopened.worksheets[0];
   assert.equal(sheet.getRow(6).cellCount,15);assert.equal(sheet.getCell("O7").value,100);
+  assert.deepEqual(sheet.getRow(6).values.slice(1),["STT",report.nameHeader,...report.groupLabels.flatMap(label=>[label,"Hạng"]),"Tổng điểm"]);
+  for(const column of [4,6,8,10,12,14])assert.equal(sheet.getCell(6,column).value,"Hạng");
   assert.equal(sheet.getCell("C7").numFmt,"#,##0.00");assert.equal(sheet.getCell("D7").value,1);
   assert.equal(sheet.getCell("D7").font.color.argb,"FFB91C1C");
   assert.equal(sheet.getCell("B7").fill.fgColor.argb,"FF67CBE7");

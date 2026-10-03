@@ -78,7 +78,7 @@ export function buildLeadershipWorkbook(WorkbookClass:new()=>Workbook,report:Lea
   sheet.getCell("A3").value=`Cập nhật: ${leadershipUpdatedLabel(report)}`;
   sheet.getCell("A4").value=`Cơ quan đang chọn: ${report.selectedName}`;
   for(let row=1;row<=4;row++){sheet.getRow(row).height=15;sheet.getCell(row,1).font={name:"Calibri",size:11,bold:row===1};}
-  const headers=["STT",report.nameHeader,...report.groupLabels.flatMap(label=>[label,`Hạng\n${label}`]),"Tổng điểm"];
+  const headers=["STT",report.nameHeader,...report.groupLabels.flatMap(label=>[label,"Hạng"]),"Tổng điểm"];
   const header=sheet.getRow(6);header.values=headers;header.height=54;
   sheet.getColumn(1).width=5;sheet.getColumn(2).width=Math.max(34,...report.rows.map(row=>row.name.length+2));
   headers.forEach((_,index)=>{if(index>1)sheet.getColumn(index+1).width=index===headers.length-1?10:index%2===0?13:10;});
