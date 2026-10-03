@@ -58,6 +58,14 @@ for(const WorkbookClass of [ExcelJS.Workbook,globalThis.ExcelJS.Workbook]){
   assert.equal(sheet.getCell("D7").font.color.argb,"FFB91C1C");
   assert.equal(sheet.getCell("B7").fill.fgColor.argb,"FF67CBE7");
   assert.equal(sheet.getRow(7).height,15);assert.deepEqual(sheet.model.merges,[]);
+  assert.equal(sheet.getRow(6).height,sheet.getRow(7).height);
+  sheet.getRow(6).eachCell(cell=>assert.notEqual(cell.alignment.wrapText,true));
+  for(let column=1;column<=15;column++){
+    const headerText=String(sheet.getCell(6,column).value);
+    assert.ok(sheet.getColumn(column).width>=headerText.length+4);
+  }
+  assert.ok(sheet.getColumn(4).width<sheet.getColumn(3).width);
+  assert.ok(sheet.getColumn(1).width<15); // Metadata does not stretch STT.
   assert.equal(sheet.views[0].ySplit,6);assert.equal(sheet.pageSetup.orientation,"landscape");
   for(const label of data.groupOrder.map(id=>data.groupLabels[id]))assert.ok(sheet.getRow(6).values.includes(label));
 }

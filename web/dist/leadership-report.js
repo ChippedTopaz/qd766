@@ -77,16 +77,12 @@ export function buildLeadershipWorkbook(WorkbookClass, report) {
     const headers = ["STT", report.nameHeader, ...report.groupLabels.flatMap(label => [label, "Hạng"]), "Tổng điểm"];
     const header = sheet.getRow(6);
     header.values = headers;
-    header.height = 54;
-    sheet.getColumn(1).width = 5;
-    sheet.getColumn(2).width = Math.max(34, ...report.rows.map(row => row.name.length + 2));
-    headers.forEach((_, index) => { if (index > 1)
-        sheet.getColumn(index + 1).width = index === headers.length - 1 ? 10 : index % 2 === 0 ? 13 : 10; });
+    header.height = 15;
     header.eachCell((cell, col) => {
         const color = col >= 3 && col < headers.length ? leadershipColors[Math.floor((col - 3) / 2)] ?? "F1F5F9" : "F1F5F9";
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
         cell.font = { name: "Calibri", size: 10, bold: true };
-        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: false };
     });
     report.rows.forEach((item, index) => {
         const row = sheet.addRow([index + 1, item.name, ...item.scores.flatMap((score, i) => [score, item.ranks[i] ?? null]), item.total]);
@@ -104,6 +100,24 @@ export function buildLeadershipWorkbook(WorkbookClass, report) {
             cell.border = { top: { style: "hair", color: { argb: "FFD1D5DB" } }, bottom: { style: "hair", color: { argb: "FFD1D5DB" } }, left: { style: "hair", color: { argb: "FFD1D5DB" } }, right: { style: "hair", color: { argb: "FFD1D5DB" } } };
         });
     const end = 6 + report.rows.length;
+    // Fit table contents only: long report metadata/notes must not widen STT.
+    const context = typeof document !== "undefined" ? document.createElement("canvas").getContext("2d") : null;
+    headers.forEach((_, index) => {
+        const column = index + 1;
+        let width = 0;
+        for (let row = 6; row <= end; row++) {
+            const cell = sheet.getCell(row, column);
+            const text = typeof cell.value === "number" ? cell.value.toLocaleString("vi-VN", {
+                minimumFractionDigits: cell.numFmt === "#,##0.00" ? 2 : 0,
+                maximumFractionDigits: cell.numFmt === "#,##0.00" ? 2 : 0,
+            }) : String(cell.value ?? "").normalize("NFC");
+            if (context)
+                context.font = `${cell.font?.bold ? "bold " : ""}10pt Calibri`;
+            width = Math.max(width, context ? context.measureText(text).width / 7 : text.length);
+        }
+        // Include whitespace and room for the header's filter arrow.
+        sheet.getColumn(column).width = Math.min(255, Math.ceil(width + 4));
+    });
     report.notes.forEach((note, index) => { const cell = sheet.getCell(end + 2 + index, 1); cell.value = note; cell.font = { name: "Calibri", size: 10, color: { argb: "FF64748B" } }; });
     sheet.autoFilter = { from: { row: 6, column: 1 }, to: { row: Math.max(6, end), column: headers.length } };
     sheet.views = [{ state: "frozen", xSplit: 2, ySplit: 6 }];
