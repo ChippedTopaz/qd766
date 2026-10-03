@@ -325,6 +325,10 @@ return `<header class="contextbar"><div class="context-fields"><label class="fie
 }
 
 function shell(content: string): void {
+  // Async search refreshes replace the shell; preserve only the active search input.
+  // Never reclaim focus if the user has moved to another control in the meantime.
+  const activeQuery=document.activeElement?.id==="catalog-query"?document.activeElement as HTMLInputElement:null;
+  const queryCaret=activeQuery?{start:activeQuery.selectionStart,end:activeQuery.selectionEnd,direction:activeQuery.selectionDirection}:null;
   const loaded=data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)];
   const formalityNotice=state.scope==="formality"&&catalogPreview.mode==="single"&&catalogPreview.selectedId?`<div class="formality-notice" role="status"><strong>Thủ tục đang chọn</strong><span><b>${esc(data.formality.code)}</b>${esc(data.formality.name)}</span></div>`:state.scope==="formality"&&catalogPreview.mode==="filtered"&&catalogPreview.selected>0?`<div class="formality-notice batch" role="status"><strong>Phạm vi đang chọn</strong><span><b>${int(catalogPreview.selected)} TTHC</b>${catalogPreview.level==="ward"?"Cấp xã":catalogPreview.level==="province"?"Cấp tỉnh":"Cấp tỉnh và cấp xã"}${catalogPreview.field?` · ${esc(catalogPreview.field)}`:""}${catalogPreview.query?` · Từ khóa “${esc(catalogPreview.query)}”`:""}</span></div>`:"";
   const periodNotice=state.demo==="normal"&&state.screen!=="operations"&&loaded&&period().provisional?`<div class="period-notice" role="status"><strong>Số liệu tạm thời</strong><span>Kỳ báo cáo này chưa kết thúc. Kết quả có thể thay đổi khi hệ thống nguồn cập nhật dữ liệu.</span></div>`:"";
@@ -335,6 +339,11 @@ function shell(content: string): void {
   const timingNotice=loaded?.delivery?.detailsAvailable===false?`<div class="period-notice" role="status"><strong>Chỉ có điểm tổng hợp tỉnh</strong><span>Kỳ này có đủ điểm 6 nhóm để so sánh tỉnh; chưa có chỉ tiêu thành phần hoặc điểm sở/ngành, xã/phường. Chọn kỳ không tạo yêu cầu thu thập.</span></div>`:state.demo==="normal"&&loaded?.delivery?.result==="national-summary"&&loaded.delivery.capturedAt!==loaded.delivery.detailsCapturedAt?`<div class="period-notice" role="status"><strong>Hai thời điểm cập nhật</strong><span>Điểm tỉnh: ${esc(dateTime(loaded.delivery.capturedAt))}. Chi tiết chỉ tiêu và điểm cơ quan trực thuộc: ${esc(dateTime(loaded.delivery.detailsCapturedAt))}. Số liệu thành phần có thể chưa khớp điểm tỉnh mới nhất.</span></div>`:"";
 root.innerHTML = `<div class="app-shell enterprise-mode ${["overview","formulas"].includes(state.screen)?"bento-mode":""}">${nav()}<div class="workspace">${context()}<main class="content">${state.screen==="formulas"?"":(state.screen==="overview"&&state.demo==="normal"?"":staleNotice+periodNotice+timingNotice)}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : state.modal==="collection"?collectionConfirmation():""}${completionMessage?`<div class="collection-toast" role="status"><strong>Hoàn tất</strong><span>${esc(completionMessage)}</span><button class="btn small" data-action="dismiss-completion">Đóng</button></div>`:""}</div>`;
   bind();
+  if(queryCaret){
+    const query=document.querySelector<HTMLInputElement>("#catalog-query");
+    query?.focus({preventScroll:true});
+    if(query&&queryCaret.start!==null&&queryCaret.end!==null)query.setSelectionRange(queryCaret.start,queryCaret.end,queryCaret.direction??"none");
+  }
 }
 
 function initSearchableSelects():void{

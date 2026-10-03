@@ -6,11 +6,12 @@ data.periods=[{id:'month-2026-10',label:'Tháng 10/2026',type:'month',year:2026,
 const item={id:data.formality.id,code:data.formality.code,name:data.formality.name,available:false,executionLevels:[],field:'Lĩnh vực thử',publishingAgency:''};
 data.snapshots={'month-2026-10:all':original,'month-2026-10:formality':{...original,scope:'formality',formalityId:'different-formality'}};
 const root={innerHTML:''},controls=new Map(),calls=[],urls=[];
-function control(id){if(!controls.has(id))controls.set(id,{value:item.id,dataset:{},handlers:{},addEventListener(kind,cb){this.handlers[kind]=cb;}});return controls.get(id);}
+function control(id){if(!controls.has(id))controls.set(id,{id:id.replace(/^#/,''),value:item.id,dataset:{},handlers:{},selectionStart:2,selectionEnd:2,selectionDirection:'none',focus(){document.activeElement=this;this.focusCount=(this.focusCount??0)+1;},setSelectionRange(start,end,direction){this.selectionStart=start;this.selectionEnd=end;this.selectionDirection=direction;},addEventListener(kind,cb){this.handlers[kind]=cb;}});return controls.get(id);}
 globalThis.document={title:'',querySelector:s=>s==='#app'?root:['#province-select','#unit-select','#catalog-field'].includes(s)?null:s.startsWith('#')||s.startsWith('[data-action=')?control(s):null,
   querySelectorAll:s=>s==='input[name=catalog-formality]'?[control('radio')]:s==='[data-action=submit-statistics]'?[control('submit')]:s==='[data-action=new-collection]'?[control('new')]:[]};
 globalThis.TomSelect=class{constructor(){this.control_input={}}on(){}destroy(){}};
-globalThis.window={setTimeout:()=>1,clearTimeout:()=>{}};
+const timers=new Map();let timerId=0;
+globalThis.window={setTimeout:(cb,delay)=>{timers.set(++timerId,{cb,delay});return timerId;},clearTimeout:id=>timers.delete(id)};
 globalThis.location={pathname:'/',search:process.argv.includes('--restore')?`?period=month-2026-10&scope=formality&formality=${item.id}`:''};
 globalThis.history={replaceState:(_,__,url)=>urls.push(url)};globalThis.scrollTo=()=>{};
 let owned=process.argv.includes('--restore'),rows=[],finishConfirmation;
@@ -40,6 +41,12 @@ if(process.argv.includes('--restore')){
   assert.match(root.innerHTML,/Thủ tục đã khai thác/);assert.doesNotMatch(root.innerHTML,/catalog-list/);
   assert.match(root.innerHTML,/<div class="context-bottom"><label class="field saved-formality">/);
   controls.get('new').handlers.click();await settle();assert.match(root.innerHTML,/Khai thác dữ liệu TTHC/);
+  const query=control('#catalog-query');query.value='đất';document.activeElement=query;
+  query.handlers.input({target:query});
+  const searchTimer=[...timers.values()].find(timer=>timer.delay===350);assert(searchTimer);searchTimer.cb();await settle();
+  assert.equal(document.activeElement,query);assert(query.focusCount>=2);assert.equal(query.selectionStart,2);assert.equal(query.selectionEnd,2);
+  assert.match(root.innerHTML,/value="đất"/);
+  document.activeElement=null;
   controls.get('radio').handlers.change();await settle();assert.equal(calls.filter(c=>c.method==='POST').length,0);
   controls.get('submit').handlers.click();await settle();assert.match(root.innerHTML,/3 credit/);
   assert.equal(calls.filter(c=>c.url==='/api/v1/me/formality-requests'&&c.method==='POST').length,0);
