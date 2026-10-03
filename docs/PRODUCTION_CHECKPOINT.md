@@ -71,3 +71,13 @@ Chưa bật đăng nhập, chưa có OAuth client/domain, chưa áp dụng migra
 
 Không triển khai công thức thanh toán chưa rõ hoặc dựng chi tiết DVCTT của đơn vị
 con khi nguồn chỉ trả điểm. Mọi mở rộng dữ liệu lịch sử phải qua lịch quản trị an toàn.
+# Chuẩn bị backend người dùng riêng — 03/10/2026
+
+Launcher `tools/start_public_backend.py` bind loopback 8769; đọc riêng `.env.public`,
+bắt buộc Google login/public boundary và giữ paid/trial credits tắt. Chỉ dùng chung
+kết nối PostgreSQL từ `.env`; không kế thừa quyền quản trị hoặc SQL echo.
+104 kiểm thử backend PASS, gồm 5 kiểm thử launcher/config/boundary mới.
+Check khởi chạy hiện BLOCKED vì chưa có cấu hình Google riêng; chưa chạy 8769,
+chưa triển khai D:\QD766\app, thêm task, sửa DNS, route tunnel hoặc Netlify.
+Google login thật, cookie HTTPS và kết nối DB của instance này chưa được nghiệm thu.
+Hướng dẫn: `docs/PUBLIC_BACKEND_ROLLOUT.md`. Không mở cổng 8767/8768 ra Internet.
