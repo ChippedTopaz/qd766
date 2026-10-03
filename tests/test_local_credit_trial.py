@@ -75,6 +75,39 @@ class LocalCreditTrialTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
             self.assertEqual(db.get(UserAccount,identifier("account:a")).credit_balance,30)
 
+    def test_fresh_confirmation_retries_terminal_job_and_shares_successor(self):
+        for outcome in ("failure", "cancel"):
+            with self.subTest(outcome=outcome):
+                selection=dict(self.selection, formalityIds=[mock_catalog().formalities[1 if outcome=="failure" else 2].id])
+                token=str(uuid.uuid4())
+                quote=self.quote(selection=selection).json()["quote"]
+                first=self.submit(quote=quote,token=token).json()["items"][0]
+                self.assertEqual(self.outcome(outcome).status_code,200)
+                # Replaying an old confirmation must never create a new attempt.
+                replay=self.submit(quote=quote,token=token).json()["items"][0]
+                self.assertEqual(replay["id"],first["id"])
+                self.assertEqual(replay["state"],"refunded")
+                # Merely reading a new quote also does not retry a job.
+                new_quote=self.quote(selection=selection).json()["quote"]
+                jobs_before=self.clients["admin"].get("/api/v1/local-trial/jobs").json()
+                self.assertFalse(any(j["state"]=="queued" for j in jobs_before))
+                retried=self.submit(quote=new_quote).json()["items"][0]
+                self.assertEqual(retried["state"],"waiting")
+                self.assertNotEqual(retried["id"],first["id"])
+                self.assertEqual(self.submit("b",quote=self.quote("b",selection).json()["quote"]).status_code,202)
+                jobs=self.clients["admin"].get("/api/v1/local-trial/jobs").json()
+                self.assertEqual(sum(j["state"]=="queued" for j in jobs),1)
+                self.assertEqual(len(jobs),len(jobs_before)+1)
+                self.assertEqual(self.outcome("success").status_code,200)
+                for key in ("a","b"):
+                    rows=self.clients[key].get("/api/v1/me/formality-requests").json()["items"]
+                    self.assertTrue(any(r["formalityId"]==selection["formalityIds"][0] and r["state"]=="ready" for r in rows))
+                history=self.clients["a"].get("/api/v1/me/formality-requests").json()
+                self.assertEqual(next(r for r in history["items"] if r["id"]==first["id"])["state"],"refunded")
+        for key in ("a","b"):
+            me=self.clients[key].get("/api/v1/auth/me").json()
+            self.assertEqual((me["credits"],me["reservedCredits"]),(24,0))
+
     def test_queued_dedup_success_notification_and_personal_library(self):
         self.assertEqual(self.submit().status_code,202)
         self.assertEqual(self.submit("b").status_code,202)

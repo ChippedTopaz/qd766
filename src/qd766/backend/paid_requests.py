@@ -172,6 +172,14 @@ def create_paid_data_request(
         return paid_request, True
 
     job, _ = enqueue_job(session, request_value, priority=50)
+    # A fresh confirmed request may retry a terminal failure. Preserve the old
+    # job and refunded requests; use a deterministic successor key so concurrent
+    # accounts join the same new attempt via enqueue_job's unique-key savepoint.
+    while job.state in {"failed", "halted"}:
+        job, _ = enqueue_job(
+            session, request_value, priority=50,
+            idempotency_key=f"{dataset_key}:retry:{job.id}",
+        )
     paid_request.collection_job_id = job.id
     if job.state in {"queued", "running"}:
         paid_request.state = "waiting"

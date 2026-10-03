@@ -41,6 +41,9 @@ Tài khoản ban đầu có 30 credit; chạy lại giữ nguyên số dư/lịc
 - Job dùng chung nhưng quyền xem và giao dịch thuộc từng tài khoản.
 - Cấp credit có khóa chống thực hiện lặp và nhật ký quản trị.
 - Thu hồi quyền tạo yêu cầu không xóa thư viện dữ liệu đã được cấp quyền xem.
+- Sau thất bại/hủy, báo giá mới và xác nhận mới cho phép tạo lượt xử lý kế tiếp.
+  Các tài khoản cùng yêu cầu dùng chung lượt này; job và giao dịch hoàn cũ được giữ
+  nguyên. Gửi lại chính xác xác nhận cũ không tự tạo lượt xử lý mới.
 - Migration `20261003_0011` mới được chuẩn bị, **chưa áp dụng production**.
 
 Đây chưa phải nghiệm thu đăng nhập Google/worker thật/đồng thời PostgreSQL.
