@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { cleanLoginSearch } from '../dist/login-url.js';
+
+const google='iss=https%3A%2F%2Faccounts.google.com&state=fake-test-state&code=fake-test-code&scope=openid+email+profile&authuser=0&prompt=none';
+assert.equal(cleanLoginSearch('?'+google), '');
+const filters='province=province-1&period=month-2026-9&unit=unit-1&formality=procedure-1&scope=formality';
+const cleaned=new URLSearchParams(cleanLoginSearch('?'+filters+'&'+google));
+for(const [key,value] of new URLSearchParams(filters))assert.equal(cleaned.get(key),value);
+assert.deepEqual(cleaned.getAll('scope'),['formality']);
+for(const key of ['state','code','iss','authuser','prompt'])assert.equal(cleaned.has(key),false);
+assert.equal(cleanLoginSearch('?'+filters),null);
+assert.equal(cleanLoginSearch(''),null);
+assert.equal(cleanLoginSearch('?login=failed'),null);
+assert.equal(cleanLoginSearch('?state=fake&error=access_denied&error_description=example&login=failed'),'?login=failed');
+assert.equal(cleanLoginSearch('?code=business-code'),null);
+const app=await readFile(new URL('../src/app.ts',import.meta.url),'utf8');
+const start=app.slice(app.indexOf('async function start()'));
+assert(start.indexOf('cleanLoginSearch(location.search)') < start.indexOf('fetch("/api/v1/access-policy")'));
+assert.match(start,/history\.replaceState\(history\.state\?\?null/);
+assert.match(start,/location\.hash\?\?""/);
+console.log('LOGIN_URL_TEST_OK: OAuth parameters removed, filters/error indicator preserved; no new request or session change');

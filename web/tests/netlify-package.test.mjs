@@ -14,6 +14,7 @@ async function list(url,prefix=""){
 const files=await list(base);
 assert(files.includes("index.html"));
 assert(files.includes("dist/app.js"));
+assert(files.includes("dist/login-url.js"));
 assert(files.includes("bento.css"));
 assert(files.includes("collection.css"));
 assert(files.includes("dist/bento.js"));

@@ -7,6 +7,7 @@ import { parameterLabels } from "./parameter-labels.js";
 import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
 import { CollectionTracker, type TrackedCollection } from "./collection-tracker.js";
+import { cleanLoginSearch } from "./login-url.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 import type TomSelectControl from "tom-select";
 
@@ -1068,6 +1069,10 @@ async function switchProvince(rootDepartmentId:string):Promise<void>{
 }
 
 async function start(): Promise<void> {
+  // Clean before API calls, including pending-account and error/empty screens.
+  // Session authentication stays in its HttpOnly cookie, never in URL parameters.
+  const cleanSearch=cleanLoginSearch(location.search);
+  if(cleanSearch!==null)history.replaceState(history.state??null,"",`${location.pathname}${cleanSearch}${location.hash??""}`);
   const productionSite=document.querySelector('meta[name="qd766-deployment"]')?.getAttribute("content")==="public";
   try {
     const policyResponse=await fetch("/api/v1/access-policy");

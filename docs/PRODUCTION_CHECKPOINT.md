@@ -91,3 +91,11 @@ và cho phép callback chính bochiso766.com ngoài callback api đã nghiệm t
 Chưa đăng ký task mới, thay config secret/callback, DNS, Netlify deployment hoặc
 nghiệm thu cookie/session qua Netlify. Không bật credit/paid/payment.
 Thực hiện từng bước theo docs/PRODUCTION_TRIAL.md, giữ callback api để rollback.
+# Dọn URL sau đăng nhập — 03/10/2026
+
+Người quản trị đã xác nhận SSL và đăng nhập trên bochiso766.com sau khi tiến trình
+8769 được khởi động lại để nạp callback mới. Frontend nay bỏ tham số phản hồi OAuth
+khỏi URL ngay đầu khởi chạy, kể cả màn hình chờ duyệt/lỗi; không gửi lại mã Google,
+không reload hoặc sửa cookie/session. Giữ bộ lọc tỉnh/kỳ/đơn vị/TTHC, scope all/formality,
+hash, history state và login=failed. TypeScript và test login URL/collection/F5 PASS.
+Chưa xác nhận bản này đã deploy Netlify và nghiệm thu URL sạch trên Google thật.

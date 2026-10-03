@@ -7,6 +7,7 @@ import { parameterLabels } from "./parameter-labels.js";
 import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
 import { CollectionTracker } from "./collection-tracker.js";
+import { cleanLoginSearch } from "./login-url.js";
 const root = document.querySelector("#app");
 if (!root)
     throw new Error("Thiếu app root");
@@ -1366,6 +1367,11 @@ async function switchProvince(rootDepartmentId) {
     render();
 }
 async function start() {
+    // Clean before API calls, including pending-account and error/empty screens.
+    // Session authentication stays in its HttpOnly cookie, never in URL parameters.
+    const cleanSearch = cleanLoginSearch(location.search);
+    if (cleanSearch !== null)
+        history.replaceState(history.state ?? null, "", `${location.pathname}${cleanSearch}${location.hash ?? ""}`);
     const productionSite = document.querySelector('meta[name="qd766-deployment"]')?.getAttribute("content") === "public";
     try {
         const policyResponse = await fetch("/api/v1/access-policy");
