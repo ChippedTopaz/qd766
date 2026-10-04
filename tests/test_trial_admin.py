@@ -41,10 +41,115 @@ class TrialAdminTests(unittest.TestCase):
     def tearDown(self):
         self.client.close();self.app.state.engine.dispose()
 
+    def test_source_wallet_admin_grant_requires_explicit_source_and_is_idempotent(self):
+        from dataclasses import replace
+        from qd766.backend.wallet_access import enroll
+        self.app.state.settings=replace(self.app.state.settings,paid_requests_enabled=True,
+            trial_credits_enabled=True,trial_credit_management=True)
+        self.app.state.session_factory.configure(info={"source_wallet_enabled":True})
+        with self.app.state.session_factory.begin() as db:
+            enroll(db,self.admin_id,now=datetime.now(timezone.utc))
+        payload={"operationId":str(uuid.uuid4()),"canCollect":True,"amount":7,"reason":"Test source wallet"}
+        url=f"/api/v1/admin/accounts/{self.admin_id}/trial-credit"
+        self.assertEqual(self.client.post(url,json=payload,headers=self.headers).status_code,409)
+        payload["creditSource"]="purchased"
+        result=self.client.post(url,json=payload,headers=self.headers)
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(result.json()["availableCredits"],7)
+        self.assertTrue(self.client.post(url,json=payload,headers=self.headers).json()["replayed"])
+        self.assertEqual(self.client.get(f"/api/v1/admin/accounts/{self.admin_id}/credits").json()["availableCredits"],7)
+        payload["creditSource"]="subscription"
+        self.assertEqual(self.client.post(url,json=payload,headers=self.headers).status_code,409)
+        with self.app.state.session_factory() as db:
+            self.assertEqual(db.get(UserAccount,self.admin_id).credit_balance,0)
+
+    def test_trial_activation_starts_on_admin_action_once_preserves_legacy_and_permission(self):
+        from dataclasses import replace
+        from qd766.backend.models import CreditWalletEvent,SubscriptionCycle,AccountCollectionPermission
+        self.app.state.settings=replace(self.app.state.settings,source_wallet_trial=True,
+            paid_requests_enabled=True,trial_credits_enabled=True,trial_credit_management=True)
+        self.app.state.session_factory.configure(info={"source_wallet_enabled":True})
+        with self.app.state.session_factory.begin() as db:
+            db.get(UserAccount,self.admin_id).credit_balance=25
+        payload={"operationId":str(uuid.uuid4())}
+        url=f"/api/v1/admin/accounts/{self.admin_id}/trial-activation"
+        self.assertEqual(self.client.post(url,json=payload).status_code,403)
+        activated=self.client.post(url,json=payload,headers=self.headers)
+        self.assertEqual(activated.status_code,200,activated.text)
+        self.assertFalse(activated.json()["replayed"])
+        self.assertTrue(self.client.post(url,json=payload,headers=self.headers).json()["replayed"])
+        self.assertEqual(self.client.post(url,json={"operationId":str(uuid.uuid4())},headers=self.headers).status_code,409)
+        wallet=self.client.get(f"/api/v1/admin/accounts/{self.admin_id}/credits").json()
+        self.assertEqual(wallet["availableCredits"],100)
+        with self.app.state.session_factory() as db:
+            self.assertEqual(db.get(UserAccount,self.admin_id).credit_balance,25)
+            self.assertIsNone(db.get(AccountCollectionPermission,self.admin_id))
+            self.assertEqual(db.scalar(select(func.count()).select_from(SubscriptionCycle)),1)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CreditWalletEvent)),1)
+
     def invite(self, **extra):
         result = self.client.post("/api/v1/admin/invitations", json={"provinceId": ROOT_ID, **extra}, headers=self.headers)
         self.assertEqual(result.status_code, 200, result.text)
         return result.json()
+
+    def enable_default_invited_trial(self):
+        from dataclasses import replace
+        self.app.state.settings=replace(self.app.state.settings,source_wallet_trial=True,
+            paid_requests_enabled=True,trial_credits_enabled=True,trial_credit_management=True)
+        self.app.state.session_factory.configure(info={"source_wallet_enabled":True,
+            "default_collection_access":True})
+
+    def test_invitation_auto_grants_100_once_and_default_collection_without_permission(self):
+        from qd766.backend.models import SubscriptionCycle,CreditWalletEvent,AccountCollectionPermission
+        self.enable_default_invited_trial()
+        invite=self.invite(email="new@example.com",accessTier="agency",unitId=CHILD_ID)
+        client,result=self.redeem(invite["token"])
+        self.assertEqual(result.headers["location"],"/")
+        profile=client.get("/api/v1/auth/me").json()
+        self.assertEqual(profile["credits"],100)
+        self.assertTrue(profile["canCollect"])
+        self.assertEqual(profile["unitId"],CHILD_ID)
+        aid=uuid.UUID(profile["id"])
+        with self.app.state.session_factory() as db:
+            self.assertIsNone(db.get(AccountCollectionPermission,aid))
+            self.assertEqual(db.get(UserAccount,aid).credit_balance,0)
+            cycle=db.scalar(select(SubscriptionCycle).where(SubscriptionCycle.account_id==aid))
+            self.assertEqual(cycle.included_credit,100)
+            self.assertAlmostEqual((cycle.starts_at.replace(tzinfo=timezone.utc)-datetime.now(timezone.utc)).total_seconds(),0,delta=10)
+        _,result=self.redeem(client=client)
+        self.assertEqual(result.headers["location"],"/")
+        self.assertEqual(client.get("/api/v1/auth/me").json()["credits"],100)
+        with self.app.state.session_factory() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(SubscriptionCycle).where(SubscriptionCycle.account_id==aid)),1)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CreditWalletEvent).where(CreditWalletEvent.account_id==aid,CreditWalletEvent.kind=="grant")),1)
+        client.close()
+
+    def test_new_policy_invalid_invite_cannot_get_trial(self):
+        from qd766.backend.models import SubscriptionCycle,CreditWalletEvent
+        self.enable_default_invited_trial()
+        invite=self.invite(email="right@example.com")
+        client,result=self.redeem(invite["token"],email="wrong@example.com")
+        self.assertEqual(result.headers["location"],"/?login=invite-required")
+        with self.app.state.session_factory() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(SubscriptionCycle)),0)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CreditWalletEvent)),0)
+        client.close()
+
+    def test_default_collection_still_denies_locked_account_and_cannot_be_disabled_separately(self):
+        from qd766.backend.collection_permissions import can_collect
+        self.enable_default_invited_trial()
+        client,_=self.redeem(self.invite()["token"])
+        aid=uuid.UUID(client.get("/api/v1/auth/me").json()["id"])
+        denied=self.client.post(f"/api/v1/admin/accounts/{aid}/trial-credit",headers=self.headers,
+            json={"operationId":str(uuid.uuid4()),"canCollect":False,"amount":0,"reason":"Test default access"})
+        self.assertEqual(denied.status_code,409)
+        with self.app.state.session_factory.begin() as db:
+            self.assertTrue(can_collect(db,aid))
+            db.get(UserAccount,aid).active=False
+        with self.app.state.session_factory() as db:
+            self.assertFalse(can_collect(db,aid))
+        self.assertEqual(client.get("/api/v1/auth/me").status_code,401)
+        client.close()
 
     def redeem(self, token=None, sub="new", email="new@example.com", client=None):
         client = client or TestClient(self.app, base_url="https://testserver", follow_redirects=False)
@@ -113,6 +218,26 @@ class TrialAdminTests(unittest.TestCase):
             self.assertEqual(client.get("/api/v1/admin/"+path).status_code, 403)
         self.assertEqual(client.post("/api/v1/admin/accounts/"+profile["id"], json={"role":"admin"},
             headers={"X-QD766-CSRF":profile["csrfToken"]}).status_code, 403)
+        client.close()
+
+    def test_national_viewer_can_view_other_province_but_cannot_admin_or_collect(self):
+        invite=self.invite(accessTier="national")
+        client,result=self.redeem(invite["token"])
+        self.assertEqual(result.headers["location"],"/")
+        profile=client.get("/api/v1/auth/me").json()
+        self.assertEqual(profile["accessTier"],"national")
+        self.assertEqual(profile["role"],"user")
+        self.assertFalse(profile["canCollect"])
+        self.assertEqual(client.get("/api/v1/dashboard?root_department_id="+TAY_NINH_ROOT_ID).status_code,200)
+        provinces=client.get("/api/v1/dashboard/provinces").json()
+        self.assertGreaterEqual(len(provinces),2)
+        for path in ("accounts","invitations","audit","directory"):
+            self.assertEqual(client.get("/api/v1/admin/"+path).status_code,403)
+        self.assertEqual(client.post("/api/v1/admin/accounts/"+profile["id"],
+            json={"provinceId":ROOT_ID,"active":True,"role":"admin"},
+            headers={"X-QD766-CSRF":profile["csrfToken"]}).status_code,403)
+        self.assertEqual(client.get("/api/v1/collection-control").status_code,403)
+        self.assertEqual(client.get("/api/v1/national-summaries").status_code,403)
         client.close()
 
     def test_bad_unit_and_injected_role_rejected(self):

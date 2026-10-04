@@ -1,4 +1,4 @@
-param([switch]$ReplaceExisting)
+param([switch]$ReplaceExisting, [switch]$RealWallet, [switch]$PausePaidRequests)
 $ErrorActionPreference = 'Stop'
 $RepositoryRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $RepositoryRoot '.venv\Scripts\python.exe'
@@ -10,10 +10,17 @@ Set-Location -LiteralPath $RepositoryRoot
 foreach ($path in @($Python, $Launcher, $BackgroundPython)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Missing public backend files.' }
 }
-& $Python $Launcher --check
+if ($PausePaidRequests -and -not $RealWallet) { throw 'Pause requires -RealWallet.' }
+$ModeArguments = @()
+if ($RealWallet) { $ModeArguments += '--real-wallet' }
+if ($PausePaidRequests) { $ModeArguments += '--pause-paid-requests' }
+& $Python $Launcher @ModeArguments --check
 if ($LASTEXITCODE -ne 0) { throw 'Public configuration check failed. No task registered.' }
 $ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($ExistingTask) {
+    if (-not $RealWallet -and (($ExistingTask.Actions | ForEach-Object { $_.Arguments }) -join ' ') -match '--real-wallet') {
+        throw 'Cannot replace a real-wallet task with legacy mode. Use -RealWallet; pause if necessary.'
+    }
     if (-not $ReplaceExisting) { throw 'Task already exists. Review it before using -ReplaceExisting.' }
     $BackupDirectory = Join-Path $RepositoryRoot '.tmp-public-task-backups'
     New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
@@ -27,6 +34,7 @@ $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
     -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 # Direct windowless Python action: no PowerShell wrapper to leave a child server behind.
 $Arguments = '"{0}" --background-log' -f $Launcher
+if ($ModeArguments.Count) { $Arguments += ' ' + ($ModeArguments -join ' ') }
 $Action = New-ScheduledTaskAction -Execute $BackgroundPython -Argument $Arguments -WorkingDirectory $RepositoryRoot
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
 $Task = New-ScheduledTask -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings

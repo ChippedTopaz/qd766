@@ -252,7 +252,7 @@ class UserAccount(Base):
         CheckConstraint("credit_balance >= 0", name="ck_user_credit_balance"),
         CheckConstraint("credit_reserved >= 0", name="ck_user_credit_reserved"),
         CheckConstraint("role IN ('user', 'admin')", name="ck_account_role"),
-        CheckConstraint("access_tier IN ('province', 'agency')", name="ck_account_access_tier"),
+        CheckConstraint("access_tier IN ('province', 'agency', 'national')", name="ck_account_access_tier"),
         CheckConstraint("access_tier != 'agency' OR (unit_department_id IS NOT NULL AND root_department_id IS NOT NULL)", name="ck_account_unit_scope"),
     )
 
@@ -313,7 +313,7 @@ class TrialInvitation(Base):
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     used_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    __table_args__ = (CheckConstraint("access_tier IN ('province', 'agency')", name="ck_invite_tier"),
+    __table_args__ = (CheckConstraint("access_tier IN ('province', 'agency', 'national')", name="ck_invite_tier"),
         CheckConstraint("access_tier != 'agency' OR unit_department_id IS NOT NULL", name="ck_invite_unit"))
 
 
@@ -419,6 +419,88 @@ class CreditLedgerEntry(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class CreditLot(Base):
+    """Independent source-aware wallet; not activated for existing account balances."""
+    __tablename__ = "credit_lots"
+    __table_args__ = (
+        CheckConstraint("source IN ('subscription', 'purchased')", name="ck_credit_lot_source"),
+        CheckConstraint("available >= 0 AND reserved >= 0", name="ck_credit_lot_balance"),
+        CheckConstraint("(source = 'purchased' AND expires_at IS NULL) OR (source = 'subscription' AND expires_at IS NOT NULL)",
+                        name="ck_credit_lot_expiration"),
+        Index("ix_credit_lot_account", "account_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    source: Mapped[str] = mapped_column(String(16))
+    available: Mapped[int] = mapped_column(Integer)
+    reserved: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CreditHold(Base):
+    __tablename__ = "credit_holds"
+    __table_args__ = (
+        UniqueConstraint("account_id", "request_key", name="uq_credit_hold_request"),
+        CheckConstraint("state IN ('reserved', 'charged', 'refunded')", name="ck_credit_hold_state"),
+        CheckConstraint("amount > 0", name="ck_credit_hold_amount"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    request_key: Mapped[str] = mapped_column(String(240))
+    state: Mapped[str] = mapped_column(String(16), default="reserved")
+    amount: Mapped[int] = mapped_column(Integer)
+    allocations: Mapped[list] = mapped_column(JsonDocument)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CreditWalletEvent(Base):
+    __tablename__ = "credit_wallet_events"
+    __table_args__ = (
+        UniqueConstraint("account_id", "event_key", name="uq_credit_wallet_event"),
+        CheckConstraint("kind IN ('grant', 'reserve', 'charge', 'refund', 'expire')", name="ck_credit_wallet_event_kind"),
+        CheckConstraint("amount > 0", name="ck_credit_wallet_event_amount"),
+        Index("ix_credit_wallet_event_account", "account_id", "created_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    event_key: Mapped[str] = mapped_column(String(250))
+    kind: Mapped[str] = mapped_column(String(16))
+    amount: Mapped[int] = mapped_column(Integer)
+    details: Mapped[dict] = mapped_column(JsonDocument)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CreditWalletEnrollment(Base):
+    """Explicit opt-in; existing legacy Credit are never classified as purchased."""
+    __tablename__ = "credit_wallet_enrollments"
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SubscriptionCycle(Base):
+    """Explicit monthly boundaries; isolated until commercial activation is approved."""
+    __tablename__ = "subscription_cycles"
+    __table_args__ = (
+        UniqueConstraint("account_id", "operation_key", name="uq_subscription_cycle_operation"),
+        CheckConstraint("tier IN ('agency', 'province')", name="ck_subscription_cycle_tier"),
+        CheckConstraint("origin IN ('trial', 'paid', 'redemption')", name="ck_subscription_cycle_origin"),
+        CheckConstraint("ends_at > starts_at", name="ck_subscription_cycle_dates"),
+        CheckConstraint("included_credit >= 0", name="ck_subscription_cycle_credit"),
+        Index("ix_subscription_cycle_account", "account_id", "starts_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    operation_key: Mapped[str] = mapped_column(String(200))
+    tier: Mapped[str] = mapped_column(String(16))
+    origin: Mapped[str] = mapped_column(String(16))
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    included_credit: Mapped[int] = mapped_column(Integer)
+    granted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class UserNotification(Base):

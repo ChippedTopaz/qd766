@@ -75,6 +75,64 @@ class LocalCreditTrialTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
             self.assertEqual(db.get(UserAccount,identifier("account:a")).credit_balance,30)
 
+    def test_personal_credit_ledger_is_private_paginated_and_read_only(self):
+        self.grant("a",7)
+        self.submit("a")
+        response=self.clients["a"].get("/api/v1/me/credits?limit=1")
+        self.assertEqual(response.status_code,200)
+        wallet=response.json()
+        self.assertEqual(wallet["availableCredits"],34)
+        self.assertEqual(wallet["reservedCredits"],3)
+        self.assertEqual(len(wallet["items"]),1)
+        other=self.clients["b"].get("/api/v1/me/credits").json()
+        self.assertEqual(other["availableCredits"],30)
+        self.assertTrue(all(item["type"]=="topup" for item in other["items"]))
+        self.assertEqual(self.clients["a"].get("/api/v1/me/credits?limit=101").status_code,422)
+        self.assertEqual(self.clients["a"].post("/api/v1/me/credits",headers=self.headers("a")).status_code,403)
+        self.clients["a"].post("/api/v1/auth/logout",headers=self.headers("a"))
+        self.assertEqual(self.clients["a"].get("/api/v1/me/credits").status_code,401)
+
+    def test_url_account_injection_does_not_expose_other_history_or_credit(self):
+        request_id=self.submit("a").json()["items"][0]["id"]
+        self.outcome("success")
+        foreign=str(identifier("account:a"))
+        history=self.clients["b"].get(f"/api/v1/me/formality-requests?account_id={foreign}").json()
+        self.assertEqual(history["items"],[])
+        self.assertEqual(history["unreadNotifications"],0)
+        wallet=self.clients["b"].get(f"/api/v1/me/credits?account_id={foreign}").json()
+        self.assertEqual(wallet["availableCredits"],30)
+        self.assertFalse(any(row["type"]=="charge" for row in wallet["items"]))
+        self.assertEqual(self.clients["b"].post("/api/v1/me/notifications/read",
+            json={"requestIds":[request_id]},headers=self.headers("b")).status_code,200)
+        self.assertEqual(self.clients["a"].get("/api/v1/me/formality-requests").json()["unreadNotifications"],1)
+
+    def test_locked_account_cannot_reuse_session_to_read_or_request(self):
+        token=self.quote("a").json()["quote"]
+        account=str(identifier("account:a"))
+        province=self.clients["a"].get("/api/v1/auth/me").json()["provinceId"]
+        self.assertEqual(self.clients["admin"].post(f"/api/v1/admin/accounts/{account}",
+            json={"provinceId":province,"active":False},
+            headers=self.headers("admin")).status_code,200)
+        for path in ("/api/v1/auth/me","/api/v1/me/credits","/api/v1/me/formality-requests",
+                     "/api/v1/me/formalities?period_type=year&year=2026","/api/v1/dashboard"):
+            self.assertEqual(self.clients["a"].get(path).status_code,401,path)
+        self.assertEqual(self.clients["a"].post("/api/v1/me/formality-requests",
+            json={"quote":token,"token":str(uuid.uuid4())},headers={"X-QD766-CSRF":"old"}).status_code,401)
+
+    def test_national_scope_does_not_grant_paid_library_or_credit_administration(self):
+        with self.app.state.session_factory.begin() as db:
+            db.get(UserAccount,identifier("account:b")).access_tier="national"
+        self.submit("a");self.outcome("success")
+        profile=self.clients["b"].get("/api/v1/auth/me").json()
+        self.assertEqual(profile["role"],"user")
+        path=f"/api/v1/dashboard/selection?scope=formality&period_type=year&year=2026&formality_id={self.formality}"
+        self.assertEqual(self.clients["b"].get(path).status_code,403)
+        account=str(identifier("account:a"))
+        self.assertEqual(self.clients["b"].get(f"/api/v1/admin/accounts/{account}/credits").status_code,403)
+        self.assertEqual(self.clients["b"].get("/api/v1/me/formality-requests").json()["items"],[])
+        self.assertEqual(self.submit("b").status_code,202)
+        self.assertEqual(self.clients["b"].get(path).status_code,200)
+
     def test_fresh_confirmation_retries_terminal_job_and_shares_successor(self):
         for outcome in ("failure", "cancel"):
             with self.subTest(outcome=outcome):
@@ -181,19 +239,47 @@ class LocalCreditTrialTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)),0)
 
     def test_insufficient_credit_batch_is_atomic_and_does_not_add_jobs(self):
-        for month in range(1,9):
-            selection=dict(self.selection,periodType="month",periodValue=month)
-            self.assertEqual(self.submit(quote=self.quote(selection=selection).json()["quote"]).status_code,202)
+        with self.app.state.session_factory.begin() as db:
+            db.get(UserAccount,identifier("account:a")).credit_balance=6
         selection=dict(self.selection,formalityIds=[item.id for item in mock_catalog().formalities])
         quote=self.quote(selection=selection).json()
         self.assertEqual((quote["availableCredits"],quote["totalCredits"]),(6,9))
         self.assertEqual(self.submit(quote=quote["quote"]).status_code,409)
         me=self.clients["a"].get("/api/v1/auth/me").json()
-        self.assertEqual((me["credits"],me["reservedCredits"]),(6,24))
+        self.assertEqual((me["credits"],me["reservedCredits"]),(6,0))
         with self.app.state.session_factory() as db:
-            self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)),8)
-            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),8)
-            self.assertEqual(db.scalar(select(func.count()).select_from(CreditLedgerEntry).where(CreditLedgerEntry.entry_type=="reserve")),8)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)),0)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CreditLedgerEntry).where(CreditLedgerEntry.entry_type=="reserve")),0)
+
+    def test_two_pending_requests_per_account_and_terminal_outcome_frees_slot(self):
+        for outcome in ("success","failure","cancel"):
+            with self.subTest(outcome=outcome):
+                month={"success":1,"failure":4,"cancel":7}[outcome]
+                def submit_month(value,key="a"):
+                    selection=dict(self.selection,periodType="month",periodValue=value)
+                    return self.submit(key,quote=self.quote(key,selection).json()["quote"])
+                self.assertEqual(submit_month(month).status_code,202)
+                self.assertEqual(submit_month(month+1).status_code,202)
+                rejected=submit_month(month+2)
+                self.assertEqual(rejected.status_code,409)
+                self.assertIn("tối đa 2",rejected.json()["detail"])
+                history=self.clients["a"].get("/api/v1/me/formality-requests").json()
+                self.assertEqual(history["pendingRequests"],2)
+                # Another account can attach to a shared job; its limit is independent.
+                self.assertEqual(submit_month(month,"b").status_code,202)
+                self.assertEqual(self.outcome(outcome).status_code,200)
+                self.assertEqual(submit_month(month+2).status_code,202)
+                self.outcome("failure");self.outcome("failure")
+
+    def test_batch_exceeding_pending_limit_rolls_back_all_holds_and_jobs(self):
+        selection=dict(self.selection,formalityIds=[item.id for item in mock_catalog().formalities])
+        response=self.submit(quote=self.quote(selection=selection).json()["quote"])
+        self.assertEqual(response.status_code,409)
+        with self.app.state.session_factory() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)),0)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
+            self.assertEqual(db.get(UserAccount,identifier("account:a")).credit_balance,30)
 
     def test_revoke_new_collection_permission_does_not_drop_pending_request(self):
         self.assertEqual(self.submit().status_code,202)

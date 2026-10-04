@@ -1,5 +1,6 @@
 """Isolated, fail-closed office tunnel instance. Never inherit operator flags."""
 from pathlib import Path
+from dataclasses import replace
 from sqlalchemy.engine import URL, make_url
 
 from .auth import validate_auth_settings
@@ -28,7 +29,11 @@ def read_config(path: Path) -> dict[str, str]:
     return result
 
 
-def public_settings(office: dict[str, str], public: dict[str, str]) -> Settings:
+def public_settings(office: dict[str, str], public: dict[str, str], *, real_wallet=False, requests_paused=False) -> Settings:
+    if type(real_wallet) is not bool or type(requests_paused) is not bool:
+        raise ValueError("Wallet mode must be an explicit boolean")
+    if requests_paused and not real_wallet:
+        raise ValueError("Pause requires real wallet mode")
     if set(public) != AUTH_KEYS:
         raise ValueError("Public configuration must contain only the three Google settings")
     if any(not value or value.startswith("<") for value in public.values()):
@@ -59,4 +64,10 @@ def public_settings(office: dict[str, str], public: dict[str, str]) -> Settings:
         google_client_secret=public["QD766_GOOGLE_CLIENT_SECRET"],
         google_redirect_uri=public["QD766_GOOGLE_REDIRECT_URI"])
     validate_auth_settings(settings)
+    if real_wallet:
+        from .wallet_runtime import validate_wallet_runtime
+        settings=replace(settings,real_wallet_enabled=True,wallet_requests_paused=requests_paused,
+            paid_requests_enabled=True,trial_credits_enabled=True,trial_credit_management=True,
+            formality_credit_cost=5)
+        validate_wallet_runtime(settings)
     return settings

@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import {pathToFileURL} from "node:url";
+const {requestCreditDisplay}=await import(pathToFileURL(process.argv[2]).href);
+assert.match(requestCreditDisplay("ready",3),/>-3</);
+assert.match(requestCreditDisplay("ready",3),/#dc2626/);
+assert.match(requestCreditDisplay("refunded",3),/>0</);
+assert.match(requestCreditDisplay("waiting",3),/>0</);
+assert.match(requestCreditDisplay("waiting",3),/chưa ghi nhận thu/);
+assert.equal(requestCreditDisplay("ready",null),"Quản trị");
+console.log("Personal credit presentation PASS");

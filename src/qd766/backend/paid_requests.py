@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from qd766.periods import PeriodSelection
@@ -35,6 +35,10 @@ class InsufficientCredits(PaidRequestError):
 
 
 class CollectionUnavailable(PaidRequestError):
+    pass
+
+
+class PendingRequestLimit(PaidRequestError):
     pass
 
 
@@ -84,6 +88,7 @@ def create_paid_data_request(
     credit_cost: int,
     idempotency_token: str,
     allow_trial: bool = False,
+    max_pending_requests: int | None = None,
 ) -> tuple[PaidDataRequest, bool]:
     if credit_cost <= 0:
         raise ValueError("Credit cost must be positive")
@@ -97,7 +102,7 @@ def create_paid_data_request(
     idempotency_key = _paid_idempotency_key(account.id, idempotency_token)
     existing = session.scalar(
         select(PaidDataRequest).where(
-            PaidDataRequest.idempotency_key == idempotency_key
+            PaidDataRequest.idempotency_key.in_((idempotency_key, "wallet:"+idempotency_key))
         )
     )
     if existing is not None:
@@ -123,7 +128,18 @@ def create_paid_data_request(
     )
     if entitlement is not None:
         return entitlement, False
-    if account.credit_balance < credit_cost:
+    if session.info.get("wallet_requests_paused"):
+        raise CollectionUnavailable("New paid requests are temporarily paused")
+    from .wallet_access import enabled as wallet_enabled, credits, active_subscription
+    source_wallet = wallet_enabled(session, account.id)
+    if session.info.get("real_wallet_enabled") and not source_wallet:
+        raise PaidPlanRequired("Account wallet transition has not been approved")
+    if source_wallet:
+        from .subscriptions import grant_due_cycles
+        if active_subscription(session, account.id, now=utc_now()) is None:
+            raise PaidPlanRequired("Subscription has expired")
+        grant_due_cycles(session, account.id, now=utc_now())
+    if credits(session, account)[0] < credit_cost:
         raise InsufficientCredits("Credit balance is insufficient")
 
     snapshot = _matching_snapshot(
@@ -134,6 +150,14 @@ def create_paid_data_request(
         year=year,
         period_value=period_value,
     )
+    # The account row is locked above: concurrent tabs cannot both take the last slot.
+    # Existing entitlements/replays and immediately available data do not add a pending slot.
+    if snapshot is None and max_pending_requests is not None:
+        pending = session.scalar(select(func.count()).select_from(PaidDataRequest).where(
+            PaidDataRequest.account_id == account.id,
+            PaidDataRequest.state.in_(("reserved", "waiting")))) or 0
+        if pending >= max_pending_requests:
+            raise PendingRequestLimit("Maximum active requests reached")
     control = session.get(CollectionControl, "dvcqg")
     if snapshot is None and control is not None and control.circuit_state == "open":
         raise CollectionUnavailable("DVCQG collection circuit is open")
@@ -153,19 +177,25 @@ def create_paid_data_request(
     )
     session.add(paid_request)
     session.flush()
-    account.credit_balance -= credit_cost
-    account.credit_reserved += credit_cost
-    _ledger_entry(
-        session,
-        account,
-        paid_request=paid_request,
-        event_key=f"paid-request:{paid_request.id}:reserve",
-        entry_type="reserve",
-        amount=credit_cost,
-        available_delta=-credit_cost,
-        reserved_delta=credit_cost,
-        details={"datasetKey": dataset_key},
-    )
+    if source_wallet:
+        from .credit_wallet import reserve
+        # Persisted marker lets a restarted worker choose the correct settlement core.
+        paid_request.idempotency_key="wallet:"+idempotency_key
+        reserve(session, account.id, credit_cost, request_key=str(paid_request.id), now=utc_now())
+    else:
+        account.credit_balance -= credit_cost
+        account.credit_reserved += credit_cost
+        _ledger_entry(
+            session,
+            account,
+            paid_request=paid_request,
+            event_key=f"paid-request:{paid_request.id}:reserve",
+            entry_type="reserve",
+            amount=credit_cost,
+            available_delta=-credit_cost,
+            reserved_delta=credit_cost,
+            details={"datasetKey": dataset_key},
+        )
 
     if snapshot is not None:
         _settle_request(session, paid_request, account, snapshot)
@@ -255,22 +285,28 @@ def _settle_request(
 ) -> None:
     if paid_request.state == "ready":
         return
-    account.credit_reserved -= paid_request.credit_cost
+    source_wallet = paid_request.idempotency_key.startswith("wallet:")
+    if source_wallet:
+        from .credit_wallet import finish
+        finish(session, account.id, request_key=str(paid_request.id), outcome="charge", now=utc_now())
+    else:
+        account.credit_reserved -= paid_request.credit_cost
     paid_request.state = "ready"
     paid_request.snapshot_id = snapshot.id
     paid_request.error = None
     paid_request.completed_at = utc_now()
-    _ledger_entry(
-        session,
-        account,
-        paid_request=paid_request,
-        event_key=f"paid-request:{paid_request.id}:charge",
-        entry_type="charge",
-        amount=paid_request.credit_cost,
-        available_delta=0,
-        reserved_delta=-paid_request.credit_cost,
-        details={"snapshotId": str(snapshot.id)},
-    )
+    if not source_wallet:
+        _ledger_entry(
+            session,
+            account,
+            paid_request=paid_request,
+            event_key=f"paid-request:{paid_request.id}:charge",
+            entry_type="charge",
+            amount=paid_request.credit_cost,
+            available_delta=0,
+            reserved_delta=-paid_request.credit_cost,
+            details={"snapshotId": str(snapshot.id)},
+        )
     _notification(
         session,
         paid_request,
@@ -288,22 +324,28 @@ def _refund_request(
 ) -> None:
     if paid_request.state == "refunded":
         return
-    account.credit_balance += paid_request.credit_cost
-    account.credit_reserved -= paid_request.credit_cost
+    source_wallet = paid_request.idempotency_key.startswith("wallet:")
+    if source_wallet:
+        from .credit_wallet import finish
+        finish(session, account.id, request_key=str(paid_request.id), outcome="refund", now=utc_now())
+    else:
+        account.credit_balance += paid_request.credit_cost
+        account.credit_reserved -= paid_request.credit_cost
     paid_request.state = "refunded"
     paid_request.error = error
     paid_request.completed_at = utc_now()
-    _ledger_entry(
-        session,
-        account,
-        paid_request=paid_request,
-        event_key=f"paid-request:{paid_request.id}:release",
-        entry_type="release",
-        amount=paid_request.credit_cost,
-        available_delta=paid_request.credit_cost,
-        reserved_delta=-paid_request.credit_cost,
-        details={"error": error},
-    )
+    if not source_wallet:
+        _ledger_entry(
+            session,
+            account,
+            paid_request=paid_request,
+            event_key=f"paid-request:{paid_request.id}:release",
+            entry_type="release",
+            amount=paid_request.credit_cost,
+            available_delta=paid_request.credit_cost,
+            reserved_delta=-paid_request.credit_cost,
+            details={"error": error},
+        )
     _notification(
         session,
         paid_request,

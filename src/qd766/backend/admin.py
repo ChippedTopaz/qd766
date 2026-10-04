@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 
 from .auth import SESSION_COOKIE, current_session, digest
-from .models import AccountCollectionPermission, AdminAudit, CreditLedgerEntry, Department, Dataset, Entity, LoginSession, Snapshot, TrialInvitation, UserAccount
+from .models import AccountCollectionPermission, AdminAudit, CreditLedgerEntry, Department, Dataset, Entity, LoginSession, Snapshot, TrialInvitation, UserAccount, SubscriptionCycle
+from .wallet_access import enabled as wallet_enabled, credits, active_subscription, subscription_summary
 
 router = APIRouter(prefix="/api/v1/admin", tags=["trial administration"])
 
@@ -34,7 +35,7 @@ def units_statement(root):
 class Assignment(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provinceId: uuid.UUID
-    accessTier: Literal["province", "agency"] = "province"
+    accessTier: Literal["province", "agency", "national"] = "province"
     unitId: uuid.UUID | None = None
 
 
@@ -82,7 +83,12 @@ def accounts(request: Request):
         return [{"id": str(a.id), "email": a.email, "name": a.display_name, "role": a.role,
                  "admitted": a.trial_admitted, "active": a.active, "accessTier": a.access_tier,
                  "canCollect": request.app.state.settings.paid_requests_enabled and can_collect(db, a.id),
-                 "credits": a.credit_balance, "reservedCredits": a.credit_reserved,
+                 "credits": credits(db,a)[0], "reservedCredits": credits(db,a)[1],
+                 "walletMode":"sources" if wallet_enabled(db,a.id) else "legacy",
+                 "subscription":subscription_summary(db,a),
+                 "canActivateTrial":bool(db.info.get("source_wallet_enabled") and a.active and a.trial_admitted
+                    and a.access_tier in {"agency","province"} and db.scalar(select(SubscriptionCycle.id).where(
+                        SubscriptionCycle.account_id==a.id)) is None),
                  "provinceId": str(a.root_department_id) if a.root_department_id else None,
                  "unitId": str(a.unit_department_id) if a.unit_department_id else None}
                 for a in db.scalars(select(UserAccount).order_by(UserAccount.created_at.desc()).limit(500))]
@@ -164,9 +170,53 @@ def audit_log(request: Request):
 class TrialCreditChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operationId: uuid.UUID
-    canCollect: bool
+    canCollect: bool = True
     amount: int = Field(default=0, ge=0, le=100000)
     reason: str = Field(min_length=3, max_length=240)
+    creditSource: Literal["subscription", "purchased"] | None = None
+
+
+class TrialActivation(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    operationId:uuid.UUID
+
+
+@router.post("/accounts/{account_id}/trial-activation")
+def activate_trial(account_id:uuid.UUID,payload:TrialActivation,request:Request):
+    if not request.app.state.settings.source_wallet_enabled:
+        raise HTTPException(403,"Kích hoạt subscription chưa được mở ở môi trường này.")
+    from .paid_requests import _locked_account
+    from .wallet_access import enroll
+    from .subscriptions import schedule_plan,grant_due_cycles
+    from .credit_wallet import WalletError,utc
+    with request.app.state.session_factory.begin() as db:
+        actor=administrator(request,db,write=True)
+        if db.get(UserAccount,account_id) is None:
+            raise HTTPException(404,"Không tìm thấy tài khoản.")
+        account=_locked_account(db,account_id)
+        prior=db.scalar(select(AdminAudit).where(AdminAudit.actor_id==actor.id,
+            AdminAudit.action=="subscription.trial-activated",
+            AdminAudit.details["operationId"].as_string()==str(payload.operationId)))
+        if prior:
+            if prior.details["accountId"]!=str(account_id):
+                raise HTTPException(409,"Mã kích hoạt đã dùng cho tài khoản khác.")
+            return {"state":"active","endsAt":prior.details["endsAt"],"replayed":True}
+        if not account.active or not account.trial_admitted or account.access_tier not in {"agency","province"}:
+            raise HTTPException(409,"Tài khoản chưa đủ điều kiện kích hoạt dùng thử.")
+        if db.scalar(select(SubscriptionCycle.id).where(SubscriptionCycle.account_id==account.id)):
+            raise HTTPException(409,"Tài khoản đã có subscription; không cấp lại tháng dùng thử.")
+        now=datetime.now(timezone.utc)
+        try:
+            enroll(db,account.id,now=now)
+            cycle=schedule_plan(db,account.id,tier=account.access_tier,origin="trial",
+                operation_key="admin-trial:"+str(payload.operationId),starts_at=now,months=1,now=now)[0]
+            grant_due_cycles(db,account.id,now=now)
+        except WalletError as error:
+            raise HTTPException(409,"Chưa thể kích hoạt. Cần kết thúc các yêu cầu cũ đang chờ và đối soát Credit đang giữ.") from error
+        ends_at=utc(cycle.ends_at).isoformat()
+        audit(db,actor,"subscription.trial-activated",accountId=str(account.id),
+            operationId=str(payload.operationId),startsAt=now.isoformat(),endsAt=ends_at)
+        return {"state":"active","endsAt":ends_at,"replayed":False}
 
 
 def trial_credit_enabled(request):
@@ -183,6 +233,10 @@ def grant_trial_credit(account_id: uuid.UUID, payload: TrialCreditChange, reques
         if db.get(UserAccount, account_id) is None:
             raise HTTPException(404, "Không tìm thấy tài khoản.")
         target = _locked_account(db, account_id)
+        if db.info.get("real_wallet_enabled") and not wallet_enabled(db,target.id):
+            raise HTTPException(409,"Cần kích hoạt ví Credit trước khi cấp Credit theo nguồn.")
+        if db.info.get("default_collection_access") and not payload.canCollect:
+            raise HTTPException(409,"Tra cứu là quyền mặc định. Hãy khóa tài khoản nếu cần ngừng truy cập.")
         if not target.active or not target.trial_admitted or target.root_department_id is None:
             raise HTTPException(409, "Chỉ cấp quyền/credit cho tài khoản đang hoạt động và đã được mời, gán tỉnh.")
         event = f"trial-grant:{actor.id}:{target.id}:{payload.operationId}"
@@ -193,25 +247,43 @@ def grant_trial_credit(account_id: uuid.UUID, payload: TrialCreditChange, reques
         if prior_audit is not None:
             prior = prior_audit.details
             if (prior.get("accountId") != str(target.id) or prior.get("amount") != payload.amount
-                    or prior.get("canCollect") != payload.canCollect or prior.get("reason") != payload.reason):
+                    or prior.get("canCollect") != payload.canCollect or prior.get("reason") != payload.reason
+                    or prior.get("creditSource") != payload.creditSource):
                 raise HTTPException(409, "Mã giao dịch đã dùng với nội dung khác.")
-            return {"availableCredits": target.credit_balance, "reservedCredits": target.credit_reserved, "replayed": True}
+            available,reserved=credits(db,target)
+            return {"availableCredits": available, "reservedCredits": reserved, "replayed": True}
         existing = db.scalar(select(CreditLedgerEntry).where(CreditLedgerEntry.event_key == event))
         if existing is not None:
             if existing.amount != payload.amount or existing.details != details:
                 raise HTTPException(409, "Mã giao dịch đã dùng với nội dung khác.")
             return {"availableCredits": target.credit_balance, "reservedCredits": target.credit_reserved, "replayed": True}
-        permission = db.get(AccountCollectionPermission, target.id)
-        if permission is None:
-            permission = AccountCollectionPermission(account_id=target.id)
-            db.add(permission)
-        permission.enabled = payload.canCollect
-        permission.granted_by = actor.id
+        if not db.info.get("default_collection_access"):
+            permission = db.get(AccountCollectionPermission, target.id)
+            if permission is None:
+                permission = AccountCollectionPermission(account_id=target.id)
+                db.add(permission)
+            permission.enabled = payload.canCollect
+            permission.granted_by = actor.id
         if payload.amount:
-            top_up_credits(db, target.id, payload.amount, event_key=event, details=details)
+            if wallet_enabled(db,target.id):
+                if payload.creditSource is None:
+                    raise HTTPException(409,"Vui lòng chọn nguồn Credit cần cấp.")
+                from .credit_wallet import grant
+                now=datetime.now(timezone.utc)
+                cycle=active_subscription(db,target.id,now=now)
+                if payload.creditSource=="subscription" and cycle is None:
+                    raise HTTPException(409,"Cần subscription còn hiệu lực để cấp Credit theo chu kỳ.")
+                grant(db,target.id,payload.amount,source=payload.creditSource,operation_key=event,now=now,
+                    expires_at=cycle.ends_at if payload.creditSource=="subscription" else None)
+            else:
+                if payload.creditSource is not None:
+                    raise HTTPException(409,"Tài khoản chưa bật Credit theo nguồn.")
+                top_up_credits(db, target.id, payload.amount, event_key=event, details=details)
         audit(db, actor, "trial-credit.updated", accountId=str(target.id), operationId=str(payload.operationId),
-              amount=payload.amount, canCollect=payload.canCollect, reason=payload.reason)
-        return {"availableCredits": target.credit_balance, "reservedCredits": target.credit_reserved, "replayed": False}
+              amount=payload.amount, canCollect=payload.canCollect, reason=payload.reason,
+              **({"creditSource":payload.creditSource} if payload.creditSource is not None else {}))
+        available,reserved=credits(db,target)
+        return {"availableCredits": available, "reservedCredits": reserved, "replayed": False}
 
 
 @router.get("/accounts/{account_id}/credits")
@@ -222,6 +294,15 @@ def credit_ledger(account_id: uuid.UUID, request: Request):
         account = db.get(UserAccount, account_id)
         if account is None:
             raise HTTPException(404, "Không tìm thấy tài khoản.")
+        if wallet_enabled(db,account.id):
+            from .models import CreditWalletEvent
+            available,reserved=credits(db,account)
+            return {"availableCredits":available,"reservedCredits":reserved,"walletMode":"sources",
+                "items":[{"type":"redemption" if r.details.get("reason")=="subscription_redemption" else r.kind,
+                    "amount":r.amount,"availableAfter":r.details.get("availableAfter",0),
+                    "reservedAfter":r.details.get("reservedAfter",0),"at":r.created_at.isoformat(),"details":r.details}
+                    for r in db.scalars(select(CreditWalletEvent).where(CreditWalletEvent.account_id==account.id)
+                        .order_by(CreditWalletEvent.created_at.desc(),CreditWalletEvent.id.desc()).limit(100))]}
         return {"availableCredits": account.credit_balance, "reservedCredits": account.credit_reserved,
                 "items": [{"type": row.entry_type, "amount": row.amount, "availableAfter": row.available_after,
                            "reservedAfter": row.reserved_after, "at": row.created_at.isoformat(), "details": row.details}

@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from qd766.backend.models import Base, CollectionControl, CollectionJob, CreditLedgerEntry, Department, Formality, PaidDataRequest, Snapshot, UserAccount, UserNotification
-from qd766.backend.paid_requests import create_paid_data_request, refund_paid_requests_for_job, settle_paid_requests_for_job, top_up_credits
+from qd766.backend.paid_requests import create_paid_data_request, refund_paid_requests_for_job, settle_paid_requests_for_job, top_up_credits, PendingRequestLimit
 from qd766.backend.local_credit_trial import mock_snapshot
 from qd766.backend import worker
 
@@ -250,6 +250,173 @@ def run_checks(url):
             assert count(db, CreditLedgerEntry, CreditLedgerEntry.entry_type == "charge") == 25
             assert count(db, UserNotification) == 31
         print("PASS=restart_after_committed_success_does_not_charge_twice", flush=True)
+        limited_account=uuid.uuid4()
+        with factory.begin() as db:
+            db.add(UserAccount(id=limited_account,external_subject="pg-limit-test",display_name="Limit test",plan="paid"))
+            db.flush()
+            top_up_credits(db,limited_account,30,event_key="seed:limit")
+        barrier=Barrier(6)
+        def submit_limited(i):
+            barrier.wait(timeout=15)
+            try:
+                with factory.begin() as db:
+                    create_paid_data_request(db,account_id=limited_account,province_code="25",
+                        root_department_id=root,formality_id=formality,period_type="month",year=2025,
+                        period_value=7+i,credit_cost=3,idempotency_token=f"limited:{i}",max_pending_requests=2)
+                return "accepted"
+            except PendingRequestLimit:
+                return "limited"
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            outcomes=list(executor.map(submit_limited,range(6)))
+        assert outcomes.count("accepted")==2 and outcomes.count("limited")==4
+        with factory() as db:
+            assert count(db,PaidDataRequest,PaidDataRequest.account_id==limited_account)==2
+            assert count(db,CreditLedgerEntry,CreditLedgerEntry.account_id==limited_account,
+                         CreditLedgerEntry.entry_type=="reserve")==2
+            account=db.get(UserAccount,limited_account)
+            assert (account.credit_balance,account.credit_reserved)==(24,6)
+        print("PASS=six_concurrent_distinct_requests_accept_two_without_extra_holds",flush=True)
+        from qd766.backend.credit_wallet import grant,reserve,balance,WalletError
+        wallet_account=uuid.uuid4()
+        wallet_now=datetime.now(timezone.utc)
+        with factory.begin() as db:
+            db.add(UserAccount(id=wallet_account,external_subject="pg-wallet-test",display_name="Wallet concurrency",plan="paid"))
+            db.flush()
+            grant(db,wallet_account,10,source="purchased",operation_key="seed",now=wallet_now)
+        wallet_barrier=Barrier(6)
+        def reserve_wallet(i):
+            wallet_barrier.wait(timeout=15)
+            try:
+                with factory.begin() as db:
+                    reserve(db,wallet_account,5,request_key=f"wallet:{i}",now=wallet_now)
+                return "held"
+            except WalletError:
+                return "insufficient"
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            results=list(executor.map(reserve_wallet,range(6)))
+        assert results.count("held")==2 and results.count("insufficient")==4
+        with factory() as db:
+            assert balance(db,wallet_account,now=wallet_now)==dict(subscription=0,purchased=0,reserved=10,available=0)
+        print("PASS=source_wallet_concurrent_reservations_never_overspend",flush=True)
+        from qd766.backend.subscriptions import redeem_month,schedule_plan,grant_due_cycles,monthly_boundary
+        from qd766.backend.models import SubscriptionCycle,CreditWalletEvent
+        subscription_account=uuid.uuid4()
+        with factory.begin() as db:
+            db.add(UserAccount(id=subscription_account,external_subject="pg-subscription-test",
+                display_name="Subscription concurrency",access_tier="province"))
+            db.flush()
+            grant(db,subscription_account,1000,source="purchased",operation_key="seed",now=wallet_now)
+        redemption_barrier=Barrier(6)
+        def redeem_concurrently(i):
+            redemption_barrier.wait(timeout=15)
+            try:
+                with factory.begin() as db:
+                    redeem_month(db,subscription_account,operation_key=f"redeem:{i}",now=wallet_now)
+                return "redeemed"
+            except WalletError:
+                return "blocked"
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            results=list(executor.map(redeem_concurrently,range(6)))
+        assert results.count("redeemed")==1 and results.count("blocked")==5
+        with factory() as db:
+            assert balance(db,subscription_account,now=wallet_now)["purchased"]==400
+            assert count(db,SubscriptionCycle,SubscriptionCycle.account_id==subscription_account)==1
+            assert count(db,CreditWalletEvent,CreditWalletEvent.account_id==subscription_account,
+                         CreditWalletEvent.kind=="charge")==1
+        print("PASS=concurrent_subscription_redemption_charges_once",flush=True)
+        cycle_now=monthly_boundary(wallet_now,1)
+        with factory.begin() as db:
+            schedule_plan(db,subscription_account,tier="province",origin="paid",operation_key="six-month-plan",
+                          starts_at=cycle_now,months=6,now=wallet_now)
+        grant_barrier=Barrier(6)
+        def grant_concurrently(i):
+            grant_barrier.wait(timeout=15)
+            with factory.begin() as db:
+                return grant_due_cycles(db,subscription_account,now=cycle_now)
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            results=list(executor.map(grant_concurrently,range(6)))
+        assert sum(results)==1
+        with factory() as db:
+            assert balance(db,subscription_account,now=cycle_now)==dict(subscription=200,purchased=400,reserved=0,available=600)
+        print("PASS=concurrent_monthly_credit_grant_once_no_future_grants",flush=True)
+        from qd766.backend.wallet_access import enroll
+        factory.configure(info={"source_wallet_enabled":True})
+        source_accounts=[uuid.uuid4(),uuid.uuid4()]
+        with factory.begin() as db:
+            for i,aid in enumerate(source_accounts):
+                db.add(UserAccount(id=aid,external_subject=f"pg-source-request:{i}",display_name="Source request",
+                    access_tier="province",plan="paid",credit_balance=31))
+                db.flush();enroll(db,aid,now=wallet_now)
+                grant(db,aid,2,source="subscription",operation_key="sub",now=wallet_now,
+                      expires_at=monthly_boundary(wallet_now,1))
+                grant(db,aid,10,source="purchased",operation_key="purchase",now=wallet_now)
+                db.add(SubscriptionCycle(account_id=aid,operation_key="fixture",tier="province",
+                    origin="redemption",starts_at=wallet_now,ends_at=monthly_boundary(wallet_now,1),included_credit=0))
+        source_barrier=Barrier(6)
+        def source_request(i):
+            source_barrier.wait(timeout=15)
+            with factory.begin() as db:
+                paid,_=create_paid_data_request(db,account_id=source_accounts[i%2],province_code="25",
+                    root_department_id=root,formality_id=formality,period_type="month",year=2026,
+                    period_value=9,credit_cost=5,idempotency_token=f"source:{i}",max_pending_requests=2)
+                return paid.id,paid.collection_job_id
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            results=list(executor.map(source_request,range(6)))
+        assert len({r[0] for r in results})==2 and len({r[1] for r in results})==1
+        finish(results[0][1],True)
+        with factory() as db:
+            for aid in source_accounts:
+                assert balance(db,aid,now=wallet_now)==dict(subscription=0,purchased=7,reserved=0,available=7)
+                assert (db.get(UserAccount,aid).credit_balance,db.get(UserAccount,aid).credit_reserved)==(31,0)
+                assert count(db,CreditWalletEvent,CreditWalletEvent.account_id==aid,CreditWalletEvent.kind=="charge")==1
+        print("PASS=source_wallet_shared_job_separate_charges_no_legacy_mutation",flush=True)
+        activation_account=uuid.uuid4()
+        with factory.begin() as db:
+            db.add(UserAccount(id=activation_account,external_subject="pg-trial-activation",
+                display_name="Trial activation",access_tier="province",trial_admitted=True,credit_balance=50))
+        activation_barrier=Barrier(6)
+        def activate_concurrently(i):
+            activation_barrier.wait(timeout=15)
+            try:
+                with factory.begin() as db:
+                    enroll(db,activation_account,now=wallet_now)
+                    schedule_plan(db,activation_account,tier="province",origin="trial",
+                        operation_key=f"trial:{i}",starts_at=wallet_now,months=1,now=wallet_now)
+                    grant_due_cycles(db,activation_account,now=wallet_now)
+                return "activated"
+            except WalletError:
+                return "blocked"
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            results=list(executor.map(activate_concurrently,range(6)))
+        assert results.count("activated")==1 and results.count("blocked")==5
+        with factory() as db:
+            assert balance(db,activation_account,now=wallet_now)["subscription"]==100
+            assert db.get(UserAccount,activation_account).credit_balance==50
+            assert count(db,SubscriptionCycle,SubscriptionCycle.account_id==activation_account)==1
+        print("PASS=concurrent_trial_activation_grants_one_free_month_once",flush=True)
+        from qd766.backend.subscription_maintenance import run_subscription_maintenance
+        maintenance_account = uuid.uuid4()
+        with factory.begin() as db:
+            db.add(UserAccount(id=maintenance_account, external_subject="pg-cycle-maintenance",
+                display_name="Maintenance", access_tier="agency", root_department_id=root,
+                unit_department_id=root, credit_balance=63))
+            db.flush()
+            enroll(db, maintenance_account, now=wallet_now)
+            schedule_plan(db, maintenance_account, tier="agency", origin="paid",
+                operation_key="maintenance-fixture", starts_at=wallet_now, months=6, now=wallet_now)
+        maintenance_barrier = Barrier(6)
+        def maintain_concurrently(i):
+            maintenance_barrier.wait(timeout=15)
+            return run_subscription_maintenance(factory, now=wallet_now, batch_size=2)
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            maintenance_results = list(executor.map(maintain_concurrently, range(6)))
+        assert all(not result["failures"] for result in maintenance_results)
+        with factory() as db:
+            assert balance(db, maintenance_account, now=wallet_now)["subscription"] == 100
+            assert db.get(UserAccount, maintenance_account).credit_balance == 63
+            assert count(db, CreditWalletEvent, CreditWalletEvent.account_id==maintenance_account,
+                         CreditWalletEvent.kind=="grant") == 1
+        print("PASS=overlapping_maintenance_runs_grant_current_cycle_once", flush=True)
         print("POSTGRESQL_CREDIT_TEST=PASS NO_DVCQG_CALLS NO_PRODUCTION_DB", flush=True)
     finally:
         engine.dispose()

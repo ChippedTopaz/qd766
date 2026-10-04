@@ -48,7 +48,7 @@ async def enforce_public_read_only(request: Request, call_next):
         return await call_next(request)
     allowed = request.method in {"GET", "HEAD"}
     user_collection=request.app.state.settings.paid_requests_enabled
-    user_path=path in {"/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/formalities","/api/v1/me/notifications/read"}
+    user_path=path in {"/api/v1/me/credits","/api/v1/me/subscription/redemption","/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/formalities","/api/v1/me/notifications/read"}
     catalog_path=path.startswith("/api/v1/province-catalog/") and path.endswith("/preview")
     private_selection=path=="/api/v1/dashboard/selection" and request.query_params.get("scope")=="formality"
     if path.startswith("/api/"):
@@ -57,7 +57,7 @@ async def enforce_public_read_only(request: Request, call_next):
         allowed = allowed and not any(key.lower().replace("_", "") == "formalityid" for key in request.query_params)
         if user_collection and (user_path or catalog_path or private_selection):
             allowed=(request.method in {"GET","HEAD"} and path!="/api/v1/me/collection-quote") or (
-                request.method=="POST" and path in {"/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/notifications/read"})
+                request.method=="POST" and path in {"/api/v1/me/subscription/redemption","/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/notifications/read"})
     else:
         allowed = allowed and (path in {"/", "/index.html", "/admin.html", "/admin.css", "/styles.css", "/bento.css", "/collection.css"}
             or path.startswith("/dist/") and path.endswith(".js")
@@ -72,6 +72,13 @@ async def enforce_public_read_only(request: Request, call_next):
         if request.app.state.settings.invite_required and not account.trial_admitted:
             return JSONResponse(status_code=403, content={"detail": "Tài khoản chưa được mời dùng thử."})
         if account.role == "admin" and account.trial_admitted and not (user_path or catalog_path or private_selection):
+            response = await call_next(request)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        # National viewing is not an admin role and never bypasses purchased TTHC access.
+        if account.access_tier == "national" and not (user_path or catalog_path or private_selection):
+            if path.startswith("/api/v1/national-summaries"):
+                return JSONResponse(status_code=403, content={"detail":"Sử dụng giao diện so sánh điểm tỉnh."})
             response = await call_next(request)
             response.headers["Cache-Control"] = "no-store"
             return response

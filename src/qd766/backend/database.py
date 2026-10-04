@@ -20,6 +20,8 @@ def create_database_engine(settings: Settings) -> Engine:
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
+    if settings.real_wallet_enabled:
+        options["connect_args"] = {"options": "-c search_path=public"}
     return create_engine(settings.database_url, **options)
 
 

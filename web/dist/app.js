@@ -8,6 +8,10 @@ import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChar
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
 import { CollectionTracker } from "./collection-tracker.js";
 import { cleanLoginSearch } from "./login-url.js";
+import { loginView } from "./login-view.js";
+import { openPersonalCredits, requestCreditDisplay } from "./personal-credits.js";
+import { accountMenu, bindAccountMenu } from "./account-menu.js";
+import { collectionCopy, insufficientCreditMessage } from "./collection-copy.js";
 const root = document.querySelector("#app");
 if (!root)
     throw new Error("Thiếu app root");
@@ -22,6 +26,8 @@ let publicReadOnly = false;
 let paidRequestsEnabled = false;
 let loginRequired = false;
 let googleLoginEnabled = false;
+let localSimulation = false;
+let localGoogleTrial = false;
 let signedInUser = null;
 let data;
 let state;
@@ -44,6 +50,7 @@ let libraryRequest = 0;
 let collectionTab = "new";
 let myRequests = [];
 let historyError = "", historyLoading = false, historyTimer = 0;
+let pendingRequestCount = null;
 let acquisitionMessage = "";
 let creditQuote = null;
 let confirmationToken = "";
@@ -84,7 +91,7 @@ function collectionNotices() {
     const count = paidRequestsEnabled ? myRequests.filter(item => ["reserved", "waiting", "running"].includes(item.state)).length : pending.length;
     return count || unreadNotifications ? `<button class="collection-status-pill" data-action="request-history">${count ? `${count} yêu cầu đang xử lý` : ""}${count && unreadNotifications ? " · " : ""}${unreadNotifications ? `${unreadNotifications} thông báo mới` : ""} · Xem yêu cầu</button>` : "";
 }
-const canAcquire = () => paidRequestsEnabled || !publicReadOnly;
+const canAcquire = () => paidRequestsEnabled ? Boolean(signedInUser?.canCollect) : !publicReadOnly;
 const libraryParams = () => {
     const selected = period();
     const params = new URLSearchParams({ period_type: selected.type, year: String(selected.year) });
@@ -93,7 +100,7 @@ const libraryParams = () => {
     return params;
 };
 async function loadLibrary() {
-    if (!canAcquire())
+    if (!paidRequestsEnabled && !canAcquire())
         return;
     const revision = ++libraryRequest, rootId = data.province.id, periodId = state.periodId;
     library = [];
@@ -145,6 +152,7 @@ async function loadMyRequests(markRead = false) {
             throw new Error("Chưa đọc được lịch sử yêu cầu.");
         if (paidRequestsEnabled) {
             const body = await response.json();
+            pendingRequestCount = body.pendingRequests ?? null;
             unreadNotifications = body.unreadNotifications ?? 0;
             const previous = new Map(myRequests.map(item => [item.id, item.state]));
             myRequests = body.items;
@@ -153,8 +161,10 @@ async function loadMyRequests(markRead = false) {
                 announceCollectionComplete(`${data.province.name} · ${requestPeriod(completed)} · ${completed.code}`);
                 void loadLibrary();
             }
-            if (signedInUser)
+            if (signedInUser) {
                 signedInUser.credits = body.availableCredits;
+                signedInUser.reservedCredits = body.reservedCredits;
+            }
             if (markRead && unreadNotifications) {
                 const acknowledged = await fetch("/api/v1/me/notifications/read", { method: "POST", headers: { "Content-Type": "application/json", "X-QD766-CSRF": signedInUser?.csrfToken ?? "" }, body: JSON.stringify({ requestIds: myRequests.map(item => item.id) }) });
                 if (acknowledged.ok)
@@ -202,14 +212,25 @@ function requestPeriod(item) { return item.periodType === "month" ? `Tháng ${it
 function acquisitionPage() {
     if (!canAcquire())
         return `<section class="panel"><div class="empty-state"><h2>Khai thác dữ liệu theo TTHC</h2><p>Đăng nhập tài khoản được cấp quyền để tạo yêu cầu khai thác.</p></div></section>`;
-    const labels = { ready: "Hoàn thành", succeeded: "Hoàn thành", waiting: "Đang chờ", reserved: "Đang chờ", queued: "Đang chờ", running: "Đang xử lý", refunded: "Đã hoàn credit", failed: "Thất bại", halted: "Đã dừng" };
-    const historyView = `<section class="panel"><div class="panel-head"><h2>${paidRequestsEnabled ? "Yêu cầu của tôi" : "Yêu cầu trên máy cơ quan"}</h2><button class="btn small" data-action="refresh-history">Làm mới</button></div>${historyError ? `<p class="collection-error">${esc(historyError)}</p>` : ""}<div class="table-wrap"><table><thead><tr><th>Thủ tục hành chính</th><th>Kỳ</th><th>Trạng thái</th><th>Credit</th><th></th></tr></thead><tbody>${myRequests.map(item => `<tr><td><b>${esc(item.code)}</b><span class="request-name" title="${esc(item.name)}">${esc(item.name)}</span></td><td>${esc(requestPeriod(item))}</td><td><span class="badge ${["ready", "succeeded"].includes(item.state) ? "good" : "neutral"}">${esc(labels[item.state] ?? item.state)}</span></td><td>${item.creditCost === null ? "Quản trị" : int(item.creditCost)}</td><td>${["ready", "succeeded"].includes(item.state) ? `<button class="btn small" data-view-request="${esc(item.id)}">Xem dữ liệu</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="5">${historyLoading ? "Đang đọc lịch sử…" : "Chưa có yêu cầu nào."}</td></tr>`}</tbody></table></div></section>`;
-    return `<header class="bento-heading"><h1>Khai thác dữ liệu TTHC</h1><p>${esc(data.province.name)} · ${esc(period().label)}</p></header><div class="collection-tabs"><button class="btn ${collectionTab === "new" ? "primary" : ""}" data-collection-tab="new">Tạo yêu cầu</button><button class="btn ${collectionTab === "history" ? "primary" : ""}" data-collection-tab="history">${paidRequestsEnabled ? "Yêu cầu của tôi" : "Lịch sử quản trị"}</button></div>${acquisitionMessage ? `<p class="collection-feedback" role="status">${esc(acquisitionMessage)}</p>` : ""}${collectionTab === "new" ? catalogReady() : historyView}`;
+    const labels = { ready: "Hoàn thành", succeeded: "Hoàn thành", waiting: "Đang chờ", reserved: "Đang chờ", queued: "Đang chờ", running: "Đang xử lý", refunded: "Thất bại", failed: "Thất bại", halted: "Đã dừng" };
+    const historyView = `<section class="panel"><div class="panel-head"><h2>${paidRequestsEnabled ? "Yêu cầu của tôi" : "Yêu cầu trên máy cơ quan"}</h2><button class="btn small" data-action="refresh-history">Làm mới</button></div>${historyError ? `<p class="collection-error">${esc(historyError)}</p>` : ""}<div class="table-wrap"><table><thead><tr><th>Thủ tục hành chính</th><th>Kỳ</th><th>Trạng thái</th><th>Credit</th><th></th></tr></thead><tbody>${myRequests.map(item => `<tr><td><b>${esc(item.code)}</b><span class="request-name" title="${esc(item.name)}">${esc(item.name)}</span></td><td>${esc(requestPeriod(item))}</td><td><span class="badge ${["ready", "succeeded"].includes(item.state) ? "good" : "neutral"}">${esc(labels[item.state] ?? item.state)}</span></td><td>${requestCreditDisplay(item.state, item.creditCost)}</td><td>${["ready", "succeeded"].includes(item.state) ? `<button class="btn small" data-view-request="${esc(item.id)}">Xem dữ liệu</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="5">${historyLoading ? "Đang đọc lịch sử…" : "Chưa có yêu cầu nào."}</td></tr>`}</tbody></table></div></section>`;
+    return `<header class="bento-heading"><h1>Khai thác dữ liệu TTHC</h1>${paidRequestsEnabled ? `<span class="badge ${pendingRequestCount !== null && pendingRequestCount >= 2 ? "warn" : "neutral"}">${pendingRequestCount === null ? "Tối đa 2 yêu cầu đang chờ / xử lý" : `${int(pendingRequestCount)}/2 yêu cầu đang chờ / xử lý`}</span>` : ""}<p>${esc(data.province.name)} · ${esc(period().label)}</p></header><div class="collection-tabs"><button class="btn ${collectionTab === "new" ? "primary" : ""}" data-collection-tab="new">Tạo yêu cầu</button><button class="btn ${collectionTab === "history" ? "primary" : ""}" data-collection-tab="history">${paidRequestsEnabled ? "Yêu cầu của tôi" : "Lịch sử quản trị"}</button></div>${acquisitionMessage ? `<p class="collection-feedback" role="status">${esc(acquisitionMessage)}</p>` : ""}${collectionTab === "new" ? catalogReady() : historyView}`;
 }
 function collectionConfirmation() {
     const selected = catalogPreview.items.find(item => item.id === catalogPreview.selectedId);
     const rows = creditQuote?.items ?? (selected ? [selected] : []);
-    return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Xác nhận lấy dữ liệu"><div class="modal collection-confirm"><div class="modal-top"><strong>Xác nhận lấy dữ liệu</strong><button class="btn small" data-action="close-modal">Đóng</button></div><div class="brief"><h2>${esc(period().label)} · ${esc(data.province.name)}</h2><ul>${rows.map(item => `<li><b>${esc(item.code)}</b> ${esc(item.name)}</li>`).join("")}</ul>${creditQuote ? `<div class="credit-summary"><span>Chi phí</span><strong>${int(creditQuote.totalCredits)} credit</strong><span>Số dư: ${int(creditQuote.availableCredits)} credit</span></div><p>Credit được giữ khi gửi yêu cầu, ghi nhận thu khi dữ liệu sẵn sàng. Hoàn toàn bộ nếu thất bại, bị chặn hoặc hủy. Thủ tục đã thuộc quyền khai thác của bạn không thu thêm.</p>` : `<p>Môi trường quản trị máy cơ quan: không thu credit. Phân quyền theo tài khoản chỉ được kiểm chứng khi bật đăng nhập.</p>`}<p class="collection-error">${esc(acquisitionMessage)}</p><button class="btn primary" data-action="confirm-collection" ${submittingCollection || Boolean(creditQuote && creditQuote.totalCredits > creditQuote.availableCredits) ? "disabled" : ""}>${submittingCollection ? "Đang gửi…" : "Xác nhận lấy dữ liệu"}</button></div></div></div>`;
+    const copy = creditQuote ? collectionCopy(creditQuote.items) : { title: "Tra cứu dữ liệu", notice: "", button: "Tra cứu dữ liệu", mode: "new" };
+    const expired = creditQuote?.blockedReason === "subscription_expired";
+    return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="${esc(copy.title)}"><div class="modal collection-confirm">
+    <div class="modal-top"><strong>${esc(copy.title)}</strong><button class="btn small" data-action="close-modal">Đóng</button></div>
+    <div class="brief"><h2>${esc(period().label)} · ${esc(data.province.name)}</h2><ul>${rows.map(item => `<li><b>${esc(item.code)}</b> ${esc(item.name)}</li>`).join("")}</ul>
+    ${creditQuote ? `<div class="credit-summary"><span>Credit sử dụng</span><strong>${int(creditQuote.totalCredits)} Credit</strong><span>Số dư: ${int(creditQuote.availableCredits)} Credit</span></div>
+      ${expired ? '<div role="alert" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:16px;margin:16px 0"><strong>Subscription đã hết hạn</strong><p>Gia hạn để tiếp tục khai thác. Yêu cầu chưa được gửi và không giữ Credit.</p></div>' : `<p role="status">${esc(copy.notice)}</p>`}` :
+        `<p>Môi trường quản trị máy cơ quan: không thu credit. Phân quyền theo tài khoản chỉ được kiểm chứng khi bật đăng nhập.</p>`}
+    <p class="collection-error" ${acquisitionMessage ? 'role="alert"' : ""}>${esc(acquisitionMessage)}</p>
+    <button class="btn primary" data-action="${copy.mode === "new" ? "confirm-collection" : "open-owned-quote"}" ${expired || submittingCollection ? "disabled" : ""}>${submittingCollection ? "Đang gửi…" : esc(copy.button)}</button>
+    ${expired ? '<button class="btn" data-action="renew-from-collection">Gia hạn trong Usage</button>' : ""}
+    </div></div></div>`;
 }
 async function prepareCollection() {
     if (submittingCollection || submittingQuote || catalogPreview.loading || catalogPreview.error || !canAcquire())
@@ -231,13 +252,13 @@ async function prepareCollection() {
         try {
             const selected = period();
             const response = await fetch("/api/v1/me/collection-quote", { method: "POST", headers: { "Content-Type": "application/json", "X-QD766-CSRF": signedInUser?.csrfToken ?? "" }, body: JSON.stringify({ periodType: selected.type, year: selected.year, periodValue: selected.value ?? null, formalityIds: ids }) });
-            if (!response.ok) {
-                const body = await response.json();
-                throw new Error(body.detail ?? "Chưa lấy được chi phí.");
+            const body = await response.json();
+            if (!response.ok && !(response.status === 403 && body.blockedReason === "subscription_expired")) {
+                throw new Error(body.detail ?? "Chưa xác định được Credit sử dụng.");
             }
-            const result = await response.json();
+            const result = body;
             if (quotedContext !== data.province.id + ":" + state.periodId) {
-                acquisitionMessage = "Kỳ hoặc tỉnh đã thay đổi; hãy xác nhận chi phí lại.";
+                acquisitionMessage = "Kỳ hoặc tỉnh đã thay đổi; vui lòng xác nhận lại yêu cầu tra cứu.";
                 return;
             }
             creditQuote = result;
@@ -269,8 +290,14 @@ async function confirmCollection() {
         render();
         return;
     }
-    if (!creditQuote)
+    if (!creditQuote || creditQuote.blockedReason)
         return;
+    const insufficient = insufficientCreditMessage(creditQuote.totalCredits, creditQuote.availableCredits);
+    if (insufficient) {
+        acquisitionMessage = insufficient;
+        render();
+        return;
+    }
     submittingCollection = true;
     render();
     try {
@@ -278,8 +305,10 @@ async function confirmCollection() {
         const body = await response.json();
         if (!response.ok)
             throw new Error(body.detail ?? "Chưa gửi được yêu cầu.");
-        if (signedInUser)
+        if (signedInUser) {
             signedInUser.credits = body.availableCredits;
+            signedInUser.reservedCredits = body.reservedCredits;
+        }
         state.modal = "none";
         collectionTab = "history";
         catalogPreview.selectedId = null;
@@ -388,7 +417,9 @@ const unitOptions = () => {
 };
 function nav() {
     const html = baseNav();
-    return signedInUser?.role === "admin" ? html.replace("</nav>", `<button type="button" data-action="open-admin" title="Quản trị dùng thử"><span class="nav-icon" aria-hidden="true">${icon("shield")}</span><span>Quản trị dùng thử</span></button></nav>`) : html;
+    const collection = publicReadOnly && paidRequestsEnabled && canAcquire() ? `<button type="button" data-nav="procedure" class="${state.screen === "procedure" ? "active" : ""}"><span class="nav-icon" aria-hidden="true">${icon("document")}</span><span>Theo TTHC</span></button>` : "";
+    const admin = signedInUser?.role === "admin" ? `<button type="button" data-action="open-admin" title="Quản trị dùng thử"><span class="nav-icon" aria-hidden="true">${icon("shield")}</span><span>Quản trị dùng thử</span></button>` : "";
+    return html.replace("</nav>", collection + admin + "</nav>").replace(/<div class="side-meta">[\s\S]*?<\/div><\/div><\/aside>$/, signedInUser ? accountMenu(signedInUser) + "</aside>" : '$&');
 }
 function baseNav() {
     return `<aside class="sidebar"><div class="brand"><span class="brand-mark">766</span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item => !publicReadOnly || !["procedure", "operations", "suggestions"].includes(item.id)).map((item) => `<button data-nav="${item.id}" class="${state.screen === item.id ? "active" : ""}" aria-current="${state.screen === item.id ? "page" : "false"}"><span class="nav-icon" aria-hidden="true">${icon(({ overview: "shield", time: "chart", peers: "monitor", procedure: "document", suggestions: "star", quality: "shield", operations: "clock", formulas: "document" })[item.id])}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
@@ -403,7 +434,7 @@ function context() {
     const canSubmit = !publicReadOnly && !submittingCollection && !collectionTracker.hasActive(selectionKey()) && state.scope === "formality" && ["ready", "normal"].includes(state.demo) && (catalogPreview.mode === "filtered" ? catalogPreview.selected > 0 : Boolean(catalogPreview.selectedId));
     const selectedProvinceId = pendingProvinceId || data.province.id;
     const provinceItems = (provinceOptions.length ? provinceOptions : [{ id: data.province.id, name: data.province.name, departmentCode: null, provinceCode: data.province.code ?? null, snapshotCount: 0, latestSnapshotAt: null, available: true }]).slice().sort((left, right) => alphabet.compare(displayProvinceName(left.name), displayProvinceName(right.name))).map(item => `<option value="${esc(item.id)}" ${item.id === selectedProvinceId ? "selected" : ""}>${esc(displayProvinceName(item.name))}${item.available ? "" : " · chưa có dữ liệu"}</option>`).join("");
-    return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type === "month" ? "selected" : ""}>Tháng</option><option value="quarter" ${selectedPeriod.type === "quarter" ? "selected" : ""}>Quý</option><option value="year" ${selectedPeriod.type === "year" ? "selected" : ""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item => `<option value="${item.id}" ${item.id === state.periodId ? "selected" : ""}>${item.type === "month" ? `Tháng ${item.value}` : item.type === "quarter" ? `Quý ${item.value}` : "Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year => `<option value="${year}" ${year === selectedPeriod.year ? "selected" : ""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope === "all" ? "selected" : ""}>Tất cả thủ tục hành chính</option>${!canAcquire() ? "" : `<option value="formality" ${state.scope === "formality" ? "selected" : ""}>Theo thủ tục hành chính</option>`}</select></label></div><div class="context-bottom">${state.scope === "formality" && state.screen !== "procedure" ? `<label class="field saved-formality"><span>Thủ tục đã khai thác</span><select id="saved-formality"><option value="">${libraryLoading ? "Đang đọc danh sách…" : "Chọn thủ tục đã khai thác"}</option>${library.map(item => `<option value="${esc(item.id)}" ${item.id === data.formality.id ? "selected" : ""}>${esc(item.code + " · " + item.name)}</option>`).join("")}</select></label>` : ""}<div class="context-actions">${signedInUser ? `<span class="muted">${esc(signedInUser.name)}</span><button class="btn" data-action="logout">Đăng xuất</button>` : googleLoginEnabled ? `<a class="btn" href="/api/v1/auth/google/start">Đăng nhập Google</a>` : ""}${canAcquire() ? `<button class="btn" data-action="new-collection">+ Lấy dữ liệu TTHC khác</button>` : ""}${collectionNotices()}<button class="btn" data-action="open-quality">${data.snapshots[snapshotKey(state.periodId, state.scope, data.formality.id)]?.delivery?.detailsAvailable === false ? "● Chỉ có điểm tổng hợp" : "● Chất lượng dữ liệu"}</button><button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></div></header>`;
+    return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type === "month" ? "selected" : ""}>Tháng</option><option value="quarter" ${selectedPeriod.type === "quarter" ? "selected" : ""}>Quý</option><option value="year" ${selectedPeriod.type === "year" ? "selected" : ""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item => `<option value="${item.id}" ${item.id === state.periodId ? "selected" : ""}>${item.type === "month" ? `Tháng ${item.value}` : item.type === "quarter" ? `Quý ${item.value}` : "Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year => `<option value="${year}" ${year === selectedPeriod.year ? "selected" : ""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope === "all" ? "selected" : ""}>Tất cả thủ tục hành chính</option>${!canAcquire() ? "" : `<option value="formality" ${state.scope === "formality" ? "selected" : ""}>Theo thủ tục hành chính</option>`}</select></label></div><div class="context-bottom">${state.scope === "formality" && state.screen !== "procedure" ? `<label class="field saved-formality"><span>Thủ tục đã khai thác</span><select id="saved-formality"><option value="">${libraryLoading ? "Đang đọc danh sách…" : "Chọn thủ tục đã khai thác"}</option>${library.map(item => `<option value="${esc(item.id)}" ${item.id === data.formality.id ? "selected" : ""}>${esc(item.code + " · " + item.name)}</option>`).join("")}</select></label>` : ""}<div class="context-actions">${!signedInUser && googleLoginEnabled ? `<a class="btn" href="/api/v1/auth/google/start">Đăng nhập Google</a>` : ""}${canAcquire() ? `<button class="btn" data-action="new-collection">+ Tra cứu TTHC khác</button>` : ""}${collectionNotices()}<button class="btn" data-action="open-quality">${data.snapshots[snapshotKey(state.periodId, state.scope, data.formality.id)]?.delivery?.detailsAvailable === false ? "● Chỉ có điểm tổng hợp" : "● Chất lượng dữ liệu"}</button><button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></div></header>`;
 }
 function shell(content) {
     // Async search refreshes replace the shell; preserve only the active search input.
@@ -419,7 +450,20 @@ function shell(content) {
     searchableSelects = [];
     const timingNotice = loaded?.delivery?.detailsAvailable === false ? `<div class="period-notice" role="status"><strong>Chỉ có điểm tổng hợp tỉnh</strong><span>Kỳ này có đủ điểm 6 nhóm để so sánh tỉnh; chưa có chỉ tiêu thành phần hoặc điểm sở/ngành, xã/phường. Chọn kỳ không tạo yêu cầu thu thập.</span></div>` : state.demo === "normal" && loaded?.delivery?.result === "national-summary" && loaded.delivery.capturedAt !== loaded.delivery.detailsCapturedAt ? `<div class="period-notice" role="status"><strong>Hai thời điểm cập nhật</strong><span>Điểm tỉnh: ${esc(dateTime(loaded.delivery.capturedAt))}. Chi tiết chỉ tiêu và điểm cơ quan trực thuộc: ${esc(dateTime(loaded.delivery.detailsCapturedAt))}. Số liệu thành phần có thể chưa khớp điểm tỉnh mới nhất.</span></div>` : "";
     root.innerHTML = `<div class="app-shell enterprise-mode ${["overview", "formulas"].includes(state.screen) ? "bento-mode" : ""}">${nav()}<div class="workspace">${context()}<main class="content">${state.screen === "formulas" ? "" : (state.screen === "overview" && state.demo === "normal" ? "" : staleNotice + periodNotice + timingNotice)}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : state.modal === "collection" ? collectionConfirmation() : ""}${completionMessage ? `<div class="collection-toast" role="status"><strong>Hoàn tất</strong><span>${esc(completionMessage)}</span><button class="btn small" data-action="dismiss-completion">Đóng</button></div>` : ""}</div>`;
+    if (localSimulation)
+        root.querySelector(".content")?.insertAdjacentHTML("afterbegin", '<div class="period-notice"><strong>THỬ NGHIỆM LOCAL · DỮ LIỆU MÔ PHỎNG</strong><span>Không gọi Cổng DVCQG, không trừ credit thật.</span><a class="btn small" href="/local-trial.html">Đổi tài khoản / thử kết quả job</a></div>');
+    if (localGoogleTrial)
+        root.querySelector(".content")?.insertAdjacentHTML("afterbegin", '<div class="period-notice"><strong>BẢN THỬ GOOGLE LOCAL</strong><span>Google thật · Dữ liệu và credit mô phỏng · Không chạy worker lấy dữ liệu thật.</span></div>');
+    if (paidRequestsEnabled && signedInUser) {
+        const scopeSelect = root.querySelector("#scope-select");
+        if (scopeSelect && !scopeSelect.querySelector('option[value="formality"]')) {
+            scopeSelect.insertAdjacentHTML("beforeend", '<option value="formality">Theo TTHC · đã khai thác</option>');
+            scopeSelect.value = state.scope;
+        }
+    }
     bind();
+    if (signedInUser)
+        bindAccountMenu(signedInUser);
     if (queryCaret) {
         const query = document.querySelector("#catalog-query");
         query?.focus({ preventScroll: true });
@@ -757,7 +801,7 @@ function catalogReady() {
     const first = catalogPreview.selected ? catalogPreview.offset + 1 : 0;
     const last = Math.min(catalogPreview.offset + catalogPreview.items.length, catalogPreview.selected);
     const canSubmit = canAcquire() && !submittingCollection && !submittingQuote && !catalogPreview.loading && !catalogPreview.error && (catalogPreview.mode === "filtered" ? catalogPreview.selected > 0 : Boolean(selected));
-    return `<section class="panel catalog-panel"><div class="catalog-mode"><button class="${catalogPreview.mode === "single" ? "active" : ""}" data-catalog-mode="single">Một TTHC</button><button class="${catalogPreview.mode === "filtered" ? "active" : ""}" data-catalog-mode="filtered">Kết quả sau lọc</button></div><div class="catalog-filters"><label class="field"><span>Cấp thực hiện</span><select id="catalog-level"><option value="">Cấp tỉnh và cấp xã</option><option value="province" ${catalogPreview.level === "province" ? "selected" : ""}>Cấp tỉnh</option><option value="ward" ${catalogPreview.level === "ward" ? "selected" : ""}>Cấp xã</option></select></label><label class="field"><span>Lĩnh vực</span><select id="catalog-field"><option value="">Tất cả lĩnh vực</option>${catalogPreview.fields.map(field => `<option value="${esc(field)}" ${field === catalogPreview.field ? "selected" : ""}>${esc(field)}</option>`).join("")}</select></label><label class="field catalog-search"><span>Tìm mã hoặc tên TTHC</span><input id="catalog-query" type="search" value="${esc(catalogPreview.query)}" placeholder="Nhập mã hoặc tên thủ tục"></label></div><p class="catalog-count">${int(catalogPreview.selected)} thủ tục phù hợp · Chọn bộ lọc không tạo yêu cầu hay trừ credit.</p>${catalogPreview.loading ? `<div class="empty-state"><h2>Đang đọc danh mục…</h2></div>` : catalogPreview.error ? `<p class="collection-error">${esc(catalogPreview.error)}</p>` : `<div class="catalog-list">${rows || '<div class="empty-state">Không tìm thấy TTHC phù hợp.</div>'}</div><div class="catalog-pagination"><span>Hiển thị ${int(first)}–${int(last)} / ${int(catalogPreview.selected)}</span><div><button class="btn small" data-action="catalog-prev" ${catalogPreview.offset === 0 ? "disabled" : ""}>Trang trước</button><button class="btn small" data-action="catalog-next" ${last >= catalogPreview.selected ? "disabled" : ""}>Trang sau</button></div></div>`}<div class="catalog-submit"><div><strong>${catalogPreview.mode === "filtered" ? int(catalogPreview.selected) + " TTHC" : selected ? esc(selected.code) : "Chưa chọn TTHC"}</strong><span title="${esc(selected?.name ?? "")}">${selected ? esc(selected.name) : "Chi phí được hiển thị trước khi xác nhận."}</span></div><button class="btn primary" data-action="submit-statistics" ${canSubmit ? "" : "disabled"}>${paidRequestsEnabled ? "Xem chi phí & lấy dữ liệu" : "Lấy dữ liệu"}</button></div></section>`;
+    return `<section class="panel catalog-panel"><div class="catalog-mode"><button class="${catalogPreview.mode === "single" ? "active" : ""}" data-catalog-mode="single">Một TTHC</button><button class="${catalogPreview.mode === "filtered" ? "active" : ""}" data-catalog-mode="filtered">Kết quả sau lọc</button></div><div class="catalog-filters"><label class="field"><span>Cấp thực hiện</span><select id="catalog-level"><option value="">Cấp tỉnh và cấp xã</option><option value="province" ${catalogPreview.level === "province" ? "selected" : ""}>Cấp tỉnh</option><option value="ward" ${catalogPreview.level === "ward" ? "selected" : ""}>Cấp xã</option></select></label><label class="field"><span>Lĩnh vực</span><select id="catalog-field"><option value="">Tất cả lĩnh vực</option>${catalogPreview.fields.map(field => `<option value="${esc(field)}" ${field === catalogPreview.field ? "selected" : ""}>${esc(field)}</option>`).join("")}</select></label><label class="field catalog-search"><span>Tìm mã hoặc tên TTHC</span><input id="catalog-query" type="search" value="${esc(catalogPreview.query)}" placeholder="Nhập mã hoặc tên thủ tục"></label></div><p class="catalog-count">${int(catalogPreview.selected)} thủ tục phù hợp · Chọn bộ lọc không tạo yêu cầu hay trừ credit.</p>${catalogPreview.loading ? `<div class="empty-state"><h2>Đang đọc danh mục…</h2></div>` : catalogPreview.error ? `<p class="collection-error">${esc(catalogPreview.error)}</p>` : `<div class="catalog-list">${rows || '<div class="empty-state">Không tìm thấy TTHC phù hợp.</div>'}</div><div class="catalog-pagination"><span>Hiển thị ${int(first)}–${int(last)} / ${int(catalogPreview.selected)}</span><div><button class="btn small" data-action="catalog-prev" ${catalogPreview.offset === 0 ? "disabled" : ""}>Trang trước</button><button class="btn small" data-action="catalog-next" ${last >= catalogPreview.selected ? "disabled" : ""}>Trang sau</button></div></div>`}<div class="catalog-submit"><div><strong>${catalogPreview.mode === "filtered" ? int(catalogPreview.selected) + " TTHC" : selected ? esc(selected.code) : "Chưa chọn TTHC"}</strong><span title="${esc(selected?.name ?? "")}">${selected ? esc(selected.name) : "Credit sử dụng được hiển thị trước khi xác nhận."}</span></div><button class="btn primary" data-action="submit-statistics" ${canSubmit ? "" : "disabled"}>${paidRequestsEnabled ? "Tra cứu dữ liệu" : "Lấy dữ liệu"}</button></div></section>`;
 }
 function operationPeriod(job) {
     const selected = job.request.period;
@@ -896,6 +940,27 @@ function bind() {
     document.querySelectorAll('[data-collection-tab]').forEach(el => el.addEventListener('click', () => { void openAcquisition(el.dataset.collectionTab); }));
     document.querySelector('[data-action=refresh-history]')?.addEventListener('click', () => { void loadMyRequests(); });
     document.querySelector('[data-action=confirm-collection]')?.addEventListener('click', () => { void confirmCollection(); });
+    document.querySelector('[data-action=renew-from-collection]')?.addEventListener('click', () => {
+        state.modal = "none";
+        creditQuote = null;
+        render();
+        openPersonalCredits((available, reserved) => { if (signedInUser) {
+            signedInUser.credits = available;
+            signedInUser.reservedCredits = reserved;
+            render();
+        } });
+    });
+    document.querySelector('[data-action=open-owned-quote]')?.addEventListener('click', () => {
+        if (!creditQuote)
+            return;
+        const copy = collectionCopy(creditQuote.items);
+        state.modal = "none";
+        const item = creditQuote.items[0];
+        if (copy.mode === "ready" && creditQuote.items.length === 1 && item)
+            void openSavedFormality(item);
+        else
+            void openAcquisition("history");
+    });
     document.querySelector('#saved-formality')?.addEventListener('change', event => { const item = library.find(item => item.id === event.target.value); if (item)
         void openSavedFormality(item); });
     document.querySelectorAll('[data-view-request]').forEach(el => el.addEventListener('click', () => {
@@ -936,6 +1001,11 @@ function bind() {
         if (signedInUser?.role === "admin")
             window.location.assign("/admin.html");
     });
+    document.querySelector("[data-action=open-credits]")?.addEventListener("click", () => openPersonalCredits((available, reserved) => { if (signedInUser) {
+        signedInUser.credits = available;
+        signedInUser.reservedCredits = reserved;
+        render();
+    } }));
     document.querySelector("[data-action=logout]")?.addEventListener("click", async () => {
         if (!signedInUser)
             return;
@@ -1397,6 +1467,8 @@ async function start() {
             throw new Error("Website chưa kết nối được backend HTTPS máy cơ quan.");
         if (policyResponse.ok) {
             const policy = await policyResponse.json();
+            localSimulation = Boolean(policy.localSimulation);
+            localGoogleTrial = Boolean(policy.localGoogleTrial);
             invitationOnly = Boolean(policy.inviteRequired);
             if (productionSite && policy.publicReadOnly !== true)
                 throw new Error("Backend chưa bật chế độ truy cập công khai an toàn.");
@@ -1412,13 +1484,13 @@ async function start() {
             else if (meResponse.status !== 401 && meResponse.status !== 403)
                 throw new Error("Chưa kiểm tra được phiên đăng nhập. Vui lòng thử lại.");
             if (loginRequired && (!signedInUser || (!signedInUser.provinceId && signedInUser.role !== "admin"))) {
-                if (new URLSearchParams(location.search).get("login") === "invite-required") {
-                    root.innerHTML = '<main class="content"><div class="empty-state"><h2>Dùng thử theo lời mời</h2><p>Hãy mở link mời của quản trị viên và đăng nhập bằng đúng tài khoản Google được mời.</p><a class="btn" href="/api/v1/auth/google/start">Đăng nhập lại</a></div></main>';
+                if (localSimulation) {
+                    location.assign("/local-trial.html");
                     return;
                 }
-                root.innerHTML = `<main class="content"><div class="empty-state"><h2>${signedInUser ? "Tài khoản đang chờ duyệt" : "Đăng nhập QĐ766"}</h2><p>${signedInUser ? "Quản trị viên cần gán tỉnh/cơ quan cho tài khoản trước khi tra cứu." : "Đăng nhập Google để xem dữ liệu của tỉnh/cơ quan được phân quyền."}</p>${!signedInUser && googleLoginEnabled ? `<a class="btn primary" href="/api/v1/auth/google/start">Đăng nhập Google</a>` : ""}${signedInUser ? `<button class="btn" data-action="logout">Đăng xuất</button>` : ""}${new URLSearchParams(location.search).get("login") === "failed" ? `<p>Đăng nhập không thành công hoặc phiên xác nhận đã hết hạn. Vui lòng thử lại.</p>` : ""}</div></main>`;
-                if (invitationOnly)
-                    root.querySelector(".empty-state")?.insertAdjacentHTML("beforeend", "<p>Giai đoạn dùng thử chỉ dành cho người có link mời của quản trị viên.</p>");
+                root.innerHTML = loginView({ pending: Boolean(signedInUser), name: signedInUser?.name ?? "", local: localGoogleTrial,
+                    failed: new URLSearchParams(location.search).get("login") === "failed",
+                    inviteRequired: invitationOnly, googleEnabled: googleLoginEnabled });
                 bind();
                 return;
             }
@@ -1452,7 +1524,7 @@ async function start() {
             state.unitId = rememberedUnit;
         document.title = `Phân tích Bộ chỉ số 766 · ${data.province.name.replace(/^UBND\s+/i, "")}`;
         render();
-        if (canAcquire()) {
+        if (paidRequestsEnabled || canAcquire()) {
             await loadLibrary();
             if (remembered.get("scope") === "formality") {
                 const saved = library.find(item => item.id === remembered.get("formality"));

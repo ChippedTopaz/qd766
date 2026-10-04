@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import {pathToFileURL} from "node:url";
+const {renderSourceWallet,sourceLabel}=await import(pathToFileURL(process.argv[2]).href);
+assert.equal(renderSourceWallet({}),"");
+const html=renderSourceWallet({walletMode:"sources",subscriptionCredits:100,purchasedCredits:600,
+  legacyCredits:94,redemptionCost:600,canRedeem:true,subscriptionEndsAt:null});
+assert.match(html,/Credit subscription/);
+assert.match(html,/Credit mua riêng/);
+assert.match(html,/600 Credit mua riêng/);
+assert.match(html,/Tháng quy đổi không cấp thêm Credit/);
+assert.match(html,/94 Credit thử nghiệm cũ/);
+assert.match(html,/data-renew-confirm hidden/);
+assert.match(renderSourceWallet({walletMode:"sources",redemptionCost:300,canRedeem:false}),/data-renew disabled/);
+assert.equal(sourceLabel("subscription"),"Subscription");
+assert.equal(sourceLabel("purchased"),"Mua riêng");
+const expired=renderSourceWallet({walletMode:"sources",subscriptionState:"expired",redemptionCost:300,canRedeem:true});
+assert.match(expired,/Subscription đã hết hạn/);
+assert.match(expired,/Dữ liệu đã khai thác vẫn khả dụng/);
+assert.doesNotMatch(expired,/data-renew disabled/);
+assert.match(renderSourceWallet({walletMode:"sources",subscriptionState:"scheduled"}),/chưa đến ngày bắt đầu/);
+console.log("Source wallet UI PASS");

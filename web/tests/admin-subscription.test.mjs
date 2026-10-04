@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import {pathToFileURL} from "node:url";
+const {adminSubscriptionCell}=await import(pathToFileURL(process.argv[2]).href);
+const base={state:"active",origin:"trial",startsAt:"2026-10-04T03:00:00Z",endsAt:"2026-11-04T03:00:00Z",nextStartsAt:null,subscriptionCredits:100,purchasedCredits:600};
+assert.match(adminSubscriptionCell(null),/Chưa áp dụng/);
+assert.match(adminSubscriptionCell(base),/Còn hiệu lực/);
+assert.match(adminSubscriptionCell(base),/Dùng thử/);
+assert.match(adminSubscriptionCell({...base,state:"expired",origin:"redemption"}),/Đã hết hạn/);
+assert.match(adminSubscriptionCell({...base,state:"expired",origin:"redemption"}),/Gia hạn bằng Credit/);
+assert.match(adminSubscriptionCell({...base,state:"scheduled"}),/Bắt đầu/);
+assert.match(adminSubscriptionCell({...base,state:"none",origin:null,endsAt:null}),/Chưa kích hoạt/);
+console.log("Admin subscription presentation PASS");

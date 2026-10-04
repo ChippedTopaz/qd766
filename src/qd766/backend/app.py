@@ -16,11 +16,14 @@ from .access_policy import enforce_public_read_only
 from .auth import enabled, validate_auth_settings, router as auth_router
 from .user_collection import router as user_collection_router
 from .admin import router as admin_router
+from .subscription_scheduler import local_credit_lifespan
+from .wallet_runtime import validate_wallet_runtime
 
 
 def create_app(settings: Settings | None = None, *, web_root: Path | None = None) -> FastAPI:
     resolved = settings or Settings.from_env()
     validate_auth_settings(resolved)
+    validate_wallet_runtime(resolved)
     if resolved.paid_requests_enabled and (not resolved.require_login or resolved.formality_credit_cost <= 0):
         raise ValueError("TTHC user collection requires authenticated deployment and configured positive credit cost")
     if resolved.trial_credit_management and not (resolved.paid_requests_enabled and resolved.trial_credits_enabled):
@@ -28,7 +31,8 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
     if resolved.public_read_only and "*" in resolved.cors_origins:
         raise ValueError("Public preview requires explicit CORS origins, not '*'")
     engine = create_database_engine(resolved)
-    app = FastAPI(title="QD766 API", version="0.2.0", docs_url=None if resolved.public_read_only else "/docs",
+    app = FastAPI(title="QD766 API", version="0.2.0", lifespan=local_credit_lifespan,
+                  docs_url=None if resolved.public_read_only else "/docs",
                   redoc_url=None if resolved.public_read_only else "/redoc",
                   openapi_url=None if resolved.public_read_only else "/openapi.json")
     app.state.settings = resolved
@@ -49,10 +53,16 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
                 "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": resolved.paid_requests_enabled,
                 "inviteRequired": resolved.invite_required,
                 "trialCreditManagement": resolved.trial_credit_management,
+                **({"defaultCollectionAccess": True} if resolved.source_wallet_enabled else {}),
+                **({"collectionRequestsPaused": resolved.wallet_requests_paused} if resolved.real_wallet_enabled else {}),
                 "localSimulation": bool(getattr(app.state, "local_credit_trial", False)),
                 **({"localGoogleTrial": True} if resolved.local_google_trial else {})}
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
+    app.state.session_factory.configure(info={"source_wallet_enabled": resolved.source_wallet_enabled,
+                                             "default_collection_access": resolved.source_wallet_enabled,
+                                             "real_wallet_enabled": resolved.real_wallet_enabled,
+                                             "wallet_requests_paused": resolved.wallet_requests_paused})
     app.state.dashboard_cache = SingleFlightTTLCache[str, dict](
         resolved.dashboard_cache_ttl_seconds
     )

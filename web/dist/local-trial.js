@@ -1,0 +1,55 @@
+"use strict";
+const root = document.querySelector("#trial");
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let csrf = "";
+async function api(path, body) { const response = await fetch("/api/v1/" + path, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json", "X-QD766-CSRF": csrf }, body: JSON.stringify(body) }); const value = await response.json(); if (!response.ok)
+    throw new Error(typeof value.detail === "string" ? value.detail : "Không thực hiện được thao tác mô phỏng."); return value; }
+const get = (id) => document.getElementById(id);
+async function refresh() { try {
+    const me = await api("auth/me");
+    csrf = me.csrfToken;
+    get("session").textContent = `${me.name} · khả dụng ${me.credits} · đang giữ ${me.reservedCredits} · ${me.canCollect ? "có quyền TTHC" : "chưa có quyền TTHC"}`;
+    get("worker").hidden = me.role !== "admin";
+    if (me.role === "admin") {
+        const jobs = await api("local-trial/jobs");
+        get("jobs").innerHTML = jobs.filter(j => ["queued", "running"].includes(j.state)).map(j => `<option value="${j.id}">${esc(j.formalityId)} · ${esc(j.state)}</option>`).join("");
+        get("job-count").textContent = `Có ${jobs.length} job trong database mô phỏng. A và B cùng yêu cầu một TTHC/kỳ sẽ chỉ có một job chung.`;
+    }
+}
+catch {
+    get("session").textContent = "Chọn một tài khoản mô phỏng để bắt đầu.";
+    get("worker").hidden = true;
+} }
+async function start() {
+    try {
+        const config = await api("local-trial/accounts");
+        if (!config.simulation)
+            throw new Error("Không phải môi trường mô phỏng.");
+        root.innerHTML = `<header><div><h1>Bàn thử credit local</h1><p><strong>DỮ LIỆU MÔ PHỎNG · Không gọi DVCQG · Không thay production</strong></p><p>Giá ${config.creditCost} credit/TTHC chỉ để kiểm thử, chưa phải giá thương mại.</p></div><a class="button" href="/">Mở Dashboard</a></header><section><h2>Chọn vai thử nghiệm</h2><p>Mỗi tài khoản ban đầu có 30 credit mô phỏng. Việc chuyển tài khoản chỉ có ở môi trường local này, không phải đăng nhập Google thật.</p><div class="actions" style="flex-wrap:wrap">${config.accounts.map(a => `<button data-login="${a.key}">${esc(a.name)}</button>`).join("")}</div><p id="session"></p><a class="button" href="/admin.html">Mở quản trị (vai admin)</a></section><p id="message" role="status"></p><section id="worker" hidden><h2>Mô phỏng kết quả xử lý</h2><p>Tạo yêu cầu trên Dashboard bằng A/B trước. Sau đó chuyển sang admin tại đây, chọn job và kết quả. Không có worker thật hoặc yêu cầu ra Internet.</p><label>Job đang chờ<select id="jobs"></select></label><p id="job-count"></p><div class="actions" style="flex-wrap:wrap"><button data-outcome="success">Hoàn thành & lưu mô phỏng</button><button data-outcome="failure">Thất bại / hoàn credit</button><button data-outcome="cancel">Hủy / hoàn credit</button><button data-outcome="circuit-open">Circuit chặn / hoàn credit</button><button data-outcome="circuit-close">Đóng circuit mô phỏng</button></div></section><section><h2>Kịch bản nên thử</h2><ol><li>Người thử A: chọn TTHC TEST.001, xem giá rồi xác nhận; còn 27 khả dụng, giữ 3.</li><li>Người thử B yêu cầu cùng TTHC/kỳ: cũng giữ 3 nhưng không thêm job.</li><li>Admin hoàn thành mô phỏng: cả hai bị trừ 3, giữ về 0, có thông báo và dữ liệu trong thư viện.</li><li>A tải lại trang, chọn thủ tục đã khai thác: không cào hoặc tính phí lại.</li><li>Thử TEST.002/003 rồi chọn thất bại, hủy hoặc circuit: credit được hoàn.</li><li>Người chưa có quyền vẫn bị chặn dù còn 30 credit; admin có thể cấp quyền và thêm credit ở trang quản trị.</li></ol></section>`;
+        root.addEventListener("click", event => { const button = event.target.closest("button"); if (!button)
+            return; void (async () => { button.disabled = true; try {
+            if (button.dataset.login) {
+                await api("local-trial/login", { account: button.dataset.login });
+                get("message").textContent = "Đã chuyển tài khoản. Mở Dashboard để thử; không dùng nhiều tài khoản trong nhiều tab cùng trình duyệt.";
+            }
+            if (button.dataset.outcome) {
+                const action = button.dataset.outcome;
+                await api("local-trial/outcome", { action, jobId: action.startsWith("circuit-") ? null : get("jobs").value || null });
+                get("message").textContent = "Đã xử lý kịch bản. Chuyển về tài khoản người dùng và tải lại Dashboard để xem kết quả.";
+            }
+            await refresh();
+        }
+        catch (e) {
+            get("message").textContent = e instanceof Error ? e.message : String(e);
+        }
+        finally {
+            button.disabled = false;
+        } })(); });
+        await refresh();
+    }
+    catch (e) {
+        root.innerHTML = `<section><h1>Không mở được bàn thử</h1><p>${esc(e instanceof Error ? e.message : e)}</p></section>`;
+    }
+}
+void start();
+//# sourceMappingURL=local-trial.js.map

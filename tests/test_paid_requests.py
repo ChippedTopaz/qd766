@@ -82,6 +82,36 @@ class PaidRequestTest(unittest.TestCase):
     def tearDown(self):
         self.engine.dispose()
 
+    def test_pause_blocks_new_requests_but_preserves_entitlement(self):
+        with self.factory.begin() as session:
+            original,_=self._request(session,0,"before-pause")
+            session.info["wallet_requests_paused"]=True
+            repeated,created=self._request(session,0,"reopen-after-pause")
+            self.assertEqual(repeated.id,original.id)
+            self.assertFalse(created)
+            from qd766.backend.paid_requests import CollectionUnavailable
+            with self.assertRaises(CollectionUnavailable):
+                self._request(session,1,"blocked-new")
+            self.assertEqual(session.get(UserAccount,self.account_ids[1]).credit_balance,10)
+
+    def test_real_wallet_never_falls_back_to_legacy_balance(self):
+        with self.factory.begin() as session:
+            session.info.update(source_wallet_enabled=True, real_wallet_enabled=True)
+            with self.assertRaises(PaidPlanRequired):
+                self._request(session, 0, "unapproved-transition", credit_cost=5)
+            self.assertEqual(session.get(UserAccount, self.account_ids[0]).credit_balance, 10)
+            self.assertEqual(session.scalar(select(func.count()).select_from(PaidDataRequest)), 0)
+            self.assertEqual(session.scalar(select(func.count()).select_from(CollectionJob)), 0)
+
+    def test_real_wallet_keeps_existing_legacy_entitlement_free(self):
+        with self.factory.begin() as session:
+            prior, _ = self._request(session, 0, "before-transition")
+            session.info.update(source_wallet_enabled=True, real_wallet_enabled=True)
+            reopened, created = self._request(session, 0, "after-transition", credit_cost=5)
+            self.assertFalse(created)
+            self.assertEqual(reopened.id, prior.id)
+            self.assertEqual(session.get(UserAccount, self.account_ids[0]).credit_balance, 7)
+
     def _request(self, session, account_index, token, **overrides):
         values = {
             "account_id": self.account_ids[account_index],

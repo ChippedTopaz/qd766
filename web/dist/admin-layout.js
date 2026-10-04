@@ -1,0 +1,48 @@
+export function installAdminLayout(root) {
+    const sections = Array.from(root.querySelectorAll(":scope > section"));
+    const form = sections[0], accounts = sections[1], invitations = sections[2], audit = sections[3], credits = sections[4];
+    const workspace = document.createElement("div");
+    workspace.className = "admin-workspace";
+    const sidebar = document.createElement("aside");
+    sidebar.className = "admin-sidebar";
+    const items = [["accounts", "Quản lý tài khoản"], ["credits", "Quản lý credits"], ["invitations", "Mời dùng thử"], ["audit", "Nhật ký quản trị"]];
+    sidebar.innerHTML = `<a class="admin-brand" href="/">766 <span>Quản trị</span></a><nav aria-label="Quản trị">${items.map(([key, label]) => `<button data-admin-section="${key}">${label}</button>`).join("")}</nav><a class="button admin-back" href="/">Về Tổng quan</a>`;
+    const panels = {};
+    items.forEach(([key]) => { const panel = document.createElement("div"); panel.dataset.adminPanel = key; panel.hidden = true; panels[key] = panel; workspace.append(panel); });
+    panels.accounts.append(accounts);
+    panels.invitations.append(form, invitations);
+    panels.audit.append(audit);
+    const inviteHeading = document.createElement("div");
+    inviteHeading.className = "actions";
+    inviteHeading.innerHTML = '<h2 style="margin-right:auto">Mời dùng thử</h2><button type="button" class="primary" data-new-invite>Tạo link mời</button>';
+    panels.invitations.prepend(inviteHeading);
+    const resetInvitation = () => {
+        root.querySelector("#cancel")?.click();
+        panels.invitations.insertBefore(form, invitations);
+    };
+    inviteHeading.querySelector("[data-new-invite]")?.addEventListener("click", () => {
+        resetInvitation();
+        form.scrollIntoView({ behavior: "smooth", block: "start" });
+        form.querySelector("#email")?.focus({ preventScroll: true });
+    });
+    if (credits)
+        panels.credits.append(credits);
+    else
+        panels.credits.innerHTML = "<section><h2>Quản lý credits</h2><p>Chức năng cấp credit chưa được mở ở môi trường này.</p></section>";
+    const header = root.querySelector("header"), message = root.querySelector("#message");
+    if (header)
+        workspace.prepend(header);
+    if (message)
+        workspace.insertBefore(message, workspace.children[1] ?? null);
+    root.append(sidebar, workspace);
+    root.classList.add("admin-shell");
+    const select = (key) => { Object.entries(panels).forEach(([id, panel]) => panel.hidden = id !== key); sidebar.querySelectorAll("button").forEach(button => { const active = button.dataset.adminSection === key; button.classList.toggle("active", active); button.setAttribute("aria-current", active ? "page" : "false"); }); };
+    sidebar.querySelectorAll("button").forEach(button => button.addEventListener("click", () => {
+        if (button.dataset.adminSection === "invitations")
+            resetInvitation();
+        select(button.dataset.adminSection);
+    }));
+    select("accounts");
+    return { edit: () => { panels.accounts.prepend(form); select("accounts"); }, invite: () => { panels.invitations.insertBefore(form, invitations); select("invitations"); } };
+}
+//# sourceMappingURL=admin-layout.js.map

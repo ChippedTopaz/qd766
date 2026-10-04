@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import {pathToFileURL} from "node:url";
+const {collectionCopy,insufficientCreditMessage}=await import(pathToFileURL(process.argv[2]).href);
+const ready=collectionCopy([{owned:true,ownedState:"ready"}]);
+assert.equal(ready.mode,"ready");assert.equal(ready.button,"Xem dữ liệu");
+assert.ok(!ready.notice.includes("Credit được giữ"));
+assert.equal(collectionCopy([{owned:true,ownedState:"waiting"}]).mode,"waiting");
+const mixed=collectionCopy([{owned:true,ownedState:"ready"},{owned:false}]);
+assert.equal(mixed.mode,"new");assert.match(mixed.notice,/không phát sinh thêm Credit/);
+assert.equal(collectionCopy([{owned:false}]).mode,"new");
+assert.equal(collectionCopy([{owned:false}]).title,"Tra cứu dữ liệu");
+assert.equal(collectionCopy([{owned:false}]).button,"Tra cứu dữ liệu");
+assert.equal(insufficientCreditMessage(5,0),"Tài khoản của bạn không đủ Credit để thực hiện lượt tra cứu này.");
+assert.equal(insufficientCreditMessage(5,4),insufficientCreditMessage(5,0));
+assert.equal(insufficientCreditMessage(5,5),null);
+assert.equal(insufficientCreditMessage(0,0),null);
+assert.equal(insufficientCreditMessage(5,10),null);
+console.log("Collection confirmation copy PASS");

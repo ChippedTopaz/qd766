@@ -63,6 +63,9 @@ class Settings:
     trial_credits_enabled: bool = False
     trial_credit_management: bool = False
     local_google_trial: bool = False  # Explicit launcher only; never inherited from environment.
+    source_wallet_trial: bool = False  # Explicit isolated launcher only; not read from environment.
+    real_wallet_enabled: bool = False  # Prepared opt-in only; never inherited from environment.
+    wallet_requests_paused: bool = False  # Keep reads/settlement/cycles; pause new paid requests only.
     google_client_id: str = ""
     google_client_secret: str = field(default="", repr=False)
     google_redirect_uri: str = ""
@@ -81,6 +84,10 @@ class Settings:
     )
     province_catalog_cache_ttl_seconds: float = 3600.0
     province_catalog_timeout_seconds: float = 30.0
+
+    @property
+    def source_wallet_enabled(self) -> bool:
+        return self.source_wallet_trial or self.real_wallet_enabled
 
     @classmethod
     def from_env(cls) -> "Settings":

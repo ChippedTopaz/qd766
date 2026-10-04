@@ -13,6 +13,16 @@ from qd766.backend.public_deployment import CALLBACK, WEBSITE_CALLBACK, read_con
 
 
 class PublicDeploymentTests(unittest.TestCase):
+    def test_explicit_wallet_mode_and_pause_do_not_weaken_public_boundary(self):
+        settings=public_settings(self.office,self.public,real_wallet=True,requests_paused=True)
+        self.assertTrue(settings.real_wallet_enabled and settings.wallet_requests_paused)
+        self.assertTrue(settings.public_read_only and settings.require_login and settings.invite_required)
+        self.assertEqual(settings.formality_credit_cost,5)
+        self.assertTrue(settings.trial_credit_management)
+        self.assertFalse(settings.source_wallet_trial or settings.local_google_trial)
+        with self.assertRaises(ValueError):public_settings(self.office,self.public,requests_paused=True)
+        with self.assertRaises(ValueError):public_settings(self.office,self.public,real_wallet="true")
+
     def setUp(self):
         self.office = {"QD766_DATABASE_PASSWORD": "fake-db-password",
                        "QD766_PUBLIC_READ_ONLY": "false", "QD766_SQL_ECHO": "true",

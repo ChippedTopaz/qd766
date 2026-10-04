@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import secrets
+import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlsplit
 
@@ -178,8 +179,21 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
         return response
     try:
         identity = verify_google_identity(code, attempt.verifier, attempt.nonce, settings)
-    except Exception:
+    except Exception as failure:
         # Never return/log token, authorization code, secret or Google's error body.
+        if settings.local_google_trial:
+            status = failure.response.status_code if isinstance(failure, httpx.HTTPStatusError) else None
+            reason = "unspecified"
+            if isinstance(failure, httpx.HTTPStatusError):
+                try:
+                    value = failure.response.json().get("error")
+                    if value in {"invalid_client", "invalid_grant", "redirect_uri_mismatch", "unauthorized_client", "invalid_request"}:
+                        reason = value
+                except (ValueError, AttributeError, TypeError):
+                    pass
+            logging.getLogger("uvicorn.error").warning(
+                "LOCAL_GOOGLE_LOGIN_FAILED type=%s status=%s reason=%s",
+                type(failure).__name__, status, reason)
         return response
     with request.app.state.session_factory.begin() as db:
         subject = "google:" + identity["sub"]
@@ -212,6 +226,10 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
             account.access_tier = invitation.access_tier
             account.unit_department_id = invitation.unit_department_id
             invitation.used_by = account.id
+            db.flush()
+            if settings.source_wallet_enabled:
+                from .invited_trial import activate_invited_trial
+                activate_invited_trial(db,account.id,invitation,now=now)
             db.add(AdminAudit(actor_id=invitation.created_by, action="invitation.redeemed",
                 details={"invitationId": str(invitation.id), "accountId": str(account.id)}))
         old = request.cookies.get(SESSION_COOKIE)
@@ -238,11 +256,13 @@ def me(request: Request):
             raise HTTPException(403, "Tài khoản chưa được mời dùng thử.")
         from .collection_permissions import can_collect
         collection_allowed = request.app.state.settings.paid_requests_enabled and can_collect(db, account.id)
+        from .wallet_access import credits
+        available,reserved=credits(db,account)
         return {"id": str(account.id), "name": account.display_name, "email": account.email,
                 "plan": account.plan, "provinceId": str(account.root_department_id) if account.root_department_id else None,
-                "credits": account.credit_balance, "csrfToken": session.csrf_token,
+                "credits": available, "csrfToken": session.csrf_token,
                 "role": account.role, "accessTier": account.access_tier, "canCollect": collection_allowed,
-                "reservedCredits": account.credit_reserved,
+                "reservedCredits": reserved,
                 "unitId": str(account.unit_department_id) if account.unit_department_id else None}
 
 
