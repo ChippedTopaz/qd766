@@ -20,14 +20,20 @@ const appRoot={innerHTML:""};
 const button=(nav)=>({dataset:{nav},handlers:{},addEventListener(kind,callback){this.handlers[kind]=callback;}});
 const navs=[button("overview"),button("time"),button("quality"),button("formulas")];
 const exportButton=button("");
+const overviewTabs=["overview","details","analysis"].map(id=>({...button(""),dataset:{overviewTab:id}}));
+const groupButtons=data.groupOrder.map(id=>({...button(""),dataset:{groupDetail:id}}));
+const groupSteps=[-1,1].map(step=>({...button(""),dataset:{groupStep:String(step)}}));
+const formulaButtons=data.groupOrder.map(id=>({...button(''),dataset:{formulaGroup:id}}));
 const trendButtons=data.groupOrder.map(id=>({...button(""),dataset:{trendToggle:id},attrs:{},setAttribute(key,value){this.attrs[key]=value;}}));
 const trendSeries=data.groupOrder.map(id=>({dataset:{trendSeries:id},attrs:{},setAttribute(key,value){this.attrs[key]=value;},removeAttribute(key){delete this.attrs[key];}}));
 globalThis.document={
   title:"",
   querySelector(selector){return selector==="#app"?appRoot:selector==="[data-action=export]"?exportButton:null;},
-  querySelectorAll(selector){return selector==="[data-nav]"?navs:selector==="[data-trend-toggle]"?trendButtons:selector==="[data-trend-series]"?trendSeries:[];},
+  querySelectorAll(selector){return selector==="[data-formula-group]"?formulaButtons:selector==="[data-overview-tab]"?overviewTabs:selector==="[data-group-detail]"?groupButtons:selector==="[data-group-step]"?groupSteps:selector==="[data-nav]"?navs:selector==="[data-trend-toggle]"?trendButtons:selector==="[data-trend-series]"?trendSeries:[];},
 };
 globalThis.window={setTimeout};
+globalThis.location={search:"",hash:"",pathname:"/"};
+globalThis.history={state:null,replaceState(){}};
 globalThis.scrollTo=()=>{};
 const calls=[];
 globalThis.fetch=async(url,options)=>{
@@ -55,6 +61,21 @@ assert.equal(trendSeries[0].attrs.hidden,'');
 trendButtons[0].handlers.click();
 assert.equal(trendButtons[0].attrs['aria-pressed'],'true');
 assert(!('hidden' in trendSeries[0].attrs));
+assert.doesNotMatch(appRoot.innerHTML,/Vấn đề cần ưu tiên|class="panel group-detail"/);
+groupButtons[1].handlers.click();
+assert.match(appRoot.innerHTML,/data-overview-tab="details" aria-selected="true"/);
+assert.match(appRoot.innerHTML,/overview-group-nav/);
+assert.match(appRoot.innerHTML,new RegExp(data.groupLabels[data.groupOrder[1]]));
+assert.doesNotMatch(appRoot.innerHTML,/class="bento-top"|class="split bento-insights"/);
+groupSteps[1].handlers.click();
+assert.match(appRoot.innerHTML,new RegExp(data.groupLabels[data.groupOrder[2]]));
+overviewTabs[2].handlers.click();
+assert.match(appRoot.innerHTML,/Vấn đề cần ưu tiên/);
+assert.match(appRoot.innerHTML,/Kết quả tốt cần duy trì/);
+assert.doesNotMatch(appRoot.innerHTML,/class="bento-top"|overview-group-nav/);
+overviewTabs[0].handlers.click();
+assert.match(appRoot.innerHTML,/class="bento-top"/);
+assert.doesNotMatch(appRoot.innerHTML,/class="split bento-insights"|overview-group-nav/);
 navs.find(n=>n.dataset.nav==="time").handlers.click();
 assert.match(appRoot.innerHTML,/Chuỗi điểm cùng loại kỳ/);
 assert.match(appRoot.innerHTML,/Tháng 9\/2026/);
@@ -66,7 +87,11 @@ assert.match(appRoot.innerHTML,/data-export-excel="scores" >/);
 const callsBeforeFormulas=calls.length;
 navs.find(n=>n.dataset.nav==="formulas").handlers.click();
 assert.match(appRoot.innerHTML,/Công thức tính Bộ chỉ số 766/);
-assert.equal((appRoot.innerHTML.match(/class="formula-card"/g)||[]).length,21);
+assert.equal((appRoot.innerHTML.match(/class="formula-card"/g)||[]).length,4);
+formulaButtons.find(button=>button.dataset.formulaGroup==='provide-online-tree').handlers.click();
+assert.match(appRoot.innerHTML,/id="formula-provide-online-tree"/);
+assert.doesNotMatch(appRoot.innerHTML,/id="formula-transparency"/);
+assert.equal((appRoot.innerHTML.match(/class="formula-card"/g)||[]).length,3);
 assert.equal(calls.length,callsBeforeFormulas);
 assert(calls.every(call=>call.method==="GET"&&!call.url.includes("requests")&&!call.url.includes("jobs")));
 console.log("SUMMARY_ONLY_UI_OK: actual renderer, history table, detail export disabled, GET-only");

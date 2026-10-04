@@ -12,6 +12,9 @@ import { loginView } from "./login-view.js";
 import { openPersonalCredits, requestCreditDisplay } from "./personal-credits.js";
 import { accountMenu, bindAccountMenu } from "./account-menu.js";
 import { collectionCopy, insufficientCreditMessage } from "./collection-copy.js";
+import { changeTone, rankImprovement } from "./change-tone.js";
+import { overviewTabs, overviewTabItems, adjacentGroup, type OverviewTab } from "./overview-tabs.js";
+import { bindComparisonExports } from "./comparison-export.js";
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 import type TomSelectControl from "tom-select";
 
@@ -40,6 +43,8 @@ let localGoogleTrial=false;
 let signedInUser:{name:string;email?:string;provinceId:string|null;csrfToken:string;credits:number;reservedCredits?:number;canCollect?:boolean;role?:string;accessTier?:string;unitId?:string|null}|null=null;
 let data: AppData;
 let state: State;
+let overviewTab: OverviewTab = "overview";
+let selectedFormulaGroup:GroupId="transparency";
 let selectionRequest=0;
 let pendingMessage="";
 let completionMessage="";
@@ -424,7 +429,7 @@ function unavailable(kind: DemoState): string {
 
 function render(): void {
   if(state.screen==="procedure")return shell(acquisitionPage());
-  if (state.screen === "formulas") return shell(renderFormulaReference());
+  if (state.screen === "formulas") return shell(renderFormulaReference(selectedFormulaGroup));
   if (state.screen === "operations") return shell(operations());
   if (state.demo !== "normal") return shell(unavailable(state.demo));
   if(snapshot().delivery?.detailsAvailable===false&&state.unitId!==data.province.id)
@@ -444,7 +449,7 @@ function overview(): string {
   const currentRank=rankFor(view,state.periodId,null);
   const previousRank=previousView&&previousPeriod?rankFor(previousView,previousPeriod.id,null):null;
   const scoreChange=previousView?.totalScore!==null&&previousView?.totalScore!==undefined&&view.totalScore!==null?view.totalScore-previousView.totalScore:null;
-  const rankChange=currentRank&&previousRank?previousRank.rank-currentRank.rank:null;
+  const rankChange=rankImprovement(previousRank?.rank,currentRank?.rank);
   const suggestions=buildSuggestions(view);
   const priority=suggestions.filter(item=>item.severity==="critical"||item.severity==="warning").slice(0,3);
   const strengths=suggestions.filter(item=>item.severity==="positive").slice(0,3);
@@ -452,13 +457,21 @@ function overview(): string {
     .sort((a,b)=>periodOrder(a)-periodOrder(b)).slice(-12).map(p=>({label:p.label,order:periodOrder(p),view:buildUnitView(data,p.id,state.scope,state.unitId)}));
   return `<header class="bento-heading"><h1>${esc(view.name)}</h1><p>${esc(period().label)} <span>·</span> ${state.scope==="all"?"Tất cả thủ tục hành chính":esc(data.formality.code+" · "+data.formality.name)}</p></header>
   ${overviewStatus()}
+  ${overviewTabs(overviewTab)}
+  <div id="overview-tab-panel" role="tabpanel" aria-labelledby="overview-tab-${overviewTab}">
+  ${overviewTab==="overview"?`
   <section class="bento-top" aria-label="Tổng điểm và sáu nhóm chỉ tiêu"><article class="bento-card hero-card"><div class="bento-card-head"><div><h2>Điểm tổng hợp 766</h2><p>Bộ chỉ số phục vụ người dân, doanh nghiệp</p></div><span class="badge ${gaugeLevel(view.totalMaximum===100?view.totalScore:view.ratio).tone}">${gaugeLevel(view.totalMaximum===100?view.totalScore:view.ratio).label}</span></div>${gauge(view.totalScore,view.totalMaximum)}
-  <div class="hero-comparison"><div><span>Thứ hạng cùng cấp</span><strong>${currentRank?`${currentRank.rank}/${currentRank.total}`:"Chưa xếp hạng"}</strong><small>${currentRank?`Phân vị P${Math.round(currentRank.percentile)}${currentRank.tiedCount>1?" · đồng hạng":""}`:"Cùng kỳ, cùng phạm vi"}</small></div><div><span>So với kỳ trước</span><strong class="${scoreChange===null?"":scoreChange>=0?"positive":"negative"}">${scoreChange===null?"Chưa đủ kỳ":`${scoreChange>=0?"+":""}${n(scoreChange)} điểm`}</strong><small>${previousPeriod?esc(previousPeriod.label):"Cần kỳ liền trước cùng loại"}</small></div></div>
-  <div class="hero-footer">${rankChange===null?"Chưa đủ dữ liệu biến động thứ hạng":rankChange===0?"Thứ hạng không đổi":`Thứ hạng ${rankChange>0?"tăng":"giảm"} ${Math.abs(rankChange)} bậc`}<span>${view.groups.filter(g=>g.score.value!==null).length}/6 nhóm có điểm</span></div></article>
+  <div class="hero-comparison"><div><span>Thứ hạng cùng cấp</span><strong>${currentRank?`${currentRank.rank}/${currentRank.total}`:"Chưa xếp hạng"}</strong><small>${currentRank?`Phân vị P${Math.round(currentRank.percentile)}${currentRank.tiedCount>1?" · đồng hạng":""}`:"Cùng kỳ, cùng phạm vi"}</small></div><div><span>So với kỳ trước</span><strong class="${changeTone(scoreChange)}">${scoreChange===null?"Chưa đủ kỳ":`${scoreChange>=0?"+":""}${n(scoreChange)} điểm`}</strong><small>${previousPeriod?esc(previousPeriod.label):"Cần kỳ liền trước cùng loại"}</small></div></div>
+  <div class="hero-footer"><span class="${changeTone(rankChange)}">${rankChange===null?"Chưa đủ dữ liệu biến động thứ hạng":rankChange===0?"Thứ hạng không đổi":`Thứ hạng ${rankChange>0?"tăng":"giảm"} ${Math.abs(rankChange)} bậc`}</span><span>${view.groups.filter(g=>g.score.value!==null).length}/6 nhóm có điểm</span></div></article>
   <div class="bento-pillars">${view.groups.map(groupPanel).join("")}</div></section>
   <section class="bento-charts"><article class="bento-card trend-card"><div class="bento-card-head"><div><h2>Xu hướng điểm</h2><p>Lịch sử của cơ quan đang chọn · ${period().type==="month"?"Theo tháng":period().type==="quarter"?"Theo quý":"Theo năm"}</p></div><span class="bento-icon">${icon("chart")}</span></div>${trendChart(points,data.groupOrder,hiddenTrendGroups)}</article><article class="bento-card composition-card"><div class="bento-card-head"><div><h2>Cơ cấu điểm 766</h2><p>Đóng góp của sáu nhóm chỉ tiêu</p></div></div>${composition(view)}</article></section>
-  ${overviewGroupDetail(view)}
-  <section class="split bento-insights"><article class="panel insight-warning"><div class="panel-head"><div><h2><span class="bento-icon">${icon("warning")}</span>Vấn đề cần ưu tiên</h2><p>Dựa trên khoảng cách với trung vị và cảnh báo dữ liệu</p></div><span class="badge warn">${priority.length} phát hiện</span></div><div class="panel-body ticket-list">${priority.length?priority.map(item=>miniTicket(item,false)).join(""):`<div class="bento-empty">${icon("shield")}<strong>Chưa có cảnh báo ưu tiên</strong><span>Chưa phát hiện cảnh báo ưu tiên nào trong kỳ này.</span></div>`}</div></article><article class="panel insight-strength"><div class="panel-head"><div><h2><span class="bento-icon">${icon("star")}</span>Kết quả tốt cần duy trì</h2><p>Nhóm thuộc phân vị cao hoặc gần bão hòa điểm</p></div><span class="badge good">Điểm mạnh</span></div><div class="panel-body ticket-list">${strengths.length?strengths.map(item=>miniTicket(item,true)).join(""):`<div class="bento-empty">${icon("star")}<strong>Chưa xác định điểm mạnh nổi bật</strong><span>Kết quả hiện tại chưa nằm trong nhóm dẫn đầu.</span></div>`}</div></article></section>`;
+  `:overviewTab==="details"?overviewGroupNavigator(view)+overviewGroupDetail(view):`
+  <section class="split bento-insights"><article class="panel insight-warning"><div class="panel-head"><div><h2><span class="bento-icon">${icon("warning")}</span>Vấn đề cần ưu tiên</h2><p>Dựa trên khoảng cách với trung vị và cảnh báo dữ liệu</p></div><span class="badge warn">${priority.length} phát hiện</span></div><div class="panel-body ticket-list">${priority.length?priority.map(item=>miniTicket(item,false)).join(""):`<div class="bento-empty">${icon("shield")}<strong>Chưa có cảnh báo ưu tiên</strong><span>Chưa phát hiện cảnh báo ưu tiên nào trong kỳ này.</span></div>`}</div></article><article class="panel insight-strength"><div class="panel-head"><div><h2><span class="bento-icon">${icon("star")}</span>Kết quả tốt cần duy trì</h2><p>Nhóm thuộc phân vị cao hoặc gần bão hòa điểm</p></div><span class="badge good">Điểm mạnh</span></div><div class="panel-body ticket-list">${strengths.length?strengths.map(item=>miniTicket(item,true)).join(""):`<div class="bento-empty">${icon("star")}<strong>Chưa xác định điểm mạnh nổi bật</strong><span>Kết quả hiện tại chưa nằm trong nhóm dẫn đầu.</span></div>`}</div></article></section>`}</div>`;
+}
+
+function overviewGroupNavigator(view:UnitView):string{
+  const group=view.groups.find(item=>item.id===state.selectedGroup);
+  return `<div class="overview-group-nav" aria-label="Chuyển nhóm chỉ tiêu"><button class="btn" data-group-step="-1" aria-label="Nhóm chỉ tiêu trước"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5l-7 7 7 7M7 12h13"/></svg></button><div aria-live="polite"><span>Nhóm chỉ tiêu</span><strong>${esc(group?.label??"Tổng hợp 6 nhóm chỉ tiêu")}</strong></div><button class="btn" data-group-step="1" aria-label="Nhóm chỉ tiêu tiếp theo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5l7 7-7 7M4 12h13"/></svg></button></div>`;
 }
 
 function overviewStatus():string{
@@ -477,7 +490,7 @@ function groupPanel(group: UnitGroupView): string {
   const prior=previous?buildUnitView(data,previous.id,state.scope,state.unitId).groups.find(g=>g.id===group.id):null;
   const priorScore=prior?scoreValue(prior):null;
   const delta=score!==null&&priorScore!==null?score-priorScore:null;
-  return `<button class="bento-card pillar-card ${state.selectedGroup===group.id?"selected":""}" style="--pillar-color:${groupColors[group.id]}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup===group.id}"><div class="pillar-heading"><h3>${esc(group.label)}</h3><span class="bento-icon">${groupIcon(group.id)}</span></div><div class="pillar-score"><strong>${n(score)}</strong><span>/ ${n(maximum)}</span></div><div class="pillar-meta"><span class="${delta===null?"":delta>=0?"positive":"negative"}">${delta===null?"Chưa đủ kỳ trước":`${delta>=0?"+":""}${n(delta)} đ`}</span><span>${peer?`Hạng ${peer.rank}/${peer.total}`:"Chưa xếp hạng"}</span></div><div class="pillar-progress" role="img" aria-label="${ratio===null?"Chưa có tỷ lệ điểm":`Đạt ${pct(ratio)} điểm tối đa`}"><i style="width:${Math.max(0,Math.min(ratio??0,100))}%"></i></div><div class="pillar-bottom"><span>${ratio===null?"Chưa có điểm":pct(ratio)+" điểm tối đa"}</span><span>${peer?`Trung vị ${n(peer.median)} đ`:"Xem chi tiết →"}</span></div></button>`;
+  return `<button class="bento-card pillar-card ${state.selectedGroup===group.id?"selected":""}" style="--pillar-color:${groupColors[group.id]}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup===group.id}"><div class="pillar-heading"><h3>${esc(group.label)}</h3><span class="bento-icon">${groupIcon(group.id)}</span></div><div class="pillar-score"><strong>${n(score)}</strong><span>/ ${n(maximum)}</span></div><div class="pillar-meta"><span class="${changeTone(delta)}">${delta===null?"Chưa đủ kỳ trước":`${delta>=0?"+":""}${n(delta)} đ`}</span><span>${peer?`Hạng ${peer.rank}/${peer.total}`:"Chưa xếp hạng"}</span></div><div class="pillar-progress" role="img" aria-label="${ratio===null?"Chưa có tỷ lệ điểm":`Đạt ${pct(ratio)} điểm tối đa`}"><i style="width:${Math.max(0,Math.min(ratio??0,100))}%"></i></div><div class="pillar-bottom"><span>${ratio===null?"Chưa có điểm":pct(ratio)+" điểm tối đa"}</span><span>${peer?`Trung vị ${n(peer.median)} đ`:"Xem chi tiết →"}</span></div></button>`;
 }
 
 function totalPeerComparison(view:UnitView):string{
@@ -506,9 +519,9 @@ function groupComparisonSummary(view:UnitView):string{
     const scoreChange=currentScore!==null&&previousScore!==null?currentScore-previousScore:null;
     const currentRank=rankFor(group,state.periodId,group.id);
     const previousRank=previousGroup&&previousPeriod?rankFor(previousGroup,previousPeriod.id,group.id):null;
-    const rankChange=currentRank&&previousRank?previousRank.rank-currentRank.rank:null;
+    const rankChange=rankImprovement(previousRank?.rank,currentRank?.rank);
     const rankChangeText=rankChange===null?"—":rankChange>0?`↑ ${rankChange} bậc`:rankChange<0?`↓ ${Math.abs(rankChange)} bậc`:"Không đổi";
-    return `<tr class="selectable-row" data-group-detail="${group.id}"><td><button class="row-link">${esc(group.label)}</button></td><td class="num"><strong>${n(currentScore)}</strong> / ${n(group.maximum)}</td><td class="num">${previousPeriod?n(previousScore):"—"}</td><td class="num ${scoreChange===null?"":scoreChange>=0?"positive":"negative"}">${scoreChange===null?"—":`${scoreChange>=0?"+":""}${n(scoreChange)}`}</td><td class="num ${rankChange===null?"":rankChange>=0?"positive":"negative"}">${rankChangeText}</td></tr>`;
+    return `<tr class="selectable-row" data-group-detail="${group.id}"><td><button class="row-link">${esc(group.label)}</button></td><td class="num"><strong>${n(currentScore)}</strong> / ${n(group.maximum)}</td><td class="num">${previousPeriod?n(previousScore):"—"}</td><td class="num ${changeTone(scoreChange)}">${scoreChange===null?"—":`${scoreChange>=0?"+":""}${n(scoreChange)}`}</td><td class="num ${changeTone(rankChange)}">${rankChangeText}</td></tr>`;
   }).join("");
   return `<section class="panel group-comparison" id="group-detail"><div class="panel-head"><div><p class="eyebrow">Tổng hợp 6 nhóm chỉ tiêu</p><h2>Điểm số và biến động theo kỳ</h2><p>${esc(view.name)} · ${esc(period().label)}${previousPeriod?` so với ${esc(previousPeriod.label)}`:" · chưa có kỳ trước cùng loại"}</p></div></div><div class="detail-columns"><div class="detail-metrics-card"><h3>Điểm 6 nhóm chỉ tiêu</h3><div class="table-wrap"><table class="summary-table"><thead><tr><th>Tên nhóm chỉ tiêu</th><th>Điểm số</th><th>Điểm kỳ trước</th><th>Tăng/giảm so với kỳ trước</th><th>Tăng/giảm thứ hạng</th></tr></thead><tbody>${rows}</tbody></table></div></div>${totalPeerComparison(view)}</div></section>`;
 }
@@ -628,7 +641,7 @@ function time(): string {
     const prior=previous?buildUnitView(data,previous.id,state.scope,state.unitId):null;
     const delta=v.totalScore!==null&&prior?.totalScore!==null&&prior?.totalScore!==undefined?v.totalScore-prior.totalScore:null;
     const rank=rankFor(v,p.id,null);
-    return `<tr><td>${esc(p.label)}${p.provisional?' <span class="badge warn">Tạm thời</span>':""}</td><td class="num">${n(v.totalScore)}</td><td class="num">${n(prior?.totalScore)}</td><td class="num">${delta===null?"—":(delta>=0?"+":"")+n(delta)}</td><td class="num">${rank?rank.rank+"/"+rank.total:"—"}</td>${v.groups.map(group=>`<td class="num">${n(group.score.value)}</td>`).join("")}</tr>`;
+    return `<tr><td>${esc(p.label)}${p.provisional?' <span class="badge warn">Tạm thời</span>':""}</td><td class="num">${n(v.totalScore)}</td><td class="num">${n(prior?.totalScore)}</td><td class="num ${changeTone(delta)}">${delta===null?"—":(delta>=0?"+":"")+n(delta)}</td><td class="num ${changeTone(rankImprovement(previous ? rankFor(prior!,previous.id,null)?.rank : null,rank?.rank))}">${rank?rank.rank+"/"+rank.total:"—"}</td>${v.groups.map(group=>`<td class="num">${n(group.score.value)}</td>`).join("")}</tr>`;
   }).join("");
   return `${title("So sánh theo thời gian","Điểm các kỳ cùng loại và biến động so với kỳ liền trước.","Kỳ đang diễn ra được đánh dấu tạm thời; không ghép tháng, quý và năm.")}<section class="panel"><div class="panel-head"><div><h2>Chuỗi điểm cùng loại kỳ</h2><p>Thiếu kỳ liền trước thì không tính biến động. Thứ hạng chỉ hiển thị khi đã đọc dữ liệu so sánh của kỳ đó.</p></div></div><div class="table-wrap"><table><thead><tr><th>Kỳ</th><th>Tổng điểm</th><th>Điểm kỳ trước</th><th>Tăng/giảm điểm</th><th>Thứ hạng</th>${data.groupOrder.map(group=>`<th>${esc(data.groupLabels[group])}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></section>`;
 }
@@ -803,6 +816,38 @@ async function downloadAnalysisExcel(kind:"scores"|"details"):Promise<void>{
 }
 
 function bind(): void {
+  if(typeof data!=="undefined"&&state?.demo==="normal"&&["overview","time","peers"].includes(state.screen)){
+    const snap=snapshot();
+    bindComparisonExports({organization:unit().name,period:period().label,snapshot:snap,
+      scope:state.scope==="all"?"Tất cả thủ tục hành chính":data.formality.code+" · "+data.formality.name,
+      updated:`Điểm: ${dateTime(snap.delivery?.capturedAt)} · Chi tiết: ${dateTime(snap.delivery?.detailsCapturedAt)}`},()=>ExcelJS.Workbook);
+  }
+  document.querySelectorAll<HTMLElement>('[data-formula-group]').forEach(button=>button.addEventListener("click",()=>{
+    selectedFormulaGroup=button.dataset.formulaGroup as GroupId;
+    state.screen="formulas";
+    render();
+  }));
+  document.querySelectorAll<HTMLElement>('[data-overview-tab]').forEach(button=>{
+    const activate=(tab:OverviewTab)=>{
+      overviewTab=tab;
+      if(tab==="details"&&state.selectedGroup===null)state.selectedGroup=data.groupOrder[0]??null;
+      render();
+      document.querySelector<HTMLElement>(`[data-overview-tab="${tab}"]`)?.focus({preventScroll:true});
+    };
+    button.addEventListener("click",()=>activate(button.dataset.overviewTab as OverviewTab));
+    button.addEventListener("keydown",event=>{
+      const index=overviewTabItems.findIndex(tab=>tab.id===overviewTab);
+      const next=event.key==="ArrowRight"?(index+1)%3:event.key==="ArrowLeft"?(index+2)%3:event.key==="Home"?0:event.key==="End"?2:null;
+      const target=next===null?null:overviewTabItems[next];
+      if(target){event.preventDefault();activate(target.id);}
+    });
+  });
+  document.querySelectorAll<HTMLElement>('[data-group-step]').forEach(button=>button.addEventListener("click",()=>{
+    state.selectedGroup=adjacentGroup(data.groupOrder,state.selectedGroup,Number(button.dataset.groupStep));
+    state.selectedMetric=null;
+    render();
+    document.querySelector<HTMLElement>(`[data-group-step="${button.dataset.groupStep}"]`)?.focus({preventScroll:true});
+  }));
   document.querySelectorAll<HTMLElement>('[data-action=new-collection]').forEach(el=>el.addEventListener('click',()=>{void openAcquisition()}));
   document.querySelectorAll<HTMLElement>('[data-action=request-history]').forEach(el=>el.addEventListener('click',()=>{void openAcquisition('history')}));
   document.querySelectorAll<HTMLElement>('[data-collection-tab]').forEach(el=>el.addEventListener('click',()=>{void openAcquisition(el.dataset.collectionTab as "new"|"history")}));
@@ -855,10 +900,10 @@ function bind(): void {
     const response=await fetch("/api/v1/auth/logout",{method:"POST",headers:{"X-QD766-CSRF":signedInUser.csrfToken}});
     if(response.ok)window.location.assign("/");else window.alert("Chưa đăng xuất được. Vui lòng thử lại.");
   });
-  document.querySelectorAll<HTMLElement>("[data-nav]").forEach(el=>el.addEventListener("click",()=>{const destination=el.dataset.nav as ScreenId;state.screen=destination;if(destination==="procedure"){void openAcquisition();return;}if(destination==="formulas"){render()}else if(destination==="operations"){state.demo="normal";render();void loadOperations()}else if(data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]){state.demo="normal";render()}else if(state.scope==="formality"&&!catalogPreview.selectedId){state.demo="ready";render();void loadCatalogPreview()}else{void loadSelection()}scrollTo(0,0)}));
+  document.querySelectorAll<HTMLElement>("[data-nav]").forEach(el=>el.addEventListener("click",()=>{const destination=el.dataset.nav as ScreenId;state.screen=destination;if(destination==="overview")overviewTab="overview";if(destination==="procedure"){void openAcquisition();return;}if(destination==="formulas"){render()}else if(destination==="operations"){state.demo="normal";render();void loadOperations()}else if(data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]){state.demo="normal";render()}else if(state.scope==="formality"&&!catalogPreview.selectedId){state.demo="ready";render();void loadCatalogPreview()}else{void loadSelection()}scrollTo(0,0)}));
   document.querySelectorAll<HTMLElement>("[data-state]").forEach(el=>el.addEventListener("click",()=>{state.demo=el.dataset.state as DemoState;render()}));
   document.querySelectorAll<HTMLElement>("[data-dimension]").forEach(el=>el.addEventListener("click",()=>{state.peerDimension=el.dataset.dimension as State["peerDimension"];render()}));
-  document.querySelectorAll<HTMLElement>("[data-group-detail]").forEach(el=>el.addEventListener("click",()=>{state.selectedGroup=el.dataset.groupDetail as GroupId;state.selectedMetric=null;render();document.querySelector("#group-detail")?.scrollIntoView({behavior:"smooth",block:"start"})}));
+  document.querySelectorAll<HTMLElement>("[data-group-detail]").forEach(el=>el.addEventListener("click",()=>{state.selectedGroup=el.dataset.groupDetail as GroupId;state.selectedMetric=null;overviewTab="details";render();document.querySelector(".overview-tabs")?.scrollIntoView({behavior:"smooth",block:"start"})}));
   document.querySelectorAll<HTMLElement>("[data-metric-detail]").forEach(el=>el.addEventListener("click",()=>{state.selectedMetric=el.dataset.metricDetail??null;render();document.querySelector(".comparison-card")?.scrollIntoView({behavior:"smooth",block:"nearest"})}));
   document.querySelector<HTMLElement>("[data-action=clear-metric-detail]")?.addEventListener("click",()=>{state.selectedMetric=null;render()});
   document.querySelector<HTMLElement>("[data-action=close-group-detail]")?.addEventListener("click",()=>{state.selectedGroup=null;state.selectedMetric=null;render();document.querySelector("#group-detail")?.scrollIntoView({behavior:"smooth",block:"start"})});

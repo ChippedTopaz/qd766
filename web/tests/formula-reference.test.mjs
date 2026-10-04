@@ -15,9 +15,14 @@ assert.match(items.find(f=>f.id==='2.2').rules.join(' '),/ngày làm việc ho�
 assert.equal(items.find(f=>f.id==='3.2').target,undefined);
 assert.equal(analyzeOnlineScore({apiScore:8.56,parameters:{authorityCount:89,partialCount:31,fullCount:21,onlineDossierCount:518,onlineServiceTotal:1881,channelOnlineSum:591643,channelTotalSum:600057}}),null);
 const html=renderFormulaReference();
-assert.equal((html.match(/class="formula-card"/g)||[]).length,21);
-assert.equal((html.match(/href="#formula-/g)||[]).length,6);
-assert.match(html,/chưa cung cấp điểm tối đa từng chỉ tiêu/);
+assert.equal((html.match(/class="formula-card"/g)||[]).length,4);
+assert.equal((html.match(/data-formula-group=/g)||[]).length,6);
+for(const group of formulaGroups){
+  const selected=renderFormulaReference(group.id);
+  assert.equal((selected.match(/class="formula-card"/g)||[]).length,group.items.length);
+  for(const other of formulaGroups)assert.equal(selected.includes(`id="formula-${other.id}"`),other.id===group.id);
+}
+assert.match(formulaGroups.map(group=>renderFormulaReference(group.id)).join(''),/chưa cung cấp điểm tối đa từng chỉ tiêu/);
 assert.match(html,/do quản trị viên cung cấp/);
 assert.doesNotMatch(html,/<script|fetch\(/);
 assert.match(referenceNotice('provide-online-tree'),/ngừng đối chiếu/);

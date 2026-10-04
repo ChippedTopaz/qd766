@@ -17,6 +17,18 @@ from starlette.responses import RedirectResponse, JSONResponse
 from .models import AdminAudit, LoginAttempt, LoginSession, TrialInvitation, UserAccount
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
+
+
+def csrf_matches(supplied: str, expected: str) -> bool:
+    """Invalid/non-ASCII client tokens must reject, not crash compare_digest."""
+    if not supplied or not expected:
+        return False
+    try:
+        return secrets.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+    except (AttributeError, UnicodeError):
+        return False
+
+
 SESSION_COOKIE = "qd766_session"
 FLOW_COOKIE = "qd766_login_flow"
 INVITE_COOKIE = "qd766_invite"
@@ -270,7 +282,7 @@ def me(request: Request):
 def logout(request: Request):
     with request.app.state.session_factory.begin() as db:
         session, account = current_session(db, request.cookies.get(SESSION_COOKIE))
-        if session and not secrets.compare_digest(request.headers.get("X-QD766-CSRF", ""), session.csrf_token):
+        if session and not csrf_matches(request.headers.get("X-QD766-CSRF", ""), session.csrf_token):
             raise HTTPException(403, "Xác nhận phiên không hợp lệ.")
         if session:
             db.delete(session)

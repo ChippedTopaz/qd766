@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from qd766.periods import PeriodSelection
 from qd766.province_roots import load_province_roots
 from qd766.province_catalog import ProvinceCatalogError
-from .auth import current_session, SESSION_COOKIE
+from .auth import current_session, SESSION_COOKIE, csrf_matches
 from .database import get_session
 from .models import PaidDataRequest, Formality, Snapshot, CollectionJob,UserNotification,CreditLedgerEntry,CreditLot,CreditWalletEvent,SubscriptionCycle
 from datetime import datetime,timezone
@@ -58,7 +58,7 @@ def account_for(request:Request,db:Session,*,require_collect:bool=False):
     if require_collect:
         from .collection_permissions import can_collect
         if not can_collect(db,account.id):raise HTTPException(403,"Tài khoản chưa được cấp quyền khai thác TTHC.")
-    if request.method=="POST" and not hmac.compare_digest(request.headers.get("X-QD766-CSRF",""),login.csrf_token):
+    if request.method=="POST" and not csrf_matches(request.headers.get("X-QD766-CSRF",""),login.csrf_token):
         raise HTTPException(403,"Xác nhận phiên không hợp lệ.")
     return account
 

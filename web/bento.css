@@ -51,8 +51,8 @@
 .formula-intro,.formula-principles{background:white;border:1px solid #edf0f8;border-radius:20px;padding:24px;margin:18px 0;box-shadow:0 10px 40px -10px #0f172a0d}
 .formula-page h2{font-size:19px;line-height:1.4;margin:10px 0}.formula-page p,.formula-page li{font-size:13px;line-height:1.75;color:#475569}
 .formula-index{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:20px 0}
-.formula-index a{display:grid;grid-template-columns:32px 1fr;gap:4px 12px;align-items:center;padding:16px;background:white;border:1px solid #edf0f8;border-radius:16px;text-decoration:none;color:#0f172a}
-.formula-index a:hover,.formula-index a:focus-visible{border-color:var(--formula-color);box-shadow:0 5px 20px #0f172a08}.formula-index svg{width:27px;color:var(--formula-color);grid-row:1/3}.formula-index span{font-weight:650;font-size:13px}.formula-index small{color:#64748b;font-size:11px}
+.formula-index button{display:grid;grid-template-columns:32px 1fr;gap:4px 12px;align-items:center;padding:16px;background:white;border:1px solid #edf0f8;border-radius:16px;color:#0f172a;font:inherit;text-align:left;cursor:pointer}
+.formula-index button:hover,.formula-index button:focus-visible,.formula-index button[aria-pressed=true]{border-color:var(--formula-color);box-shadow:0 5px 20px #0f172a08}.formula-index button[aria-pressed=true]{background:#f5f7ff}.formula-index svg{width:27px;color:var(--formula-color);grid-row:1/3}.formula-index span{font-weight:650;font-size:13px}.formula-index small{color:#64748b;font-size:11px}
 .formula-principles ol{padding-left:20px}.formula-principles li+li{margin-top:8px}
 .formula-group{scroll-margin-top:120px;margin:32px 0}.formula-group>header{display:flex;align-items:center;gap:14px;margin-bottom:16px}.formula-group>header .bento-icon{color:var(--formula-color);background:white;flex-shrink:0}.formula-group>header h2,.formula-group>header p{margin:0}
 .formula-card{background:white;border:1px solid #edf0f8;border-radius:20px;padding:22px;margin-bottom:14px;box-shadow:0 10px 30px -15px #0f172a15}
@@ -63,6 +63,19 @@
 @media(max-width:800px){.formula-index{grid-template-columns:repeat(2,minmax(0,1fr))}.formula-card{padding:16px}.formula-equation{gap:10px;font-size:12px;flex-wrap:wrap}.formula-fraction{max-width:100%}.formula-intro,.formula-principles{padding:18px}}
 @media(max-width:500px){.formula-index{gap:8px}.formula-index a{padding:12px;grid-template-columns:24px 1fr;gap:4px 8px}.formula-index svg{width:22px}.formula-index span{font-size:11px}.formula-index small{font-size:10px}.formula-equation{padding:15px 10px}.formula-card-heading .badge{margin-left:44px}.formula-page h2{font-size:17px}.bento-mode .nav{display:flex;overflow-x:auto}.bento-mode .nav button{flex:0 0 58px}}
 
+/* Consistent comparison colors, independent of card/group palette. */
+.change-positive,.enterprise-mode .change-positive{color:var(--green)}
+.change-negative,.enterprise-mode .change-negative{color:var(--red)}
+.change-neutral,.enterprise-mode .change-neutral{color:var(--muted)}
+.overview-tabs{display:flex;gap:6px;padding:5px;margin:0 0 20px;border:1px solid #e8ecf7;border-radius:16px;background:#fff;width:fit-content;max-width:100%;scroll-margin-top:160px}
+.overview-tabs [role=tab]{border:0;border-radius:12px;padding:11px 20px;background:transparent;color:#64748b;font-weight:650;white-space:nowrap}
+.overview-tabs [aria-selected=true]{background:#eef0ff;color:#4f46e5;box-shadow:0 2px 8px #6366f10d}
+.overview-group-nav{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;margin-bottom:14px;background:#fff;border:1px solid #e8ecf7;border-radius:20px}
+.overview-group-nav>div{text-align:center;min-width:0}.overview-group-nav span{display:block;color:#8291af;font-size:11px;margin-bottom:4px}.overview-group-nav strong{font-size:17px;color:#172554}.overview-group-nav .btn{flex-shrink:0;display:grid;place-items:center;border-radius:18px;width:76px;height:64px;background:linear-gradient(135deg,#eef2ff,#f4f7fe);color:#4f46e5;border:1px solid #e0e7ff;box-shadow:0 4px 14px #4338ca0a}.overview-group-nav .btn:hover{background:#e0e7ff}.overview-group-nav .btn svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.comparison-export{white-space:nowrap}.comparison-card>.comparison-export{margin:0 0 12px auto;display:block}
+@media(max-width:600px){.overview-group-nav .btn{width:56px;height:54px;border-radius:15px}.overview-group-nav .btn svg{width:26px;height:26px}.formula-index button{padding:12px;grid-template-columns:24px 1fr;gap:4px 8px}.panel-head:has(.comparison-export){flex-wrap:wrap}}
+#overview-tab-panel>.group-detail{margin-top:0}
+@media(max-width:600px){.overview-tabs{width:100%;gap:2px;padding:4px;margin-bottom:14px}.overview-tabs [role=tab]{flex:1;min-width:0;padding:10px 6px;font-size:11px;white-space:normal}.overview-group-nav{padding:12px;gap:8px}.overview-group-nav strong{font-size:14px}}
 /* One visual language across screens. Do not change columns, rows or data. */
 .enterprise-mode{--bg:#f4f7fe;--surface-2:#f8faff;--line:#e8edf7;--blue:#4f46e5;--blue-2:#eef2ff;background:var(--bg);font-family:Inter,"Segoe UI",Arial,sans-serif;line-height:1.5}
 .enterprise-mode .num{font-family:inherit;font-variant-numeric:tabular-nums;letter-spacing:-.015em}

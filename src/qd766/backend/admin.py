@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 
-from .auth import SESSION_COOKIE, current_session, digest
+from .auth import SESSION_COOKIE, current_session, digest, csrf_matches
 from .models import AccountCollectionPermission, AdminAudit, CreditLedgerEntry, Department, Dataset, Entity, LoginSession, Snapshot, TrialInvitation, UserAccount, SubscriptionCycle
 from .wallet_access import enabled as wallet_enabled, credits, active_subscription, subscription_summary
 
@@ -21,7 +21,7 @@ def administrator(request, db, *, write=False):
         raise HTTPException(401, "Vui lòng đăng nhập.")
     if account.role != "admin" or not account.trial_admitted:
         raise HTTPException(403, "Chỉ tài khoản quản trị được sử dụng chức năng này.")
-    if write and not secrets.compare_digest(request.headers.get("X-QD766-CSRF", ""), session.csrf_token):
+    if write and not csrf_matches(request.headers.get("X-QD766-CSRF", ""), session.csrf_token):
         raise HTTPException(403, "Xác nhận phiên không hợp lệ.")
     return account
 
