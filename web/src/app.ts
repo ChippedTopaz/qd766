@@ -1182,7 +1182,7 @@ async function loadSelection():Promise<void>{
 }
 
 async function openProvince(rootDepartmentId:string,requestId:number):Promise<void>{
-  const response=await fetch(`/api/v1/dashboard?root_department_id=${encodeURIComponent(rootDepartmentId)}`);
+  const response=await fetch(`/api/v1/dashboard?fast=true&root_department_id=${encodeURIComponent(rootDepartmentId)}`);
   if(!response.ok)throw new Error(`HTTP ${response.status}`);
   const loaded=normalizeLoadedData(await response.json() as AppData);
   if(requestId!==selectionRequest)return;
@@ -1274,7 +1274,7 @@ async function start(): Promise<void> {
     }
     const remembered=typeof location!=="undefined"?new URLSearchParams(location.search):new URLSearchParams();
     const rememberedProvince=remembered.get("province");
-    const dashboardUrl=rememberedProvince?`/api/v1/dashboard?root_department_id=${encodeURIComponent(rememberedProvince)}`:"/api/v1/dashboard";
+    const dashboardUrl=rememberedProvince?`/api/v1/dashboard?fast=true&root_department_id=${encodeURIComponent(rememberedProvince)}`:"/api/v1/dashboard?fast=true";
     const [apiResponse,provincesResponse]=await Promise.all([fetch(dashboardUrl),fetch("/api/v1/dashboard/provinces")]);
     if(provincesResponse.ok)provinceOptions=await provincesResponse.json() as ProvinceOption[];
     if(apiResponse.ok){

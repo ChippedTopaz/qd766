@@ -17,7 +17,7 @@ globalThis.window={setTimeout};globalThis.location={search:'?period=year-2026',h
 globalThis.history={state:null,replaceState(){}};globalThis.scrollTo=()=>{};
 const days=[['2026-10-05',72],['2026-10-04',70],['2026-10-03',71]].map(([reportDate,totalScore])=>({reportDate,totalScore,rank:null,cohortKey:'same',groups:{}}));
 const calls=[];
-globalThis.fetch=async url=>{calls.push(url);return {ok:true,json:async()=>structuredClone(url==='/api/v1/access-policy'?{publicReadOnly:true}:url.includes('daily-history')?{days}:url==='/api/v1/dashboard'?data:[])}};
+globalThis.fetch=async url=>{calls.push(url);return {ok:true,json:async()=>structuredClone(url==='/api/v1/access-policy'?{publicReadOnly:true}:url.includes('daily-history')?{days}:url==='/api/v1/dashboard?fast=true'?data:[])}};
 await import('../dist/app.js?annual-ui');for(let i=0;i<8;i++)await new Promise(r=>setImmediate(r));
 assert.match(app.innerHTML,/data-annual-observation/);assert.match(app.innerHTML,/\+2,00 điểm/);
 dateControl.handlers.change();assert.match(app.innerHTML,/-1,00 điểm/);

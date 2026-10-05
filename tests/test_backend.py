@@ -181,6 +181,67 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/health/ready").status_code, 200)
         self.assertEqual(self.client.get("/api/v1/snapshots").json(), [])
 
+    def test_fast_dashboard_preserves_payload_and_compresses_transport(self):
+        with self.app.state.session_factory.begin() as db:
+            store_normalized_snapshot(db, snapshot_payload())
+        regular = self.client.get("/api/v1/dashboard", params={"root_department_id": ROOT_ID})
+        fast = self.client.get("/api/v1/dashboard", params={"root_department_id": ROOT_ID, "fast": True})
+        self.assertEqual(regular.status_code, 200)
+        self.assertEqual(fast.json(), regular.json())
+        self.assertEqual(fast.headers["content-encoding"], "gzip")
+        self.assertIn("Accept-Encoding", fast.headers["vary"])
+        self.assertEqual(fast.headers["cache-control"], "private, max-age=30")
+        self.assertEqual(fast.headers["x-qd766-cache"], "hit")
+        plain = self.client.get("/api/v1/dashboard?fast=true", headers={"Accept-Encoding": "identity"})
+        self.assertNotIn("content-encoding", plain.headers)
+        self.assertEqual(plain.json(), regular.json())
+        policy = self.client.get("/api/v1/access-policy")
+        self.assertNotIn("content-encoding", policy.headers)
+
+    def test_dashboard_selects_latest_version_before_loading_children(self):
+        from sqlalchemy import event
+        with self.app.state.session_factory.begin() as db:
+            old = store_normalized_snapshot(db, snapshot_payload(), observation_id="perf-old")
+            new_payload = snapshot_payload()
+            new_payload["provinceAggregatedScore"] = 7
+            latest = store_normalized_snapshot(db, new_payload, observation_id="perf-new")
+            old.created_at = datetime(2026, 8, 29, tzinfo=timezone.utc)
+            latest.created_at = datetime(2026, 8, 30, tzinfo=timezone.utc)
+            old_id = old.id.hex
+        dataset_parameters = []
+        def capture(connection, cursor, statement, parameters, context, executemany):
+            if "FROM datasets" in statement:
+                dataset_parameters.extend(str(value) for value in parameters)
+        event.listen(self.app.state.engine, "before_cursor_execute", capture)
+        try:
+            response = self.client.get("/api/v1/dashboard?fast=true")
+        finally:
+            event.remove(self.app.state.engine, "before_cursor_execute", capture)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["snapshots"]["month-2026-08:all"]["provinceAggregatedScore"], 7)
+        self.assertNotIn(old_id, dataset_parameters)
+
+    def test_fast_dashboard_filters_agency_before_serializing_shared_cache(self):
+        import json
+        from types import SimpleNamespace
+        from starlette.responses import Response
+        from qd766.backend.routes import dashboard
+        with self.app.state.session_factory.begin() as db:
+            store_normalized_snapshot(db, snapshot_payload())
+        with self.app.state.session_factory() as db:
+            request = SimpleNamespace(app=self.app, state=SimpleNamespace(
+                authorized_root_id=uuid.UUID(ROOT_ID), authorized_unit_id=uuid.UUID(CHILD_ID)))
+            response = dashboard(request, Response(), db, fast=True)
+            scoped = json.loads(response.body)
+            self.assertEqual(scoped["defaultUnitId"], CHILD_ID)
+            self.assertEqual(len(scoped["units"]), 1)
+            dataset = scoped["snapshots"]["month-2026-08:all"]["datasets"][0]
+            self.assertIsNone(dataset["root"]["apiScore"])
+            self.assertEqual(dataset["root"]["metrics"], [])
+            self.assertTrue(dataset["children"][0]["metrics"])
+        admin = self.client.get("/api/v1/dashboard?fast=true").json()
+        self.assertTrue(admin["snapshots"]["month-2026-08:all"]["datasets"][0]["root"]["metrics"])
+
     def test_database_password_is_safely_encoded(self):
         with patch.dict(
             "os.environ",

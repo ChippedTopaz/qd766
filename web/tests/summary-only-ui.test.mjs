@@ -40,7 +40,7 @@ globalThis.fetch=async(url,options)=>{
   calls.push({url,method:options?.method??"GET"});
   let body;
   if(url==="/api/v1/access-policy")body={publicReadOnly:true};
-  else if(url==="/api/v1/dashboard")body=data;
+  else if(url==="/api/v1/dashboard?fast=true")body=data;
   else if(url==="/api/v1/dashboard/provinces")body=[];
   else if(url.startsWith("/api/v1/dashboard/province-rankings"))body=Array.from({length:34},(_,i)=>({
     rootDepartmentId:i===0?rootId:"province-"+i,provinceName:"Tỉnh "+i,

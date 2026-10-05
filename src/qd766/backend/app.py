@@ -19,6 +19,7 @@ from .admin import router as admin_router
 from .trial_registration import router as registration_router
 from .subscription_scheduler import local_credit_lifespan
 from .wallet_runtime import validate_wallet_runtime
+from .dashboard_transport import DashboardGZipMiddleware
 
 
 def create_app(settings: Settings | None = None, *, web_root: Path | None = None) -> FastAPI:
@@ -89,6 +90,7 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
             allow_methods=["GET", "POST"],
             allow_headers=["*"],
         )
+    app.add_middleware(DashboardGZipMiddleware)
     app.include_router(auth_router)
     app.include_router(admin_router)
     app.include_router(registration_router)

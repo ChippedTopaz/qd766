@@ -25,7 +25,7 @@ let savedUrl='';globalThis.history={state:null,replaceState(_s,_title,url){saved
 globalThis.scrollTo=()=>{};
 const calls=[];globalThis.fetch=async(url,options)=>{
   calls.push({url,method:options?.method??'GET'});
-  const body=url==='/api/v1/access-policy'?{publicReadOnly:true}:url==='/api/v1/dashboard'?data:[];
+  const body=url==='/api/v1/access-policy'?{publicReadOnly:true}:url==='/api/v1/dashboard?fast=true'?data:[];
   return {ok:true,status:200,json:async()=>structuredClone(body)};
 };
 await import('../dist/app.js');for(let i=0;i<5;i++)await new Promise(r=>setImmediate(r));

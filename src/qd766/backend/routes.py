@@ -4,6 +4,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from starlette.responses import JSONResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -990,13 +991,14 @@ def dashboard_province_rankings(
     return ordered
 
 
-@router.get("/dashboard", tags=["dashboard"])
+@router.get("/dashboard", tags=["dashboard"], response_model=None)
 def dashboard(
     request: Request,
     response: Response,
     session: DbSession,
     root_department_id: uuid.UUID | None = None,
-) -> dict:
+    fast: bool = False,
+) -> dict | Response:
     public_read_only = request.app.state.settings.public_read_only
     root_department_id = getattr(request.state, "authorized_root_id", None) or root_department_id
     cache_key = ("public:" if public_read_only else "office:") + (str(root_department_id) if root_department_id else "latest")
@@ -1012,6 +1014,22 @@ def dashboard(
             )
         if resolved_root_id is None:
             raise HTTPException(status_code=404, detail="No complete snapshots found")
+        # Select version IDs before hydrating entities and metrics. Reading every
+        # immutable version first becomes progressively slower after daily refreshes.
+        versions = select(
+            Snapshot.id,
+            func.row_number().over(
+                partition_by=(Snapshot.root_department_id, Snapshot.period_type,
+                              Snapshot.year, Snapshot.period_value, Snapshot.scope,
+                              Snapshot.formality_id),
+                order_by=(Snapshot.created_at.desc(), Snapshot.id.desc()),
+            ).label("version_number"),
+        ).where(
+            Snapshot.state == "complete",
+            Snapshot.root_department_id == resolved_root_id,
+            Snapshot.scope == "all" if public_read_only else True,
+            Snapshot.formality_id.is_(None) if public_read_only else True,
+        ).subquery()
         statement = (
             select(Snapshot)
             .options(
@@ -1024,10 +1042,7 @@ def dashboard(
                 .selectinload(Entity.metrics),
             )
             .where(
-                Snapshot.state == "complete",
-                Snapshot.root_department_id == resolved_root_id,
-                Snapshot.scope == "all" if public_read_only else True,
-                Snapshot.formality_id.is_(None) if public_read_only else True,
+                Snapshot.id.in_(select(versions.c.id).where(versions.c.version_number == 1)),
             )
             .order_by(
                 Snapshot.year.desc(),
@@ -1061,7 +1076,10 @@ def dashboard(
     response.headers["X-QD766-Cache"] = cache_result
     response.headers["Cache-Control"] = "private, max-age=30"
     from .agency_scope import restrict_agency
-    return restrict_agency(payload, getattr(request.state, "authorized_unit_id", None))
+    scoped = restrict_agency(payload, getattr(request.state, "authorized_unit_id", None))
+    # The payload is already JSON-native. Avoid FastAPI walking the entire large
+    # graph a second time; scope filtering must always happen before serialization.
+    return JSONResponse(scoped, headers=dict(response.headers)) if fast else scoped
 
 
 @router.get("/dashboard/selection", tags=["dashboard"])

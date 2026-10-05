@@ -19,7 +19,7 @@ globalThis.fetch=async(url,options)=>{
   calls.push({url,method:options?.method??'GET',options});let body;
   if(url==='/api/v1/access-policy')body={publicReadOnly:true,paidRequestsEnabled:true,loginRequired:true,googleLoginEnabled:true};
   else if(url==='/api/v1/auth/me')body={name:'Tester',provinceId:data.province.id,csrfToken:'test-csrf',credits:10,canCollect:true};
-  else if(url==='/api/v1/dashboard')body=data;
+  else if(url==='/api/v1/dashboard?fast=true')body=data;
   else if(url==='/api/v1/dashboard/provinces')body=[];
   else if(url.includes('/province-rankings'))body=[];
   else if(url.includes('/preview?'))body={counts:{selected:1,available:0,missing:1},fields:['Lĩnh vực thử'],items:[item]};
