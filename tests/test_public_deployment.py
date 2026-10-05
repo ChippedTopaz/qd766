@@ -13,6 +13,14 @@ from qd766.backend.public_deployment import CALLBACK, WEBSITE_CALLBACK, read_con
 
 
 class PublicDeploymentTests(unittest.TestCase):
+    def test_shared_registration_is_explicit_and_preserves_boundary(self):
+        self.assertFalse(public_settings(self.office,self.public,real_wallet=True).shared_registration_enabled)
+        settings=public_settings(self.office,self.public,real_wallet=True,shared_registration=True)
+        self.assertTrue(settings.shared_registration_enabled)
+        self.assertTrue(settings.require_login and settings.invite_required and settings.public_read_only)
+        self.assertEqual(settings.formality_credit_cost,5)
+        with self.assertRaises(ValueError):public_settings(self.office,self.public,shared_registration=True)
+        with self.assertRaises(ValueError):public_settings(self.office,self.public,real_wallet=True,shared_registration='true')
     def test_explicit_wallet_mode_and_pause_do_not_weaken_public_boundary(self):
         settings=public_settings(self.office,self.public,real_wallet=True,requests_paused=True)
         self.assertTrue(settings.real_wallet_enabled and settings.wallet_requests_paused)

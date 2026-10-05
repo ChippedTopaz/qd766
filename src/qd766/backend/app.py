@@ -16,6 +16,7 @@ from .access_policy import enforce_public_read_only
 from .auth import enabled, validate_auth_settings, router as auth_router
 from .user_collection import router as user_collection_router
 from .admin import router as admin_router
+from .trial_registration import router as registration_router
 from .subscription_scheduler import local_credit_lifespan
 from .wallet_runtime import validate_wallet_runtime
 
@@ -24,6 +25,8 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
     resolved = settings or Settings.from_env()
     validate_auth_settings(resolved)
     validate_wallet_runtime(resolved)
+    if resolved.shared_registration_enabled and not (resolved.require_login and resolved.invite_required and resolved.source_wallet_enabled):
+        raise ValueError("Shared registration requires invite-only authentication and source wallet")
     if resolved.paid_requests_enabled and (not resolved.require_login or resolved.formality_credit_cost <= 0):
         raise ValueError("TTHC user collection requires authenticated deployment and configured positive credit cost")
     if resolved.trial_credit_management and not (resolved.paid_requests_enabled and resolved.trial_credits_enabled):
@@ -49,9 +52,12 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
     @app.get("/api/v1/access-policy", tags=["health"])
     def access_policy() -> dict:
         return {"publicReadOnly": resolved.public_read_only,
+                "groupExcelExportEnabled": True,
+                "collectionMonitorEnabled": True,
                 "loginRequired": resolved.require_login,
                 "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": resolved.paid_requests_enabled,
                 "inviteRequired": resolved.invite_required,
+                **({"sharedRegistrationEnabled": True} if resolved.shared_registration_enabled else {}),
                 "trialCreditManagement": resolved.trial_credit_management,
                 **({"defaultCollectionAccess": True} if resolved.source_wallet_enabled else {}),
                 **({"collectionRequestsPaused": resolved.wallet_requests_paused} if resolved.real_wallet_enabled else {}),
@@ -85,7 +91,10 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
         )
     app.include_router(auth_router)
     app.include_router(admin_router)
+    app.include_router(registration_router)
     app.include_router(user_collection_router)
+    from .daily_routes import router as daily_router
+    app.include_router(daily_router)
     app.include_router(router)
     web_root = web_root or Path(__file__).resolve().parents[3] / "web"
     if web_root.is_dir():

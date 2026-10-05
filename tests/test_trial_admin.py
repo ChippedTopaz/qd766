@@ -293,5 +293,31 @@ class TrialAdminTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/dashboard").status_code,403)
 
 
+    def test_collection_monitor_read_only_filtered_and_admin_only(self):
+        from qd766.backend.jobs import enqueue_job
+        from qd766.backend.models import CollectionJob,CollectionControl
+        with self.app.state.session_factory.begin() as db:
+            enqueue_job(db,{'kind':'evaluation-snapshot','rootDepartmentId':ROOT_ID,
+                'period':{'type':'month','year':2026,'month':9},'scope':'formality','formalityId':str(uuid.uuid4())},priority=50)
+            db.add(CollectionControl(key='dvcqg',circuit_state='open',reason='operator-requested-pause'))
+        response=self.client.get('/api/v1/admin/collection-log?kind=formality')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['total'],1)
+        self.assertEqual(response.json()['jobs'][0]['expectedGroups'],5)
+        self.assertEqual(self.client.get('/api/v1/admin/collection-log?kind=default').json()['total'],0)
+        self.assertEqual(self.client.get('/api/v1/admin/collection-log?offset=-1').status_code,422)
+        self.assertEqual(self.client.get('/api/v1/admin/collection-log?state=queued%27%20OR%201=1').status_code,422)
+        self.assertEqual(self.client.post('/api/v1/admin/collection-log',json={},headers=self.headers).status_code,405)
+        with self.app.state.session_factory() as db:
+            self.assertEqual(db.scalar(select(CollectionJob)).state,'queued')
+            self.assertEqual(db.get(CollectionControl,'dvcqg').reason,'operator-requested-pause')
+            self.assertEqual(db.get(UserAccount,self.admin_id).credit_balance,0)
+        invitation=self.invite(accessTier='national')
+        viewer,_=self.redeem(invitation['token'])
+        self.assertEqual(viewer.get('/api/v1/admin/collection-log').status_code,403)
+        viewer.close()
+        self.client.cookies.clear()
+        self.assertEqual(self.client.get('/api/v1/admin/collection-log').status_code,401)
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,7 @@
 import { installTrialCreditManager } from "./trial-credit-admin.js";
 import { installAdminLayout } from "./admin-layout.js";
+import { installCollectionMonitor } from "./admin-collection.js";
+import { installRegistrationAdmin } from "./admin-registration.js";
 import { adminSubscriptionCell } from "./admin-subscription.js";
 let layout = null;
 const root = document.querySelector("#admin");
@@ -78,6 +80,8 @@ async function start() {
         await loadUnits();
         await refresh();
         await installTrialCreditManager(root, api);
+        installCollectionMonitor(root, api);
+        await installRegistrationAdmin(root, api, refresh);
         layout = installAdminLayout(root);
         get("tier").addEventListener("change", toggleTier);
         get("province").addEventListener("change", () => void run(() => loadUnits()));
@@ -107,6 +111,9 @@ async function start() {
     }
     catch (error) {
         root.innerHTML = `<section><h1>Không thể mở quản trị</h1><p>${esc(error instanceof Error ? error.message : error)}</p><a class="button" href="/">Về trang chủ</a></section>`;
+    }
+    finally {
+        root.setAttribute("aria-busy", "false");
     }
 }
 void start();

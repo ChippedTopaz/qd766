@@ -30,7 +30,7 @@ def validate_wallet_runtime(settings):
         raise ValueError("Real wallet requires explicit office PostgreSQL without trial schema options")
 
 
-def verify_real_wallet_schema(factory):
+def verify_real_wallet_schema(factory, *, shared_registration=False):
     """Before a real lifespan starts: inspect schema read-only, never run migrations."""
     from .models import Base
     with factory() as db:
@@ -46,6 +46,20 @@ def verify_real_wallet_schema(factory):
             if not set(Base.metadata.tables[name].columns.keys()) <= actual:
                 raise ValueError("Wallet schema is incomplete")
         revisions = list(db.execute(text("SELECT version_num FROM public.alembic_version")).scalars())
-        if revisions != ["20261004_0015"]:
+        reviewed_revisions = {"20261004_0015", "20261005_0016", "20261005_0017"}
+        if len(revisions) != 1 or revisions[0] not in reviewed_revisions:
             raise ValueError("Wallet schema version has not been reviewed")
+        if shared_registration and revisions[0] == '20261004_0015':
+            raise ValueError("Shared registration schema has not been migrated")
+        # Reviewed additive upgrades must include their actual tables, not just
+        # a claimed version number. Never accept arbitrary future revisions.
+        extra = []
+        if revisions[0] in {"20261005_0016", "20261005_0017"}:
+            extra += ["shared_trial_links", "shared_trial_logins", "trial_registrations"]
+        if revisions[0] == "20261005_0017":
+            extra += ["daily_observations"]
+        for name in extra:
+            actual = {column["name"] for column in inspector.get_columns(name, schema="public")}
+            if not set(Base.metadata.tables[name].columns.keys()) <= actual:
+                raise ValueError("Reviewed additive schema is incomplete")
         # Session closes with rollback; no financial mutation or migration.

@@ -11,14 +11,24 @@ BOOTSTRAP_PATHS = {"/api/v1/access-policy", "/api/v1/health/live", "/api/v1/heal
 
 PUBLIC_READ_PATHS = frozenset({
     "/api/v1/access-policy", "/api/v1/health/live", "/api/v1/health/ready",
-    "/api/v1/dashboard", "/api/v1/dashboard/selection",
-    "/api/v1/dashboard/provinces", "/api/v1/dashboard/province-rankings",
+    "/api/v1/dashboard", "/api/v1/dashboard/selection", "/api/v1/dashboard/group-export",
+    "/api/v1/dashboard/provinces", "/api/v1/dashboard/province-rankings", "/api/v1/dashboard/daily-history",
     "/api/v1/national-summaries", "/api/v1/national-summaries/latest",
 })
 
 
 async def enforce_public_read_only(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
+    registration_methods = {"/api/v1/auth/registration-link": {"POST"},
+                            "/api/v1/auth/registration": {"GET", "POST"},
+                            "/api/v1/auth/registration/directory": {"GET"}}
+    if path in registration_methods:
+        if request.method not in registration_methods[path]:
+            return JSONResponse(status_code=405, content={"detail": "Method not allowed"})
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
     if getattr(request.app.state, "local_credit_trial", False) and (
             path in {"/local-trial.html", "/login-preview.html"} or path.startswith("/api/v1/local-trial/")):
         # Only the isolated SQLite simulator registers these handlers and its loopback guard.
@@ -50,7 +60,7 @@ async def enforce_public_read_only(request: Request, call_next):
     user_collection=request.app.state.settings.paid_requests_enabled
     user_path=path in {"/api/v1/me/credits","/api/v1/me/subscription/redemption","/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/formalities","/api/v1/me/notifications/read"}
     catalog_path=path.startswith("/api/v1/province-catalog/") and path.endswith("/preview")
-    private_selection=path=="/api/v1/dashboard/selection" and request.query_params.get("scope")=="formality"
+    private_selection=path in {"/api/v1/dashboard/selection", "/api/v1/dashboard/group-export"} and request.query_params.get("scope")=="formality"
     if path.startswith("/api/"):
         allowed = allowed and path in PUBLIC_READ_PATHS
         allowed = allowed and all(value == "all" for value in request.query_params.getlist("scope"))
@@ -59,7 +69,7 @@ async def enforce_public_read_only(request: Request, call_next):
             allowed=(request.method in {"GET","HEAD"} and path!="/api/v1/me/collection-quote") or (
                 request.method=="POST" and path in {"/api/v1/me/subscription/redemption","/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/notifications/read"})
     else:
-        allowed = allowed and (path in {"/", "/index.html", "/admin.html", "/admin.css", "/styles.css", "/bento.css", "/collection.css"}
+        allowed = allowed and (path in {"/", "/index.html", "/admin.html", "/admin.css", "/styles.css", "/bento.css", "/collection.css", "/assets/logo-cchc.png"}
             or path.startswith("/dist/") and path.endswith(".js")
             or path.startswith("/vendor/") and path.endswith((".js", ".css")))
     if not allowed:

@@ -46,6 +46,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="Check/process at most one job")
     parser.add_argument("--poll-seconds", type=float, default=15.0)
+    parser.add_argument("--controlled", action="store_true", help="Opt into pooled 3-request collection; no scheduler/task changes")
     arguments = parser.parse_args()
     if arguments.poll_seconds < 1:
         parser.error("--poll-seconds must be at least 1")
@@ -53,12 +54,26 @@ def main() -> int:
     load_environment_file(ROOT / ".env")
     engine = create_database_engine(Settings.from_env())
     factory = create_session_factory(engine)
+    worker_id = f"{socket.gethostname()}:{os.getpid()}"
+    if arguments.controlled:
+        from qd766.concurrent_collection import PooledHttpTransport
+        from qd766.backend.models import CollectionControl
+        from qd766.collection import SafetyStop
+        def guard():
+            with factory() as db:
+                control=db.get(CollectionControl,'dvcqg')
+                if control is None or control.circuit_state!='closed' or control.lease_locked_by!=worker_id:
+                    raise SafetyStop('Collection control changed')
+        transport = PooledHttpTransport(max_workers=3, spacing=0.4, guard=guard)
+    else:
+        transport = UrllibTransport(timeout_seconds=45)
     processor = EvaluationSnapshotProcessor(
         collection_root=_collection_root(),
-        transport=UrllibTransport(timeout_seconds=45),
+        transport=transport,
         minimum_delay_seconds=5,
         jitter_seconds=1,
-        max_retries=1,
+        max_retries=4 if arguments.controlled else 1,
+        max_workers=3 if arguments.controlled else 1,
     )
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     previous_idle_state: str | None = None
@@ -74,11 +89,13 @@ def main() -> int:
                 previous_idle_state = state
             if arguments.once:
                 return 0
-            time.sleep(arguments.poll_seconds)
+            time.sleep(2.5 if arguments.controlled and result and result.job_id is not None else arguments.poll_seconds)
     except KeyboardInterrupt:
         print(_event("stopped"), flush=True)
         return 0
     finally:
+        if arguments.controlled:
+            transport.close()
         engine.dispose()
 
 

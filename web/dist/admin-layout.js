@@ -1,17 +1,26 @@
 export function installAdminLayout(root) {
     const sections = Array.from(root.querySelectorAll(":scope > section"));
-    const form = sections[0], accounts = sections[1], invitations = sections[2], audit = sections[3], credits = sections[4];
+    const form = sections[0], accounts = sections[1], invitations = sections[2], audit = sections[3], credits = sections.find(s => s.querySelector("#credit-form")), collection = sections.find(s => s.dataset.collectionMonitor === "true");
     const workspace = document.createElement("div");
     workspace.className = "admin-workspace";
     const sidebar = document.createElement("aside");
     sidebar.className = "admin-sidebar";
-    const items = [["accounts", "Quản lý tài khoản"], ["credits", "Quản lý credits"], ["invitations", "Mời dùng thử"], ["audit", "Nhật ký quản trị"]];
-    sidebar.innerHTML = `<a class="admin-brand" href="/">766 <span>Quản trị</span></a><nav aria-label="Quản trị">${items.map(([key, label]) => `<button data-admin-section="${key}">${label}</button>`).join("")}</nav><a class="button admin-back" href="/">Về Tổng quan</a>`;
+    const items = [["accounts", "Quản lý tài khoản"], ["credits", "Quản lý credits"], ["invitations", "Mời dùng thử"], ["collection", "Nhật ký khai thác"], ["audit", "Nhật ký quản trị"]];
+    const registration = sections.find(s => s.dataset.registrationReview === "true"), sharedLinks = sections.find(s => s.dataset.sharedLinks === "true");
+    if (registration)
+        items.splice(3, 0, ["registrations", "Đăng ký chờ duyệt"]);
+    sidebar.innerHTML = `<a class="admin-brand" href="/"><span class="admin-logo"><img class="cchc-logo" src="/assets/logo-cchc.png" alt="Cải cách hành chính" width="44" height="44"></span> <span>Quản trị</span></a><nav aria-label="Quản trị">${items.map(([key, label]) => `<button data-admin-section="${key}">${label}</button>`).join("")}</nav><a class="button admin-back" href="/">Về Tổng quan</a>`;
     const panels = {};
     items.forEach(([key]) => { const panel = document.createElement("div"); panel.dataset.adminPanel = key; panel.hidden = true; panels[key] = panel; workspace.append(panel); });
     panels.accounts.append(accounts);
     panels.invitations.append(form, invitations);
     panels.audit.append(audit);
+    if (sharedLinks)
+        panels.invitations.append(sharedLinks);
+    if (registration)
+        panels.registrations.append(registration);
+    if (collection)
+        panels.collection.append(collection);
     const inviteHeading = document.createElement("div");
     inviteHeading.className = "actions";
     inviteHeading.innerHTML = '<h2 style="margin-right:auto">Mời dùng thử</h2><button type="button" class="primary" data-new-invite>Tạo link mời</button>';

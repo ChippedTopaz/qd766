@@ -1,5 +1,7 @@
 import {installTrialCreditManager} from "./trial-credit-admin.js";
 import {installAdminLayout} from "./admin-layout.js";
+import {installCollectionMonitor} from "./admin-collection.js";
+import {installRegistrationAdmin} from "./admin-registration.js";
 import {adminSubscriptionCell,type SubscriptionSummary} from "./admin-subscription.js";
 let layout:{edit:()=>void;invite:()=>void}|null=null;
 type Account={id:string;email:string|null;name:string;role:string;admitted:boolean;active:boolean;accessTier:string;provinceId:string|null;unitId:string|null;credits:number;reservedCredits:number;subscription?:SubscriptionSummary|null;canActivateTrial?:boolean};
@@ -50,10 +52,10 @@ async function start(){try{
       await refresh();
     }finally{button.disabled=false;}});
   });
-  await loadUnits();await refresh();await installTrialCreditManager(root,api);layout=installAdminLayout(root);
+  await loadUnits();await refresh();await installTrialCreditManager(root,api);installCollectionMonitor(root,api);await installRegistrationAdmin(root,api,refresh);layout=installAdminLayout(root);
   get("tier").addEventListener("change",toggleTier);get("province").addEventListener("change",()=>void run(()=>loadUnits()));get("search").addEventListener("input",showAccounts);
   get("cancel").addEventListener("click",()=>{editing=null;layout?.invite();get("form-title").textContent="Tạo lời mời";get("save").textContent="Tạo link mời";get("cancel").hidden=true;get("active-label").hidden=true;get("email-label").hidden=false;get("days-label").hidden=false;});
   get("form").addEventListener("submit",event=>{event.preventDefault();void run(async()=>{const button=get<HTMLButtonElement>("save");button.disabled=true;try{if(editing){await api(`admin/accounts/${editing}`,{...assignment(),active:get<HTMLSelectElement>("active").value==="true"});message("Đã lưu quyền; phiên cũ đã được thu hồi. Người dùng cần đăng nhập lại.");}else{const invite=await api<{token:string}>("admin/invitations",{...assignment(),email:get<HTMLInputElement>("email").value||null,days:Number(get<HTMLInputElement>("days").value)});const link=`${location.origin}/#invite=${invite.token}`;get("invite-result").innerHTML=`<strong>Link chỉ hiển thị lần này:</strong> <a href="${esc(link)}">${esc(link)}</a> <button id="copy" type="button">Sao chép</button>`;get("copy").addEventListener("click",()=>void run(async()=>{await navigator.clipboard.writeText(link);message("Đã sao chép link mời.");}));message("Đã tạo lời mời. Chỉ gửi riêng cho người cần dùng thử.");}await refresh();}finally{button.disabled=false;}});});
   root.addEventListener("click",event=>{const button=(event.target as HTMLElement).closest<HTMLButtonElement>("button");if(button?.dataset.edit){void run(async()=>{const a=accounts.find(a=>a.id===button.dataset.edit)!;editing=a.id;layout?.edit();get<HTMLSelectElement>("province").value=a.provinceId??"";get<HTMLSelectElement>("tier").value=a.accessTier;get<HTMLSelectElement>("active").value=String(a.active);await loadUnits(a.unitId);toggleTier();get("form-title").textContent=`Phân quyền: ${a.name}`;get("save").textContent="Lưu quyền";get("cancel").hidden=false;get("active-label").hidden=false;get("email-label").hidden=true;get("days-label").hidden=true;get("invite-result").textContent="";get("form").scrollIntoView({behavior:"smooth"});});}if(button?.dataset.revoke)void run(async()=>{await api(`admin/invitations/${button.dataset.revoke}/revoke`,{});message("Đã thu hồi lời mời.");await refresh();});});
-}catch(error){root.innerHTML=`<section><h1>Không thể mở quản trị</h1><p>${esc(error instanceof Error?error.message:error)}</p><a class="button" href="/">Về trang chủ</a></section>`;}}
+}catch(error){root.innerHTML=`<section><h1>Không thể mở quản trị</h1><p>${esc(error instanceof Error?error.message:error)}</p><a class="button" href="/">Về trang chủ</a></section>`;}finally{root.setAttribute("aria-busy","false");}}
 void start();

@@ -1,4 +1,4 @@
-param([switch]$ReplaceExisting, [switch]$RealWallet, [switch]$PausePaidRequests)
+param([switch]$ReplaceExisting, [switch]$RealWallet, [switch]$PausePaidRequests, [switch]$SharedRegistration)
 $ErrorActionPreference = 'Stop'
 $RepositoryRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $RepositoryRoot '.venv\Scripts\python.exe'
@@ -11,13 +11,18 @@ foreach ($path in @($Python, $Launcher, $BackgroundPython)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Missing public backend files.' }
 }
 if ($PausePaidRequests -and -not $RealWallet) { throw 'Pause requires -RealWallet.' }
+if ($SharedRegistration -and -not $RealWallet) { throw 'Shared registration requires -RealWallet.' }
 $ModeArguments = @()
 if ($RealWallet) { $ModeArguments += '--real-wallet' }
 if ($PausePaidRequests) { $ModeArguments += '--pause-paid-requests' }
+if ($SharedRegistration) { $ModeArguments += '--shared-registration' }
 & $Python $Launcher @ModeArguments --check
 if ($LASTEXITCODE -ne 0) { throw 'Public configuration check failed. No task registered.' }
 $ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($ExistingTask) {
+    if (-not $SharedRegistration -and (($ExistingTask.Actions | ForEach-Object { $_.Arguments }) -join ' ') -match '--shared-registration') {
+        throw 'Cannot silently disable shared registration. Preserve -SharedRegistration when replacing this task.'
+    }
     if (-not $RealWallet -and (($ExistingTask.Actions | ForEach-Object { $_.Arguments }) -join ' ') -match '--real-wallet') {
         throw 'Cannot replace a real-wallet task with legacy mode. Use -RealWallet; pause if necessary.'
     }

@@ -1150,6 +1150,32 @@ def dashboard_selection(
     return restrict_agency(payload, getattr(request.state, "authorized_unit_id", None))
 
 
+@router.get("/dashboard/group-export", tags=["dashboard"])
+def dashboard_group_export(
+    request: Request, response: Response, session: DbSession,
+    period_type: str = Query(pattern="^(month|quarter|year)$"),
+    year: int = Query(ge=2000, le=2200),
+    scope: str = Query(default="all", pattern="^(all|formality)$"),
+    period_value: int | None = None, formality_id: uuid.UUID | None = None,
+    root_department_id: uuid.UUID | None = None,
+    group: str = "all", unit_department_id: uuid.UUID | None = None,
+) -> dict:
+    from .group_export import group_export_payload
+    authorized_unit = getattr(request.state, "authorized_unit_id", None)
+    if authorized_unit is not None and unit_department_id not in (None, authorized_unit):
+        raise HTTPException(403, "Chỉ được xuất biểu của cơ quan được phân quyền.")
+    try:
+        PeriodSelection(period_type, year, period_value).validate_collectable()
+    except ValueError as exc:
+        raise HTTPException(422, "Kỳ thống kê không hợp lệ.") from exc
+    if (scope == "formality") != (formality_id is not None):
+        raise HTTPException(422, "Phạm vi thủ tục không hợp lệ.")
+    payload = dashboard_selection(request, response, session, period_type, year, scope,
+                                  period_value, formality_id, root_department_id)
+    response.headers["Cache-Control"] = "no-store"
+    return group_export_payload(payload["snapshot"], unit_id=authorized_unit, selected_group=group)
+
+
 @router.post(
     "/dashboard/requests",
     response_model=DashboardCollectionResponse,

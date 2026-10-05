@@ -60,12 +60,16 @@ class EvaluationSnapshotProcessor:
         minimum_delay_seconds: float = 5.0,
         jitter_seconds: float = 1.0,
         max_retries: int = 1,
+        max_workers: int = 1,
     ):
         self.collection_root = collection_root
         self.transport = transport
         self.minimum_delay_seconds = minimum_delay_seconds
         self.jitter_seconds = jitter_seconds
         self.max_retries = max_retries
+        if not 1 <= max_workers <= 5:
+            raise ValueError('max_workers must be 1..5')
+        self.max_workers = max_workers
 
     def __call__(self, job_id: uuid.UUID, request: dict[str, Any]) -> dict[str, Any]:
         if request.get("kind") != "evaluation-snapshot":
@@ -83,6 +87,11 @@ class EvaluationSnapshotProcessor:
 
         plan = plan_evaluation_requests(period, root_department_id, formality_id)
         output_dir = self.collection_root / str(job_id)
+        if self.max_workers > 1:
+            from qd766.concurrent_collection import collect_concurrent_snapshot
+            collect_concurrent_snapshot(plan, period=period, output_dir=output_dir,
+                transport=self.transport, max_workers=self.max_workers, max_retries=self.max_retries)
+            return build_collected_snapshot(output_dir).to_dict()
         collect_snapshot(
             plan,
             period=period,
@@ -128,7 +137,8 @@ def run_one_job(
         snapshot = processor(job_id, request)
         with factory.begin() as session:
             job = _locked_job(session, job_id)
-            stored_snapshot = store_normalized_snapshot(session, snapshot)
+            stored_snapshot = store_normalized_snapshot(session, snapshot,
+                observation_id=str(job_id) if getattr(processor, 'max_workers', 1) > 1 else None)
             settle_paid_requests_for_job(session, job, stored_snapshot)
             succeed_job(session, job, worker_id)
             finish_batch_job(session, job, "succeeded")

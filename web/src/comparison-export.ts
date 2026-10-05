@@ -83,7 +83,7 @@ export function bindComparisonExports(context:ComparisonContext,WorkbookClass:()
     button.addEventListener('click',()=>void download(button,read()));
     if(host.matches('.comparison-card'))host.querySelector('h3')?.after(button);else host.append(button);
   };
-  // Export rendered rows only: respects filtering, scope and the current 60-row view.
+  // Export rendered rows only: respects filtering and the caller's access scope.
   document.querySelectorAll<HTMLTableElement>('.content table').forEach(table=>{
     if(table.matches('.metric-table,.progress-table,.leadership-table'))return;
     const panel=table.closest('.panel');const host=panel?.querySelector('.panel-head');

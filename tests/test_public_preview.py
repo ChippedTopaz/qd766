@@ -25,7 +25,7 @@ class PublicPreviewTests(unittest.TestCase):
     def test_public_policy_and_health_without_authentication_claim(self):
         policy = self.client.get("/api/v1/access-policy")
         self.assertEqual(policy.status_code, 200)
-        self.assertEqual(policy.json(), {"publicReadOnly": True, "loginRequired": False, "googleLoginEnabled": False, "paidRequestsEnabled": False, "inviteRequired": False, "trialCreditManagement": False, "localSimulation": False})
+        self.assertEqual(policy.json(), {"publicReadOnly": True, "groupExcelExportEnabled": True, "collectionMonitorEnabled": True, "loginRequired": False, "googleLoginEnabled": False, "paidRequestsEnabled": False, "inviteRequired": False, "trialCreditManagement": False, "localSimulation": False})
         self.assertEqual(self.client.get("/api/v1/health/live").status_code, 200)
 
     def test_block_writes_and_operator_or_raw_reads_before_database_access(self):
@@ -46,6 +46,15 @@ class PublicPreviewTests(unittest.TestCase):
             self.assertEqual(self.client.get(path).status_code, 403)
         for path in ["/", "/styles.css", "/dist/app.js", "/vendor/exceljs/exceljs.min.js"]:
             self.assertEqual(self.client.get(path).status_code, 200)
+
+    def test_public_logo_has_exact_asset_allowlist(self):
+        response = self.client.get("/assets/logo-cchc.png")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/png")
+        self.assertTrue(response.content.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertEqual(self.client.head("/assets/logo-cchc.png").status_code, 200)
+        for path in ["/assets/secret.png", "/assets/logo-cchc.png.map", "/assets/config.json"]:
+            self.assertEqual(self.client.get(path).status_code, 403)
 
     def test_dashboard_does_not_embed_paid_snapshots_in_all_response(self):
         from test_backend import snapshot_payload

@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {dailyChanges,previousDay,renderDailyHistory} from '../dist/daily-history.js';
+const a={reportDate:'2026-10-05',capturedAt:'2026-10-06T02:10:00+07:00',nationalCapturedAt:'2026-10-06T02:00:00+07:00',totalScore:72.2,rank:2,cohortSize:15,cohortKey:'same',groups:{transparency:{score:8,maximum:18}}};
+const b={...a,reportDate:'2026-10-04',totalScore:70.45,rank:3};
+assert.equal(dailyChanges([b,a]).points,1.75);assert.equal(dailyChanges([b,a]).rank,1);
+assert.equal(dailyChanges([a,{...b,reportDate:'2026-10-03'}]).points,null);
+assert.equal(dailyChanges([a,{...b,cohortKey:'changed'}]).rank,null);
+assert.equal(dailyChanges([{...a,totalScore:0},{...b,totalScore:0}]).points,0);
+const html=renderDailyHistory({days:[a,b],scope:'all'},['transparency'],{transparency:'Công khai, minh bạch'});
+assert.match(html,/05\/10\/2026/);assert.match(html,/change-positive/);assert.match(html,/\+1,75/);
+assert.match(renderDailyHistory({days:[],scope:'all'},[],{}),/Chưa có bản lưu theo ngày/);
+assert.match(renderDailyHistory(null,[],{},'<script>'),/&lt;script&gt;/);
+console.log('DAILY_HISTORY_OK: prior day, report/capture dates, zero/null, cohort-safe rank, escaping');

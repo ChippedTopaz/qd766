@@ -225,7 +225,7 @@ def _add_entity(
         )
 
 
-def store_normalized_snapshot(session: Session, payload: dict[str, Any]) -> Snapshot:
+def store_normalized_snapshot(session: Session, payload: dict[str, Any], *, observation_id: str | None = None) -> Snapshot:
     """Persist one complete normalized snapshot in a single transaction.
 
     Re-importing the exact same snapshot is idempotent. Reusing the same logical
@@ -248,6 +248,10 @@ def store_normalized_snapshot(session: Session, payload: dict[str, Any]) -> Snap
     root_department_id = next(iter(root_ids))
     raw_hashes = _raw_hashes(datasets)
     key = _snapshot_key(payload, root_department_id, raw_hashes)
+    if observation_id is not None:
+        # A new actual collection can be a new immutable observation even if its
+        # content is unchanged. Same observation remains idempotent on resume.
+        key += ':observed:' + hashlib.sha256(observation_id.encode()).hexdigest()[:24]
     existing = session.scalar(select(Snapshot).where(Snapshot.snapshot_key == key))
     if existing is not None:
         existing_hashes = {item.group_name: item.raw_sha256 for item in existing.datasets}

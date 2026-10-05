@@ -194,6 +194,17 @@ class BackendTest(unittest.TestCase):
         self.assertIn("example%40password%3Awith%2Fsymbols", url)
         self.assertIn("@127.0.0.1:5432/qd766", url)
 
+    def test_immutable_observation_id_resume_and_new_daily_capture(self):
+        with self.app.state.session_factory.begin() as db:
+            old=store_normalized_snapshot(db,snapshot_payload())
+            first=store_normalized_snapshot(db,snapshot_payload(),observation_id='daily-1')
+            resumed=store_normalized_snapshot(db,snapshot_payload(),observation_id='daily-1')
+            next_day=store_normalized_snapshot(db,snapshot_payload(),observation_id='daily-2')
+            self.assertEqual(first.id,resumed.id)
+            self.assertNotEqual(old.id,first.id)
+            self.assertNotEqual(first.id,next_day.id)
+            self.assertEqual(db.scalar(select(func.count()).select_from(Snapshot)),3)
+
     def test_import_is_atomic_queryable_and_idempotent(self):
         with self.app.state.session_factory.begin() as session:
             first = store_normalized_snapshot(session, snapshot_payload())

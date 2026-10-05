@@ -128,6 +128,43 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/v1/admin/accounts/"+str(self.identity),
             json={"role":"admin"},headers={"X-QD766-CSRF":"security-csrf"}).status_code,403)
 
+    def test_group_export_is_strictly_limited_to_assigned_agency(self):
+        params={"period_type":"month","year":2026,"period_value":8,"root_department_id":ROOT_ID}
+        response=self.client.get('/api/v1/dashboard/group-export',params=params)
+        self.assertEqual(response.status_code,200,response.text)
+        body=response.json()
+        self.assertEqual(body['accessScope'],'agency')
+        self.assertEqual([unit['departmentId'] for unit in body['units']],[CHILD_ID])
+        self.assertEqual(len(body['groups']),6)
+        for group in body['groups']:
+            self.assertTrue(all(entity['departmentId']==CHILD_ID for entity in group['entities']))
+        self.assertNotIn('raw',response.text)
+        self.assertNotIn(TAY_NINH_CHILD_ID,response.text)
+        for change in ({'root_department_id':TAY_NINH_ROOT_ID},{'unit_department_id':TAY_NINH_CHILD_ID}):
+            self.assertEqual(self.client.get('/api/v1/dashboard/group-export',params=params|change).status_code,403)
+        self.assertEqual(self.client.get('/api/v1/dashboard/group-export',params=params|{'group':'invalid'}).status_code,422)
+        self.assertEqual(self.client.get('/api/v1/dashboard/group-export',params=params|{'period_value':13}).status_code,422)
+
+    def test_group_export_province_and_national_are_not_admin_roles(self):
+        params={"period_type":"month","year":2026,"period_value":8,"root_department_id":ROOT_ID,'group':'transparency'}
+        for tier in ('province','national'):
+            with self.app.state.session_factory.begin() as db:
+                account=db.get(UserAccount,self.identity);account.access_tier=tier;account.unit_department_id=None
+            response=self.client.get('/api/v1/dashboard/group-export',params=params)
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual({unit['departmentId'] for unit in response.json()['units']},{ROOT_ID,CHILD_ID})
+            self.assertEqual(len(response.json()['groups']),1)
+        with self.app.state.session_factory() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)),0)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
+
+    def test_group_export_requires_session_and_owned_formality(self):
+        params={"period_type":"month","year":2026,"period_value":8,"root_department_id":ROOT_ID}
+        self.assertEqual(self.client.get('/api/v1/dashboard/group-export',params=params|{'scope':'formality','formality_id':str(uuid.uuid4())}).status_code,403)
+        self.assertEqual(self.client.post('/api/v1/dashboard/group-export',json=params).status_code,403)
+        self.client.cookies.clear()
+        self.assertEqual(self.client.get('/api/v1/dashboard/group-export',params=params).status_code,401)
+
     def test_bad_confirmation_and_csrf_cannot_create_job(self):
         for headers in ({}, {"X-QD766-CSRF":"' OR 1=1 --"}, {"X-QD766-CSRF":"security-csrf"}):
             response=self.client.post("/api/v1/me/formality-requests",

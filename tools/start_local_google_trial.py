@@ -68,12 +68,13 @@ def main():
         url = isolated_url(ROOT / ".env").update_query_dict({"options": f"-c search_path={schema}", "connect_timeout": "5"})
         auth = read_config(ROOT / ".env.public")
         settings = Settings(database_url=url.render_as_string(hide_password=False), public_read_only=True,
-            require_login=True, invite_required=True, paid_requests_enabled=True, formality_credit_cost=5 if args.source_wallet else 3,
+            require_login=True, invite_required=True, shared_registration_enabled=args.source_wallet, paid_requests_enabled=True, formality_credit_cost=5 if args.source_wallet else 3,
             trial_credits_enabled=True, trial_credit_management=True, local_google_trial=True,
             source_wallet_trial=args.source_wallet,
             google_client_id=auth["QD766_GOOGLE_CLIENT_ID"], google_client_secret=auth["QD766_GOOGLE_CLIENT_SECRET"],
             google_redirect_uri="http://127.0.0.1:8771/api/v1/auth/google/callback")
         app = create_app(settings, web_root=ROOT / ".tmp-credit-trial" / "site")
+        app.state.collection_probe_checkpoint=ROOT/'.tmp-release-preflight'/'controlled-20261005'/'crawl_state.sqlite'
         class Catalog:
             def load(self, *args, **kwargs):
                 return mock_catalog()

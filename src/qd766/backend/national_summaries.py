@@ -25,7 +25,7 @@ def _record_recapture(session: Session, existing: NationalSummarySnapshot, captu
 
 
 def store_national_summary(
-    session: Session, capture: NationalSummaryCapture
+    session: Session, capture: NationalSummaryCapture, *, observation_id: str | None = None
 ) -> tuple[NationalSummarySnapshot, bool]:
     period_value = capture.period.value
     summary_key = ":".join(
@@ -36,13 +36,17 @@ def store_national_summary(
             capture.raw_sha256,
         ]
     )
+    if observation_id is not None:
+        import hashlib
+        summary_key += ':observed:' + hashlib.sha256(observation_id.encode()).hexdigest()[:24]
     existing = session.scalar(
         select(NationalSummarySnapshot).where(
             NationalSummarySnapshot.summary_key == summary_key
         )
     )
     if existing is not None:
-        _record_recapture(session, existing, capture)
+        if observation_id is None:
+            _record_recapture(session, existing, capture)
         return existing, False
     snapshot = NationalSummarySnapshot(
         summary_key=summary_key,
@@ -71,7 +75,8 @@ def store_national_summary(
         )
         if existing is None:
             raise
-        _record_recapture(session, existing, capture)
+        if observation_id is None:
+            _record_recapture(session, existing, capture)
         return existing, False
     return snapshot, True
 

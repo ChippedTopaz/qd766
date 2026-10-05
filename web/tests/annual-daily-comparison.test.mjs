@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {annualDailyComparison} from '../dist/annual-daily-comparison.js';
+const day=(reportDate,totalScore)=>({reportDate,totalScore,rank:null,cohortKey:'same',groups:{}});
+const history={days:[day('2026-10-05',72),day('2026-10-04',70),day('2026-10-03',71)]};
+assert.match(annualDailyComparison(history),/\+2,00 điểm/);
+assert.match(annualDailyComparison(history,'2026-10-04'),/-1,00 điểm/);
+assert.match(annualDailyComparison(history,'2026-10-03'),/Chưa có ngày liền trước/);
+assert.match(annualDailyComparison(null),/Chưa có lịch sử ngày/);
+assert.doesNotMatch(annualDailyComparison(null),/0,00 điểm/);
+assert.match(annualDailyComparison(history),/Điểm ngày chọn: 72,00 · Tham khảo/);
+assert.match(annualDailyComparison(null,undefined,false,'Network'),/data-daily-refresh/);
+console.log('ANNUAL_DAILY_COMPARISON_OK: latest/selected day, gaps, advisory score, retry');

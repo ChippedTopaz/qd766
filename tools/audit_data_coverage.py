@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -128,6 +129,9 @@ def inventory(db, now):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--summary', action='store_true', help='Compact period and agency coverage, with latest capture times')
+    args = parser.parse_args()
     if (ROOT / ".env").exists():
         load_environment_file(ROOT / ".env")
     engine = create_database_engine(Settings.from_env())
@@ -139,6 +143,21 @@ def main():
                 connection.execute(text("SET TRANSACTION READ ONLY"))
                 with Session(bind=connection, autoflush=False) as db:
                     report = inventory(db, datetime.now(timezone.utc))
+        if args.summary:
+            for row in report['periods']:
+                details = row.pop('details')
+                timestamps = sorted(item['capturedAt'] for item in details)
+                row['oldestDetailCapture'] = timestamps[0] if timestamps else None
+                row['newestDetailCapture'] = timestamps[-1] if timestamps else None
+                row['closedCapturedBeforeEnd'] = sum(item['closedButCapturedBeforeEnd'] for item in details)
+                row['agencyCoverage'] = {
+                    level: {key: sum(item['agencies'][level][key] for item in details)
+                            for key in ('withAnyScore', 'withSixScores')}
+                    for level in ('PROVINCE', 'COMMUNE')}
+                row['missingAgencyScores'] = [dict(province=item['province'], **agency)
+                                             for item in details for agency in item['incompleteAgencies']]
+                row['groupChildRows'] = {group: sum(item['groups'].get(group, {}).get('childRows', 0)
+                                                  for item in details) for group in GROUP_LABELS}
         print(json.dumps(report, ensure_ascii=True, separators=(",", ":")))
     finally:
         engine.dispose()

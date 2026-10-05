@@ -16,9 +16,9 @@ for(const period of data.periods){
     detailsCapturedAt:null,detailsAvailable:false,stale:false};
   data.snapshots[period.id+":all"]=snap;
 }
-const appRoot={innerHTML:""};
+const appRoot={innerHTML:"",setAttribute(){}};
 const button=(nav)=>({dataset:{nav},handlers:{},addEventListener(kind,callback){this.handlers[kind]=callback;}});
-const navs=[button("overview"),button("time"),button("quality"),button("formulas")];
+const navs=[button("overview"),button("time"),button("peers"),button("quality"),button("formulas")];
 const exportButton=button("");
 const overviewTabs=["overview","details","analysis"].map(id=>({...button(""),dataset:{overviewTab:id}}));
 const groupButtons=data.groupOrder.map(id=>({...button(""),dataset:{groupDetail:id}}));
@@ -81,6 +81,14 @@ assert.match(appRoot.innerHTML,/Chuỗi điểm cùng loại kỳ/);
 assert.match(appRoot.innerHTML,/Tháng 9\/2026/);
 assert.match(appRoot.innerHTML,/Tháng 10\/2026/);
 assert.doesNotMatch(appRoot.innerHTML,/Hiện có một kỳ tháng/);
+assert.match(appRoot.innerHTML,/<details class="comparison-notes"><summary>Lưu ý<\/summary>/);
+assert.doesNotMatch(appRoot.innerHTML,/<details class="comparison-notes" open/);
+navs.find(n=>n.dataset.nav==='peers').handlers.click();
+assert.match(appRoot.innerHTML,/So sánh theo cơ quan/);
+assert.match(appRoot.innerHTML,/Bảng xếp hạng/);
+assert.doesNotMatch(appRoot.innerHTML,/Đơn vị liền kề trong xếp hạng|Quy mô hồ sơ tương đồng|Phân phối điểm/);
+for(const group of data.groupOrder)assert.match(appRoot.innerHTML,new RegExp(data.groupLabels[group]));
+assert.match(appRoot.innerHTML,/Không có cơ quan, đơn vị phù hợp/);
 exportButton.handlers.click();
 assert.match(appRoot.innerHTML,/data-export-excel="details" disabled/);
 assert.match(appRoot.innerHTML,/data-export-excel="scores" >/);

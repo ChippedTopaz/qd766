@@ -159,6 +159,14 @@ def google_start(request: Request):
                 TrialInvitation.used_at.is_(None), TrialInvitation.revoked_at.is_(None), TrialInvitation.expires_at > now))
         db.add(LoginAttempt(state_hash=digest(state), binding_hash=digest(binding), nonce=nonce, verifier=verifier,
             invitation_id=invitation, expires_at=now + timedelta(minutes=10)))
+        if settings.shared_registration_enabled:
+            from .trial_registration import LINK_COOKIE, valid_link
+            from .models import SharedTrialLogin
+            token = request.cookies.get(LINK_COOKIE, "")
+            link = valid_link(db, token=token) if 40 <= len(token) <= 100 else None
+            if link:
+                db.flush()
+                db.add(SharedTrialLogin(state_hash=digest(state), link_id=link.id))
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
     params = {"client_id": settings.google_client_id, "redirect_uri": settings.google_redirect_uri,
               "response_type": "code", "scope": "openid email profile", "state": state, "nonce": nonce,
@@ -214,7 +222,16 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
             return response
         needs_invite = settings.invite_required and (existing is None or not existing.trial_admitted)
         invitation = None
-        if needs_invite:
+        registration = shared_link = None
+        if settings.shared_registration_enabled:
+            from .models import SharedTrialLogin, TrialRegistration
+            from .trial_registration import valid_link
+            if existing:
+                registration = db.scalar(select(TrialRegistration).where(TrialRegistration.account_id == existing.id))
+            shared_login = db.get(SharedTrialLogin, attempt.state_hash)
+            if shared_login:
+                shared_link = valid_link(db, link_id=shared_login.link_id)
+        if needs_invite and registration is None and shared_link is None:
             # Atomic one-use claim; rolls back with account/session creation on errors.
             invitation = db.scalar(update(TrialInvitation).where(TrialInvitation.id == attempt.invitation_id,
                 TrialInvitation.used_at.is_(None), TrialInvitation.revoked_at.is_(None), TrialInvitation.expires_at > now,
@@ -232,6 +249,10 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
             return response
         account.email = identity["email"]
         account.display_name = str(identity.get("name") or identity["email"])[:160]
+        if not account.trial_admitted and registration is None and shared_link is not None:
+            db.add(TrialRegistration(account_id=account.id, link_id=shared_link.id, state="draft"))
+        elif registration is not None and registration.state == "draft" and shared_link is not None:
+            registration.link_id = shared_link.id
         if invitation is not None:
             account.trial_admitted = True
             account.root_department_id = invitation.root_department_id
@@ -254,6 +275,9 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
     response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_SECONDS, **cookie_options(settings))
     response.delete_cookie(FLOW_COOKIE, **cookie_options(settings))
     response.delete_cookie(INVITE_COOKIE, **cookie_options(settings))
+    if settings.shared_registration_enabled:
+        from .trial_registration import LINK_COOKIE
+        response.delete_cookie(LINK_COOKIE, **cookie_options(settings))
     response.headers["Cache-Control"] = "no-store"
     return response
 

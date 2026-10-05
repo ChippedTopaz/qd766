@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+const css=readFileSync(new URL("../admin.css",import.meta.url),"utf8");
+const mobile=css.slice(css.indexOf("@media(max-width:760px)"),css.indexOf("\n.collection-toolbar"));
+assert.match(mobile,/\.admin-sidebar nav\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+assert.match(mobile,/min-height:48px/);
+assert.match(mobile,/white-space:normal/);
+assert.doesNotMatch(mobile,/white-space:nowrap|overflow-x:auto/);
+assert.match(mobile,/button:focus-visible/);
+assert.match(css,/\.admin-sidebar\{position:fixed/);
+console.log("ADMIN_MOBILE_OK: two-column menu, wrapping labels, touch targets, keyboard focus, desktop retained");

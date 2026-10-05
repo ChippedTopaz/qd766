@@ -9,6 +9,7 @@ import os
 import socket
 import sys
 import time
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,7 +24,7 @@ from qd766.backend.jobs import (
     release_collection_lease,
 )
 from qd766.backend.national_summaries import latest_national_summary, store_national_summary
-from qd766.collection import BrowserTransport, CollectionError, SafetyStop
+from qd766.collection import BrowserTransport, UrllibTransport, CollectionError, SafetyStop
 from qd766.national_summary import collect_national_summary
 from qd766.periods import PeriodSelection
 
@@ -63,10 +64,20 @@ def main() -> int:
     parser.add_argument("--period-value", type=int)
     parser.add_argument("--all-current", action="store_true")
     parser.add_argument("--backfill-missing-year", type=int)
+    parser.add_argument("--refresh-all-year", type=int, help="Refresh every available month/quarter/year, including existing summaries")
+    parser.add_argument("--daily-policy", action="store_true", help="Open periods daily; closed periods only if not observed after close")
+    parser.add_argument("--transport", choices=("browser", "urllib"), default="browser")
+    parser.add_argument("--wait-for-lease-seconds", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-periods", type=int, default=12)
     parser.add_argument("--delay-seconds", type=float, default=5.0)
     arguments = parser.parse_args()
+    if arguments.daily_policy and (arguments.refresh_all_year is not None or arguments.period_type or arguments.all_current or arguments.year is not None or arguments.period_value is not None or arguments.backfill_missing_year is not None):
+        parser.error('--daily-policy cannot be combined with another period selector')
+    if not 0 <= arguments.wait_for_lease_seconds <= 600:
+        parser.error("--wait-for-lease-seconds must be between 0 and 600")
+    if arguments.refresh_all_year is not None and (arguments.period_type or arguments.all_current or arguments.year is not None or arguments.period_value is not None or arguments.backfill_missing_year is not None):
+        parser.error("--refresh-all-year cannot be combined with another period selector")
     if arguments.delay_seconds < 0:
         parser.error("--delay-seconds must be non-negative")
     if not 1 <= arguments.max_periods <= 12:
@@ -94,7 +105,21 @@ def main() -> int:
     load_environment_file(ROOT / ".env")
     engine = create_database_engine(Settings.from_env())
     factory = create_session_factory(engine)
-    if arguments.backfill_missing_year is not None:
+    if arguments.daily_policy:
+        from qd766.backend.province_refresh import daily_refresh_candidates, due_daily_periods
+        with factory() as session:
+            latest={}
+            for period in daily_refresh_candidates(now):
+                stored=latest_national_summary(session,period)
+                if stored is not None:
+                    latest[(period.type,period.year,period.value)]=stored.captured_at
+            periods=due_daily_periods(now,latest)
+        arguments.delay_seconds=max(arguments.delay_seconds,0.4)
+    elif arguments.refresh_all_year is not None:
+        from queue_full_default_refresh import refresh_periods
+        periods = refresh_periods(arguments.refresh_all_year, now)
+        arguments.delay_seconds = max(arguments.delay_seconds, 30.0)
+    elif arguments.backfill_missing_year is not None:
         with factory() as session:
             periods = _missing_closed_periods(session, arguments.backfill_missing_year, now)[:arguments.max_periods]
         # Conservative spacing for manual historical batches; no retries.
@@ -113,15 +138,22 @@ def main() -> int:
     acquired = False
     results: list[dict] = []
     try:
-        with factory.begin() as session:
-            lease_state = acquire_collection_lease(
-                session, worker_id, lease_seconds=1800
-            )
+        wait_deadline = time.monotonic() + arguments.wait_for_lease_seconds
+        while True:
+            with factory.begin() as session:
+                lease_state = acquire_collection_lease(
+                    session, worker_id, lease_seconds=1800
+                )
+            if lease_state != "busy" or time.monotonic() >= wait_deadline:
+                break
+            time.sleep(5)
         if lease_state != "acquired":
             print(json.dumps({"state": lease_state}, ensure_ascii=False))
             return 0
         acquired = True
-        with BrowserTransport(timeout_seconds=45) as transport:
+        transport_context = (BrowserTransport(timeout_seconds=45) if arguments.transport == "browser"
+                             else nullcontext(UrllibTransport(timeout_seconds=45)))
+        with transport_context as transport:
             for index, period in enumerate(periods):
                 # Re-check circuit and refresh the shared lease before each call.
                 with factory.begin() as session:

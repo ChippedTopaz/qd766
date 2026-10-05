@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from typing import Any
 
@@ -9,6 +9,7 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     DateTime,
+    Date,
     ForeignKey,
     Index,
     Integer,
@@ -317,6 +318,42 @@ class TrialInvitation(Base):
         CheckConstraint("access_tier != 'agency' OR unit_department_id IS NOT NULL", name="ck_invite_unit"))
 
 
+class SharedTrialLink(Base):
+    __tablename__ = "shared_trial_links"
+    __table_args__ = (CheckConstraint("max_registrations > 0 AND registered_count >= 0 AND registered_count <= max_registrations", name="ck_shared_link_capacity"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    max_registrations: Mapped[int] = mapped_column(Integer)
+    registered_count: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SharedTrialLogin(Base):
+    __tablename__ = "shared_trial_logins"
+    state_hash: Mapped[str] = mapped_column(ForeignKey("login_attempts.state_hash", ondelete="CASCADE"), primary_key=True)
+    link_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("shared_trial_links.id", ondelete="RESTRICT"))
+
+
+class TrialRegistration(Base):
+    __tablename__ = "trial_registrations"
+    __table_args__ = (
+        CheckConstraint("state IN ('draft','pending','approved','rejected')", name="ck_registration_state"),
+        CheckConstraint("state = 'draft' OR (root_department_id IS NOT NULL AND unit_department_id IS NOT NULL)", name="ck_registration_scope"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"), unique=True)
+    link_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("shared_trial_links.id", ondelete="RESTRICT"))
+    state: Mapped[str] = mapped_column(String(16), default="draft")
+    root_department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("departments.id", ondelete="RESTRICT"))
+    unit_department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("departments.id", ondelete="RESTRICT"))
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AdminAudit(Base):
     __tablename__ = "admin_audits"
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -577,6 +614,24 @@ class NationalSummarySnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class DailyObservation(Base):
+    """Immutable linkage of a reporting day to real, complete source captures."""
+    __tablename__ = "daily_observations"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    block_key: Mapped[str] = mapped_column(String(160), unique=True)
+    report_date: Mapped[date] = mapped_column(Date, index=True)
+    root_department_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("departments.id", ondelete="RESTRICT"), index=True)
+    period_type: Mapped[str] = mapped_column(String(16))
+    year: Mapped[int] = mapped_column(Integer)
+    period_value: Mapped[int | None] = mapped_column(Integer)
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("snapshots.id", ondelete="RESTRICT"))
+    national_summary_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("national_summary_snapshots.id", ondelete="RESTRICT"))
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    snapshot: Mapped[Snapshot] = relationship()
+    national_summary: Mapped[NationalSummarySnapshot] = relationship()
+    __table_args__ = (Index("ix_daily_lookup", "root_department_id", "period_type", "year", "period_value", "report_date"),)
 
 
 class CollectionBatch(Base):

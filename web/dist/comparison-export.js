@@ -96,7 +96,7 @@ export function bindComparisonExports(context, WorkbookClass) {
         else
             host.append(button);
     };
-    // Export rendered rows only: respects filtering, scope and the current 60-row view.
+    // Export rendered rows only: respects filtering and the caller's access scope.
     document.querySelectorAll('.content table').forEach(table => {
         if (table.matches('.metric-table,.progress-table,.leadership-table'))
             return;

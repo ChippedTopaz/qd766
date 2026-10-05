@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 
@@ -13,6 +13,19 @@ from .models import AccountCollectionPermission, AdminAudit, CreditLedgerEntry, 
 from .wallet_access import enabled as wallet_enabled, credits, active_subscription, subscription_summary
 
 router = APIRouter(prefix="/api/v1/admin", tags=["trial administration"])
+
+@router.get('/collection-log')
+def collection_log(request: Request, kind: Literal['default','formality'] | None = None,
+                   state: Literal['queued','running','succeeded','failed','halted'] | None = None,
+                   offset: int = Query(0,ge=0,le=100000), limit: int = Query(30,ge=1,le=100)):
+    from .collection_monitor import collection_status, probe_status, daily_status
+    with request.app.state.session_factory() as db:
+        administrator(request,db)
+        report=collection_status(db,kind=kind,state=state,offset=offset,limit=limit)
+    report['localSimulation']=bool(request.app.state.settings.local_google_trial)
+    report['probe']=probe_status(getattr(request.app.state,'collection_probe_checkpoint',None))
+    report['daily']=daily_status()
+    return report
 
 
 def administrator(request, db, *, write=False):

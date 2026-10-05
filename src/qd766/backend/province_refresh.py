@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from qd766.periods import PeriodSelection
 
@@ -41,3 +41,43 @@ def choose_detail_refresh_period(
         )
     )
     return due[0][2]
+
+VIETNAM = timezone(timedelta(hours=7))
+
+def daily_fresh_after(now: datetime) -> datetime:
+    """Daily 02:00 deadline with one hour to finish/retry; never an hourly TTL."""
+    local=now.replace(tzinfo=VIETNAM) if now.tzinfo is None else now.astimezone(VIETNAM)
+    boundary=local.replace(hour=2,minute=0,second=0,microsecond=0)
+    return boundary-timedelta(days=1) if local<boundary+timedelta(hours=1) else boundary
+
+def daily_refresh_candidates(now: datetime, *, start_year: int = 2026) -> list[PeriodSelection]:
+    """Open periods plus closed periods that may need a post-close capture."""
+    now = now.replace(tzinfo=VIETNAM) if now.tzinfo is None else now.astimezone(VIETNAM)
+    candidates = current_detail_periods(now)
+    for year in range(start_year, now.year + 1):
+        months = now.month - 1 if year == now.year else 12
+        quarters = (now.month - 1) // 3 if year == now.year else 4
+        candidates += [PeriodSelection('month', year, v) for v in range(1, months + 1)]
+        candidates += [PeriodSelection('quarter', year, v) for v in range(1, quarters + 1)]
+        if year < now.year:
+            candidates.append(PeriodSelection('year', year))
+    return candidates
+
+def refresh_cutoff(period: PeriodSelection, now: datetime) -> datetime:
+    """Daily open-period freshness; closed periods require at least one later capture."""
+    local = now.replace(tzinfo=VIETNAM) if now.tzinfo is None else now.astimezone(VIETNAM)
+    _, end = period.date_range()
+    end_date = datetime.fromisoformat(end).replace(tzinfo=VIETNAM) + timedelta(days=1)
+    if local >= end_date:
+        return end_date
+    return local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+def due_daily_periods(now: datetime, latest_completed: dict, *, start_year: int = 2026):
+    due=[]
+    for period in daily_refresh_candidates(now,start_year=start_year):
+        captured=latest_completed.get((period.type,period.year,period.value))
+        if captured is not None and captured.tzinfo is None:
+            captured=captured.replace(tzinfo=timezone.utc)
+        if captured is None or captured < refresh_cutoff(period,now):
+            due.append(period)
+    return due

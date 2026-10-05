@@ -13,6 +13,7 @@ if ($Actions.Count -ne 1 -or $Actions[0].Execute -ne (Join-Path $RepositoryRoot 
 $ModeArguments = @()
 if ($Actions[0].Arguments -match '(?:^|\s)--real-wallet(?:\s|$)') { $ModeArguments += '--real-wallet' }
 if ($Actions[0].Arguments -match '(?:^|\s)--pause-paid-requests(?:\s|$)') { $ModeArguments += '--pause-paid-requests' }
+if ($Actions[0].Arguments -match '(?:^|\s)--shared-registration(?:\s|$)') { $ModeArguments += '--shared-registration' }
 & $Python $Launcher @ModeArguments --check
 if ($LASTEXITCODE -ne 0) { throw 'Configuration invalid; current server was NOT stopped.' }
 Stop-ScheduledTask -TaskName $TaskName
@@ -47,10 +48,11 @@ Write-Output 'PUBLIC_BACKEND_READY=ok'
 $Policy = Invoke-RestMethod -Uri 'http://127.0.0.1:8769/api/v1/access-policy' -TimeoutSec 5
 $ExpectedWallet = $ModeArguments -contains '--real-wallet'
 $ExpectedPause = $ModeArguments -contains '--pause-paid-requests'
+$ExpectedRegistration = $ModeArguments -contains '--shared-registration'
 if ($Policy.loginRequired -ne $true -or $Policy.inviteRequired -ne $true -or $Policy.publicReadOnly -ne $true -or
-    $Policy.paidRequestsEnabled -ne $ExpectedWallet -or
+    $Policy.paidRequestsEnabled -ne $ExpectedWallet -or [bool]$Policy.sharedRegistrationEnabled -ne $ExpectedRegistration -or
     ($ExpectedWallet -and ($Policy.defaultCollectionAccess -ne $true -or $Policy.collectionRequestsPaused -ne $ExpectedPause))) {
     throw 'Public backend runtime policy differs from registered Task. Do not deploy frontend; inspect before proceeding.'
 }
-Write-Output ('PUBLIC_RUNTIME_POLICY=PASS REAL_WALLET=' + $ExpectedWallet + ' REQUESTS_PAUSED=' + $ExpectedPause)
+Write-Output ('PUBLIC_RUNTIME_POLICY=PASS REAL_WALLET=' + $ExpectedWallet + ' REQUESTS_PAUSED=' + $ExpectedPause + ' SHARED_REGISTRATION=' + $ExpectedRegistration)
 Get-ScheduledTask -TaskName $TaskName | Select-Object TaskName,State

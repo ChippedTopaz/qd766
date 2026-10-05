@@ -58,6 +58,7 @@ class Settings:
     public_read_only: bool = False
     require_login: bool = False
     invite_required: bool = False
+    shared_registration_enabled: bool = False  # Explicit activation after schema migration; local trial first.
     paid_requests_enabled: bool = False
     formality_credit_cost: int = 0
     trial_credits_enabled: bool = False

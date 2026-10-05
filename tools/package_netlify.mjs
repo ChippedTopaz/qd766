@@ -34,6 +34,8 @@ await copyFile(join(root,"web/bento.css"),join(output,"bento.css"));
 await copyFile(join(root,"web/collection.css"),join(output,"collection.css"));
 await copyFile(join(root,"web/admin.html"),join(output,"admin.html"));
 await copyFile(join(root,"web/admin.css"),join(output,"admin.css"));
+await mkdir(join(output,"assets"),{recursive:true});
+await copyFile(join(root,"web/assets/logo-cchc.png"),join(output,"assets/logo-cchc.png"));
 await assets(join(root,"web/dist"),join(output,"dist"),name=>name.endsWith(".js"));
 await assets(join(root,"web/vendor"),join(output,"vendor"),name=>/\.(js|css)$/.test(name)||/^LICENSE/i.test(name));
 console.log(`NETLIFY_PACKAGE_OK: ${relative(root,output)}; no fixtures, secrets or source maps`);

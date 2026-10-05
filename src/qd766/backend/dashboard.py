@@ -70,7 +70,8 @@ def _national_summary_is_stale(
     now: datetime | None = None,
 ) -> bool:
     current = now or datetime.now(timezone.utc)
-    current_date = current.date()
+    from .province_refresh import VIETNAM, daily_fresh_after
+    current_date = current.astimezone(VIETNAM).date()
     is_open = summary.year == current_date.year and (
         summary.period_type == "year"
         or (
@@ -87,22 +88,23 @@ def _national_summary_is_stale(
     captured_at = summary.captured_at
     if captured_at.tzinfo is None:
         captured_at = captured_at.replace(tzinfo=timezone.utc)
-    return captured_at < current - timedelta(hours=2)
+    return captured_at < daily_fresh_after(current)
 
 
 def _detail_snapshot_is_stale(
     snapshot: Snapshot,
     now: datetime | None = None,
-    max_age: timedelta = timedelta(hours=72),
+    max_age: timedelta | None = None,
 ) -> bool:
     """Only open reporting periods expire; completed periods stay immutable."""
     current = now or datetime.now(timezone.utc)
-    if not _is_provisional(snapshot, current.date()):
+    from .province_refresh import VIETNAM, daily_fresh_after
+    if not _is_provisional(snapshot, current.astimezone(VIETNAM).date()):
         return False
     captured_at = snapshot.created_at
     if captured_at.tzinfo is None:
         captured_at = captured_at.replace(tzinfo=timezone.utc)
-    return captured_at < current - max_age
+    return captured_at < (current-max_age if max_age is not None else daily_fresh_after(current))
 
 
 def _available_periods(snapshots: list[Snapshot], today: date | None = None) -> list[dict[str, Any]]:
