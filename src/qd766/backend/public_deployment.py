@@ -29,13 +29,19 @@ def read_config(path: Path) -> dict[str, str]:
     return result
 
 
-def public_settings(office: dict[str, str], public: dict[str, str], *, real_wallet=False, requests_paused=False, shared_registration=False) -> Settings:
-    if type(real_wallet) is not bool or type(requests_paused) is not bool or type(shared_registration) is not bool:
+def public_settings(office: dict[str, str], public: dict[str, str], *, real_wallet=False, requests_paused=False, shared_registration=False, gemini_analysis=False, gemini=None) -> Settings:
+    if any(type(value) is not bool for value in (real_wallet,requests_paused,shared_registration,gemini_analysis)):
         raise ValueError("Wallet mode must be an explicit boolean")
     if requests_paused and not real_wallet:
         raise ValueError("Pause requires real wallet mode")
     if shared_registration and not real_wallet:
         raise ValueError("Shared registration requires reviewed real wallet mode")
+    if gemini_analysis:
+        import re
+        if not real_wallet or not gemini or set(gemini)!={"QD766_GEMINI_API_KEY","QD766_GEMINI_MODEL"}:
+            raise ValueError("Analysis requires real wallet and separate Gemini configuration")
+        if not gemini["QD766_GEMINI_API_KEY"] or gemini["QD766_GEMINI_API_KEY"].startswith('<') or not re.fullmatch(r"[a-zA-Z0-9._-]{1,120}",gemini["QD766_GEMINI_MODEL"]):
+            raise ValueError("Invalid Gemini configuration")
     if set(public) != AUTH_KEYS:
         raise ValueError("Public configuration must contain only the three Google settings")
     if any(not value or value.startswith("<") for value in public.values()):
@@ -72,4 +78,6 @@ def public_settings(office: dict[str, str], public: dict[str, str], *, real_wall
             paid_requests_enabled=True,trial_credits_enabled=True,trial_credit_management=True,
             formality_credit_cost=5,shared_registration_enabled=shared_registration)
         validate_wallet_runtime(settings)
+    if gemini_analysis:
+        settings=replace(settings,gemini_analysis_enabled=True,gemini_api_key=gemini["QD766_GEMINI_API_KEY"],gemini_model=gemini["QD766_GEMINI_MODEL"])
     return settings

@@ -777,6 +777,25 @@ class ProvinceCollectionBatchItem(Base):
     )
 
 
+class GeminiAnalysis(Base):
+    __tablename__ = "gemini_analyses"
+    __table_args__ = (
+        UniqueConstraint("account_id", "request_token", name="uq_gemini_analysis_token"),
+        CheckConstraint("state IN ('running', 'ready', 'failed')", name="ck_gemini_analysis_state"),
+        Index("ix_gemini_analysis_owner", "account_id", "created_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
+    request_token: Mapped[uuid.UUID] = mapped_column(Uuid)
+    context: Mapped[dict[str, Any]] = mapped_column(JsonDocument)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JsonDocument)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JsonDocument)
+    state: Mapped[str] = mapped_column(String(16), default="running")
+    model: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class CollectionControl(Base):
     __tablename__ = "collection_controls"
     __table_args__ = (

@@ -1,5 +1,5 @@
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-export async function installTrialCreditManager(root, api, onChanged) {
+export async function installTrialCreditManager(root, api, onChanged, deferLoad = false) {
     const policy = await api("access-policy");
     if (!policy.trialCreditManagement)
         return null;
@@ -35,7 +35,17 @@ export async function installTrialCreditManager(root, api, onChanged) {
         inFlight = false;
         button.disabled = false;
     } })(); });
-    await refreshAccounts();
+    if (deferLoad)
+        root.addEventListener("click", event => {
+            if (inFlight || !event.target.closest('[data-admin-section="credits"]'))
+                return;
+            inFlight = true;
+            get("credit-save").disabled = true;
+            get("credit-account").disabled = true;
+            void refreshAccounts().catch(error).finally(() => { inFlight = false; get("credit-save").disabled = false; get("credit-account").disabled = false; });
+        });
+    else
+        await refreshAccounts();
     return { openAccount: async (id) => { if (inFlight)
             throw new Error("Vui lòng chờ giao dịch hiện tại hoàn tất."); inFlight = true; get("credit-save").disabled = true; get("credit-account").disabled = true; try {
             await refreshAccounts(id);

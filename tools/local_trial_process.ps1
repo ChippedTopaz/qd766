@@ -43,6 +43,7 @@ function Get-ReviewedLocalTrialMode {
     $mode = @()
     for ($index=2; $index -lt $arguments.Count; $index++) {
         switch ($arguments[$index]) {
+            '--gemini-analysis' { if ($mode -contains '--gemini-analysis') { throw 'Duplicate analysis mode; nothing stopped.' }; $mode += '--gemini-analysis' }
             '--source-wallet' { if ($mode -contains '--source-wallet') { throw 'Duplicate mode; nothing stopped.' }; $mode += '--source-wallet' }
             '--expiry-rehearsal' {
                 if ($mode -contains '--expiry-rehearsal' -or $index+1 -ge $arguments.Count -or

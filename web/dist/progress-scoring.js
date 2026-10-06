@@ -16,6 +16,9 @@ export function analyzeProgressScore(entity) {
         return null;
     const overdueDerived = explicitOverdue === null;
     const totalOverdue = explicitOverdue ?? Math.max(0, totalReceived - totalOnTime);
+    // Confirmed source semantics: received = completed/pending on-time + overdue.
+    if (totalReceived < 0 || totalOnTime < 0 || totalOverdue < 0 || totalReceived !== totalOnTime + totalOverdue)
+        return null;
     const onTimeRatio = totalReceived > 0 ? totalOnTime / totalReceived * 100 : null;
     const overdueRatio = totalReceived > 0 ? totalOverdue / totalReceived * 100 : null;
     const calculatedScore = onTimeRatio === null ? null : onTimeRatio / 100 * maxScore;

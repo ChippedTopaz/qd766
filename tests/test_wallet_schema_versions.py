@@ -21,11 +21,14 @@ class WalletSchemaVersionsTest(unittest.TestCase):
         self.verify('20261005_0017',shared_registration=True)
 
     def test_reviewed_versions(self):
-        for version in ('20261004_0015','20261005_0016','20261005_0017'):
+        for version in ('20261004_0015','20261005_0016','20261005_0017','20261006_0018'):
             with self.subTest(version=version):self.verify(version)
 
     def test_unknown_revision_rejected(self):
-        with self.assertRaises(ValueError):self.verify('20261006_0018')
+        with self.assertRaises(ValueError):self.verify('20261006_0019')
+
+    def test_analysis_table_required(self):
+        with self.assertRaises(ValueError):self.verify('20261006_0018','gemini_analyses')
 
     def test_missing_daily_table_columns_rejected(self):
         with self.assertRaises(ValueError):self.verify('20261005_0017','daily_observations')

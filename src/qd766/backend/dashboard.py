@@ -246,8 +246,8 @@ def snapshot_payload(
             "summaryStale": False,
             "detailsStale": details_stale,
             "message": (
-                "Dữ liệu chi tiết của kỳ đang diễn ra đã quá 72 giờ; hệ thống "
-                "đang chờ lượt làm mới an toàn tiếp theo."
+                "Chưa có dữ liệu chi tiết theo lịch cập nhật 04:00; hệ thống "
+                "đang sử dụng bản hoàn chỉnh gần nhất."
                 if details_stale
                 else "Dữ liệu lấy từ PostgreSQL trên máy chủ QD766."
             ),
@@ -284,18 +284,18 @@ def snapshot_payload(
             stale = summary_stale or details_stale
             if summary_stale and details_stale:
                 message = (
-                    "Bản tổng hợp toàn quốc đã quá 2 giờ và dữ liệu chi tiết đã "
-                    "quá 72 giờ; hệ thống đang chờ các lượt làm mới an toàn tiếp theo."
+                    "Chưa có bản tổng hợp và chi tiết theo lịch cập nhật 04:00; "
+                    "hệ thống đang sử dụng bản hoàn chỉnh gần nhất."
                 )
             elif summary_stale:
                 message = (
-                    "Bản tổng hợp toàn quốc đã quá 2 giờ; hệ thống đang chờ chu kỳ "
-                    "cập nhật an toàn tiếp theo."
+                    "Chưa có bản tổng hợp theo lịch cập nhật 04:00; "
+                    "hệ thống đang sử dụng bản hoàn chỉnh gần nhất."
                 )
             elif details_stale:
                 message = (
-                    "Điểm tỉnh và xếp hạng đã được cập nhật; dữ liệu chi tiết của "
-                    "kỳ đang diễn ra đã quá 72 giờ và đang chờ lượt làm mới tiếp theo."
+                    "Điểm tỉnh và xếp hạng đã được cập nhật; chưa có chi tiết "
+                    "theo lịch cập nhật 04:00."
                 )
             else:
                 message = (

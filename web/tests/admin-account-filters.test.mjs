@@ -20,6 +20,8 @@ assert.match(html,/id="admin-startup"[\s\S]*admin-sidebar/);
 const css=readFileSync(new URL('../admin.css',import.meta.url),'utf8');
 assert.match(css,/#admin\[aria-busy="true"\]\{display:none\}/);
 assert.match(css,/aria-busy="false".*#admin-startup/);
+assert.match(css,/#accounts td:nth-child\(3\),#accounts td:nth-child\(4\)\{white-space:normal;word-break:normal;overflow-wrap:break-word\}/);
+assert.doesNotMatch(css,/sidebar-toggle|sidebar-collapsed|sidebar-expanded/);
 const source=readFileSync(new URL('../src/admin.ts',import.meta.url),'utf8');
 assert.match(source,/data-add-credit/);assert.match(source,/openAccount\(button.dataset.addCredit/);
 console.log('ADMIN_ACCOUNT_FILTERS_OK: province/unit/search, unique scoped units, initial sidebar and credit shortcut');

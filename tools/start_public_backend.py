@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--background-log", action="store_true", help="Write UTF-8 logs without a console; no request access logging")
     parser.add_argument("--real-wallet",action="store_true",help="Explicit opt-in after approved migration/backfill; never enables payment")
     parser.add_argument("--shared-registration",action="store_true",help="Enable reviewed agency-only registration after schema verification")
+    parser.add_argument("--gemini-analysis",action="store_true",help="Explicit opt-in after analysis migration; secrets in .env.gemini")
     parser.add_argument("--pause-paid-requests",action="store_true",help="With real-wallet: pause new requests without disabling existing wallet reads/settlement")
     args = parser.parse_args()
     log_config = background_log_config() if args.background_log else None
@@ -43,7 +44,8 @@ def main():
             print(message, file=sys.stderr if error else sys.stdout, flush=True)
     try:
         settings = public_settings(read_config(ROOT / ".env"), read_config(ROOT / ".env.public"),
-            real_wallet=args.real_wallet,requests_paused=args.pause_paid_requests,shared_registration=args.shared_registration)
+            real_wallet=args.real_wallet,requests_paused=args.pause_paid_requests,shared_registration=args.shared_registration,
+            gemini_analysis=args.gemini_analysis,gemini=read_config(ROOT/".env.gemini") if args.gemini_analysis else None)
         from google.oauth2.id_token import verify_oauth2_token  # noqa: F401
         import requests  # noqa: F401
         import uvicorn
@@ -52,6 +54,11 @@ def main():
         if settings.real_wallet_enabled:
             from qd766.backend.wallet_runtime import verify_real_wallet_schema
             verify_real_wallet_schema(app.state.session_factory,shared_registration=settings.shared_registration_enabled)
+        if settings.gemini_analysis_enabled:
+            from sqlalchemy import inspect
+            from qd766.backend.models import GeminiAnalysis
+            if not set(GeminiAnalysis.__table__.columns.keys()) <= {c['name'] for c in inspect(app.state.engine).get_columns('gemini_analyses')}:
+                raise ValueError("Analysis migration is not ready")
     except Exception:
         # No exception body: a bad connection URL/configuration can contain secrets.
         report("PUBLIC_BACKEND=BLOCKED: check .env.public, office DB configuration/schema and auth dependencies. No server started.", error=True)

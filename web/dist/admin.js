@@ -11,7 +11,18 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<"
 let csrf = "", accounts = [], directory = { provinces: [], units: [] }, editing = null;
 const activationTokens = new Map();
 const get = (id) => document.getElementById(id);
+const pendingReads = new Map();
 async function api(path, body) {
+    if (body !== undefined)
+        return request(path, body);
+    const pending = pendingReads.get(path);
+    if (pending)
+        return pending;
+    const promise = request(path).finally(() => pendingReads.delete(path));
+    pendingReads.set(path, promise);
+    return promise;
+}
+async function request(path, body) {
     const response = await fetch(`/api/v1/${path}`, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json", "X-QD766-CSRF": csrf }, body: JSON.stringify(body) });
     const value = await response.json();
     if (!response.ok)
@@ -42,7 +53,7 @@ function filterUnits() {
 function showAccounts() {
     filterUnits();
     const search = get("search").value.toLocaleLowerCase("vi");
-    const num = (value) => new Intl.NumberFormat("vi-VN").format(value);
+    const formatter = new Intl.NumberFormat("vi-VN"), num = (value) => formatter.format(value);
     const province = get("account-province").value, unit = get("account-unit").value;
     get("accounts").innerHTML = filterAdminAccounts(accounts, search, province, unit).map(a => `<tr>
     <td>${esc(a.name)}<br><small>${esc(a.email)}</small></td>
@@ -52,18 +63,24 @@ function showAccounts() {
     <td><span class="pill">${!a.active ? "Đã khóa" : a.admitted ? "Được mời" : "Chưa được mời"}</span></td>
     <td>${adminSubscriptionCell(a.subscription)}</td>
     <td style="font-variant-numeric:tabular-nums;text-align:right"><strong>${num(a.credits)}</strong><small style="display:block">Đang giữ ${num(a.reservedCredits)}</small>${a.subscription ? `<small style="display:block">Subscription ${num(a.subscription.subscriptionCredits)} · Mua riêng ${num(a.subscription.purchasedCredits)}</small>` : ""}</td>
-    <td>${creditManager && a.active && a.admitted ? `<button data-add-credit="${esc(a.id)}">Thêm Credit</button>` : ""}${a.role !== "admin" ? `<button data-edit="${a.id}">Phân quyền / khóa</button>` : ""}${a.canActivateTrial ? `<button data-activate-trial="${a.id}" title="Bắt đầu 1 tháng miễn phí và cấp 100 Credit subscription">Kích hoạt dùng thử</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="8">Không có tài khoản phù hợp.</td></tr>';
+    <td><div class="account-actions">${creditManager && a.active && a.admitted ? `<button data-add-credit="${esc(a.id)}">Thêm Credit</button>` : ""}${a.role !== "admin" ? `<button data-edit="${a.id}">Phân quyền / khóa</button>` : ""}${a.canActivateTrial ? `<button data-activate-trial="${a.id}" title="Bắt đầu 1 tháng miễn phí và cấp 100 Credit subscription">Kích hoạt dùng thử</button>` : ""}</div></td></tr>`).join("") || '<tr><td colspan="8">Không có tài khoản phù hợp.</td></tr>';
 }
-async function refresh() { accounts = await api("admin/accounts"); showAccounts(); const invitations = await api("admin/invitations"); const labels = { available: "Chưa dùng", used: "Đã dùng", expired: "Hết hạn", revoked: "Đã thu hồi" }; get("invitations").innerHTML = invitations.map(i => `<tr><td>${esc(i.email ?? "Người có link")}</td><td>${esc(labels[i.state])}</td><td>${new Date(i.expiresAt).toLocaleString("vi-VN")}</td><td>${i.state === "available" ? `<button data-revoke="${i.id}">Thu hồi</button>` : ""}</td></tr>`).join(""); const audit = await api("admin/audit"); get("audit").innerHTML = audit.map(a => `<tr><td>${esc(a.action)}</td><td>${new Date(a.at).toLocaleString("vi-VN")}</td></tr>`).join(""); }
+async function loadInvitations() { const invitations = await api("admin/invitations"); const labels = { available: "Chưa dùng", used: "Đã dùng", expired: "Hết hạn", revoked: "Đã thu hồi" }; get("invitations").innerHTML = invitations.map(i => `<tr><td>${esc(i.email ?? "Người có link")}</td><td>${esc(labels[i.state])}</td><td>${new Date(i.expiresAt).toLocaleString("vi-VN")}</td><td>${i.state === "available" ? `<button data-revoke="${i.id}">Thu hồi</button>` : ""}</td></tr>`).join(""); }
+async function loadAudit() { const audit = await api("admin/audit"); get("audit").innerHTML = audit.map(a => `<tr><td>${esc(a.action)}</td><td>${new Date(a.at).toLocaleString("vi-VN")}</td></tr>`).join(""); }
+async function refresh() { accounts = await api("admin/accounts"); showAccounts(); await Promise.all([loadInvitations(), loadAudit()]); }
 async function start() {
     try {
         const me = await api("auth/me");
         if (me.role !== "admin")
             throw new Error("Chỉ tài khoản quản trị được truy cập.");
         csrf = me.csrfToken;
-        directory = await api("admin/directory");
+        const initial = await Promise.all([api("admin/directory"), api("admin/accounts"), api("access-policy")]);
+        directory = initial[0];
+        accounts = initial[1];
+        const initialApi = (path, body) => path === "access-policy" && body === undefined ? Promise.resolve(initial[2]) : api(path, body);
         root.innerHTML = `<header><div><h1>Quản trị dùng thử</h1><p>${esc(me.name)} · Lời mời và phân quyền QĐ766</p></div><a class="button" href="/">Về Tổng quan</a></header><p id="message" role="status"></p><section><h2 id="form-title">Tạo lời mời</h2><p>Link dùng một lần. Nên gắn email để chỉ đúng người được mời có thể sử dụng. Không có email: người có link có thể nhận quyền.</p><form id="form"><div class="form-grid"><label>Tỉnh/thành phố<select id="province" required>${options(directory.provinces)}</select></label><label>Phạm vi xem<select id="tier"><option value="national">Toàn quốc (không có quyền quản trị)</option><option value="province">Cả tỉnh và cơ quan thuộc tỉnh</option><option value="agency">Chỉ cơ quan được gán</option></select></label><label id="unit-label" hidden>Cơ quan<select id="unit"></select></label><label id="email-label">Email người được mời (tùy chọn)<input id="email" type="email" maxlength="320"></label><label id="days-label">Hạn lời mời (ngày)<input id="days" type="number" min="1" max="30" value="7" required></label><label id="active-label" hidden>Trạng thái<select id="active"><option value="true">Đang hoạt động</option><option value="false">Khóa tài khoản</option></select></label></div><div class="actions"><button id="save" class="primary">Tạo link mời</button><button id="cancel" type="button" hidden>Hủy chỉnh sửa</button></div></form><p id="invite-result"></p></section><section><h2>Tài khoản</h2><input id="search" placeholder="Tìm tên hoặc email…" aria-label="Tìm tài khoản"><div class="scroll"><table><thead><tr><th>Người dùng</th><th>Quyền</th><th>Tỉnh</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="accounts"></tbody></table></div></section><section><h2>Lời mời đã tạo</h2><div class="scroll"><table><thead><tr><th>Người nhận</th><th>Trạng thái</th><th>Hết hạn</th><th>Thao tác</th></tr></thead><tbody id="invitations"></tbody></table></div></section><section><h2>Nhật ký quản trị</h2><div class="scroll"><table><thead><tr><th>Hành động</th><th>Thời điểm</th></tr></thead><tbody id="audit"></tbody></table></div></section>`;
         const accountHeader = get("accounts").closest("table")?.querySelector("thead tr");
+        accountHeader?.closest("table")?.classList.add("admin-accounts-table");
         if (accountHeader) {
             const th = document.createElement("th");
             th.textContent = "Cơ quan";
@@ -114,14 +131,21 @@ async function start() {
                 }
             });
         });
-        await loadUnits();
-        await refresh();
-        creditManager = await installTrialCreditManager(root, api, refresh);
+        await Promise.all([
+            installTrialCreditManager(root, initialApi, refresh, true).then(manager => { creditManager = manager; }),
+            installRegistrationAdmin(root, initialApi, async () => { await refresh(); filterUnits(); }, true)
+        ]);
         filterUnits();
         showAccounts();
         installCollectionMonitor(root, api);
-        await installRegistrationAdmin(root, api, async () => { await refresh(); filterUnits(); });
         layout = installAdminLayout(root);
+        root.addEventListener("click", event => { const key = event.target.closest("[data-admin-section]")?.dataset.adminSection; if (key === "invitations")
+            void run(loadInvitations); if (key === "audit")
+            void run(loadAudit); });
+        // Agency choices belong to the invitation form, not the initial account screen.
+        get("unit").innerHTML = '<option value="">Chọn cơ quan</option>';
+        get("tier").addEventListener("change", () => { if (get("tier").value === "agency" && !get("unit").value)
+            void run(() => loadUnits()); });
         get("tier").addEventListener("change", toggleTier);
         get("province").addEventListener("change", () => void run(() => loadUnits()));
         get("search").addEventListener("input", showAccounts);

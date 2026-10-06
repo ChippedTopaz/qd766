@@ -31,6 +31,7 @@ def main():
     parser.add_argument("--run-mock-worker-once", action="store_true")
     parser.add_argument("--upgrade-national-scope", action="store_true")
     parser.add_argument("--source-wallet", action="store_true")
+    parser.add_argument("--gemini-analysis", action="store_true", help="Use real Gemini with simulated Credit; requires .env.gemini and --source-wallet")
     parser.add_argument("--activate-invited-trials-once", action="store_true",
                         help="Apply approved 100 Credit trial policy to previously admitted local invite accounts only")
     parser.add_argument("--expiry-rehearsal", choices=("agency", "province"),
@@ -42,6 +43,8 @@ def main():
                         help="Opt in active Google trial accounts; grant simulated 100 subscription + 600 purchased Credit once")
     parser.add_argument("--mock-outcome", choices=("success", "failure"), default="success")
     args = parser.parse_args()
+    if args.gemini_analysis and not args.source_wallet:
+        parser.error("Gemini analysis requires isolated source wallet mode")
     if args.activate_invited_trials_once and (not args.source_wallet or any((args.check,
             args.expiry_rehearsal,args.seed_source_wallets,args.run_mock_worker_once,
             args.run_subscription_maintenance_once,args.create_owner_invite,
@@ -67,10 +70,15 @@ def main():
         schema = f"credit_expiry_{args.expiry_rehearsal}" if args.expiry_rehearsal else SCHEMA
         url = isolated_url(ROOT / ".env").update_query_dict({"options": f"-c search_path={schema}", "connect_timeout": "5"})
         auth = read_config(ROOT / ".env.public")
+        gemini=read_config(ROOT/".env.gemini") if args.gemini_analysis else {}
+        if args.gemini_analysis and (set(gemini)!={"QD766_GEMINI_API_KEY","QD766_GEMINI_MODEL"} or
+                not all(value and not value.startswith('<') for value in gemini.values())):
+            raise ValueError("Gemini configuration incomplete")
         settings = Settings(database_url=url.render_as_string(hide_password=False), public_read_only=True,
             require_login=True, invite_required=True, shared_registration_enabled=args.source_wallet, paid_requests_enabled=True, formality_credit_cost=5 if args.source_wallet else 3,
             trial_credits_enabled=True, trial_credit_management=True, local_google_trial=True,
             source_wallet_trial=args.source_wallet,
+            gemini_analysis_enabled=args.gemini_analysis,gemini_api_key=gemini.get("QD766_GEMINI_API_KEY",""),gemini_model=gemini.get("QD766_GEMINI_MODEL",""),
             google_client_id=auth["QD766_GOOGLE_CLIENT_ID"], google_client_secret=auth["QD766_GOOGLE_CLIENT_SECRET"],
             google_redirect_uri="http://127.0.0.1:8771/api/v1/auth/google/callback")
         app = create_app(settings, web_root=ROOT / ".tmp-credit-trial" / "site")

@@ -13,7 +13,7 @@ for(const period of data.periods){
   snap.datasets=snap.datasets.map(dataset=>({...dataset,children:[],
     root:{...dataset.root,metrics:[],parameters:{}}}));
   snap.delivery={result:"national-summary",capturedAt:"2026-10-02T16:00:00Z",
-    detailsCapturedAt:null,detailsAvailable:false,stale:false};
+    detailsCapturedAt:null,detailsAvailable:false,stale:true,message:"Đang sử dụng dữ liệu gần nhất."};
   data.snapshots[period.id+":all"]=snap;
 }
 const appRoot={innerHTML:"",setAttribute(){}};
@@ -54,6 +54,10 @@ globalThis.fetch=async(url,options)=>{
 await import("../dist/app.js");
 for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
 assert.match(appRoot.innerHTML,/Chỉ có điểm tổng hợp tỉnh/);
+const overviewStatus=appRoot.innerHTML.match(/<details class="bento-status">([\s\S]*?)<\/details>/)[1];
+assert.equal(overviewStatus.match(/<summary>([\s\S]*?)<\/summary>/)[1],'<span class="status-toggle">ⓘ Thông tin dữ liệu</span>');
+assert.doesNotMatch(overviewStatus,/status-chips|status-timestamps|Dữ liệu quá hạn|Hai thời điểm cập nhật|72 giờ|2 giờ/);
+assert.doesNotMatch(appRoot.innerHTML,/<details class="bento-status" open/);
 const periodOptions=appRoot.innerHTML.match(/<select id="period-value">([\s\S]*?)<\/select>/)[1];
 assert(periodOptions.indexOf('value="month-2026-10"')<periodOptions.indexOf('value="month-2026-09"'));
 assert.match(appRoot.innerHTML,/Chi tiết: Chưa xác định/);
@@ -95,6 +99,16 @@ assert.match(appRoot.innerHTML,/Không có cơ quan, đơn vị phù hợp/);
 exportButton.handlers.click();
 assert.match(appRoot.innerHTML,/data-export-excel="details" disabled/);
 assert.match(appRoot.innerHTML,/data-export-excel="scores" >/);
+navs.find(n=>n.dataset.nav==='quality').handlers.click();
+const qualityNotes=appRoot.innerHTML.match(/<details class="comparison-notes">[\s\S]*?<\/details>/)?.[0];
+assert(qualityNotes,'Quality notes must be opt-in');
+assert.match(qualityNotes,/Chưa cập nhật được|Chỉ có điểm tổng hợp tỉnh/);
+const qualityVisible=appRoot.innerHTML.replace(qualityNotes,'');
+assert.doesNotMatch(qualityVisible,/Chưa cập nhật được|Số liệu tạm thời|Hai thời điểm cập nhật|Giới hạn hiện tại|Đang rà soát/);
+assert.match(qualityVisible,/Thời điểm cập nhật theo nhóm chỉ tiêu/);
+const qualityGrid=qualityVisible.match(/<section class="quality-grid">[\s\S]*?<\/section>/)?.[0]??'';
+assert.equal((qualityGrid.match(/class="quality-card"/g)||[]).length,4);
+for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
 const callsBeforeFormulas=calls.length;
 navs.find(n=>n.dataset.nav==="formulas").handlers.click();
 assert.match(appRoot.innerHTML,/Công thức tính Bộ chỉ số 766/);

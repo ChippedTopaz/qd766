@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const data=JSON.parse(readFileSync(new URL('../data/snapshots.json',import.meta.url)));
 const original=structuredClone(Object.values(data.snapshots).find(s=>s.scope==='all'));
+original.delivery={result:'detail',capturedAt:'2026-10-03T00:00:00Z',detailsCapturedAt:'2026-10-03T00:00:00Z',detailsAvailable:true,stale:true,message:'Đang sử dụng dữ liệu gần nhất.'};
 data.periods=[{id:'month-2026-10',label:'Tháng 10/2026',type:'month',year:2026,value:10}];
 const item={id:data.formality.id,code:data.formality.code,name:data.formality.name,available:false,executionLevels:[],field:'Lĩnh vực thử',publishingAgency:''};
 data.snapshots={'month-2026-10:all':original,'month-2026-10:formality':{...original,scope:'formality',formalityId:'different-formality'}};
@@ -10,7 +11,8 @@ if(compactRestore)data.snapshots['month-2026-10:all']={...original,detailsLoaded
 const root={innerHTML:'',setAttribute(){},querySelector(){return null}},controls=new Map(),calls=[],urls=[];
 function control(id){if(!controls.has(id))controls.set(id,{id:id.replace(/^#/,''),value:item.id,dataset:{},handlers:{},selectionStart:2,selectionEnd:2,selectionDirection:'none',focus(){document.activeElement=this;this.focusCount=(this.focusCount??0)+1;},setSelectionRange(start,end,direction){this.selectionStart=start;this.selectionEnd=end;this.selectionDirection=direction;},addEventListener(kind,cb){this.handlers[kind]=cb;}});return controls.get(id);}
 globalThis.document={title:'',getElementById:id=>control('#'+id),querySelector:s=>s==='#app'?root:['#province-select','#unit-select','#catalog-field'].includes(s)?null:s.startsWith('#')||s.startsWith('[data-action=')?control(s):null,
-  querySelectorAll:s=>s==='input[name=catalog-formality]'?[control('radio')]:s==='[data-action=submit-statistics]'?[control('submit')]:s==='[data-action=new-collection]'?[control('new')]:[]};
+  querySelectorAll:s=>s==='[data-nav]'?[control('overview')]:s==='input[name=catalog-formality]'?[control('radio')]:s==='[data-action=submit-statistics]'?[control('submit')]:s==='[data-action=new-collection]'?[control('new')]:[]};
+control('overview').dataset.nav='overview';
 globalThis.TomSelect=class{constructor(){this.control_input={}}on(){}destroy(){}};
 const timers=new Map();let timerId=0;
 globalThis.window={setTimeout:(cb,delay)=>{timers.set(++timerId,{cb,delay});return timerId;},clearTimeout:id=>timers.delete(id)};
@@ -45,6 +47,12 @@ if(compactRestore){
   assert(calls.some(c=>c.url.includes('/selection?')));assert.match(root.innerHTML,/Thủ tục đã khai thác/);
   assert.equal(calls.filter(c=>c.method==='POST').length,0);console.log('COLLECTION_RESTORE_OK: saved period/TTHC via own library, GET-only');
 }else{
+  controls.get('new').handlers.click();await settle();
+  const initialNotes=root.innerHTML.match(/<details class="comparison-notes">[\s\S]*?<\/details>/)?.[0];
+  assert(initialNotes,'Collection data caveats must be collapsed, not displayed as banners');
+  assert.match(initialNotes,/Chưa cập nhật được/);
+  assert.doesNotMatch(root.innerHTML.replace(initialNotes,''),/Chưa cập nhật được|Số liệu tạm thời|Hai thời điểm cập nhật/);
+  controls.get('overview').handlers.click();await settle();
   controls.get('#scope-select').handlers.change({target:{value:'formality'}});await settle();
   assert.match(root.innerHTML,/Thủ tục đã khai thác/);assert.doesNotMatch(root.innerHTML,/catalog-list/);
   assert.match(root.innerHTML,/<div class="context-bottom"><label class="field saved-formality">/);

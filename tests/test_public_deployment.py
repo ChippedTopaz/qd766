@@ -13,6 +13,14 @@ from qd766.backend.public_deployment import CALLBACK, WEBSITE_CALLBACK, read_con
 
 
 class PublicDeploymentTests(unittest.TestCase):
+    def test_gemini_is_explicit_with_separate_secrets(self):
+        secrets={"QD766_GEMINI_API_KEY":"fake-private-key","QD766_GEMINI_MODEL":"test-model"}
+        self.assertFalse(public_settings(self.office,self.public,real_wallet=True,gemini=secrets).gemini_analysis_enabled)
+        settings=public_settings(self.office,self.public,real_wallet=True,gemini_analysis=True,gemini=secrets)
+        self.assertTrue(settings.gemini_analysis_enabled)
+        self.assertNotIn('fake-private-key',repr(settings))
+        with self.assertRaises(ValueError):public_settings(self.office,self.public,gemini_analysis=True,gemini=secrets)
+        with self.assertRaises(ValueError):public_settings(self.office,self.public,real_wallet=True,gemini_analysis=True,gemini={})
     def test_shared_registration_is_explicit_and_preserves_boundary(self):
         self.assertFalse(public_settings(self.office,self.public,real_wallet=True).shared_registration_enabled)
         settings=public_settings(self.office,self.public,real_wallet=True,shared_registration=True)

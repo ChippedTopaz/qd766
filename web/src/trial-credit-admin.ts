@@ -3,7 +3,7 @@ type Ledger={availableCredits:number;reservedCredits:number;items:{type:string;a
 type Api=<T>(path:string,body?:unknown)=>Promise<T>;
 const esc=(v:unknown)=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!));
 
-export async function installTrialCreditManager(root:HTMLElement,api:Api,onChanged?:()=>Promise<void>):Promise<{openAccount:(id:string)=>Promise<void>}|null>{
+export async function installTrialCreditManager(root:HTMLElement,api:Api,onChanged?:()=>Promise<void>,deferLoad=false):Promise<{openAccount:(id:string)=>Promise<void>}|null>{
   const policy=await api<{trialCreditManagement?:boolean;localSimulation?:boolean;defaultCollectionAccess?:boolean}>("access-policy");
   if(!policy.trialCreditManagement)return null;
   const section=document.createElement("section");
@@ -20,6 +20,11 @@ export async function installTrialCreditManager(root:HTMLElement,api:Api,onChang
   get("credit-account").addEventListener("change",()=>{void selectAccount().catch(error);});
   for(const id of ["credit-permission","credit-amount","credit-reason","credit-source"])get(id).addEventListener("input",()=>{operationId=crypto.randomUUID();});
   get("credit-form").addEventListener("submit",event=>{event.preventDefault();if(inFlight)return;inFlight=true;const button=get<HTMLButtonElement>("credit-save");button.disabled=true;void (async()=>{try{await api(`admin/accounts/${get<HTMLSelectElement>("credit-account").value}/trial-credit`,{operationId,canCollect:policy.defaultCollectionAccess||get<HTMLSelectElement>("credit-permission").value==="true",amount:Number(get<HTMLInputElement>("credit-amount").value),reason:get<HTMLInputElement>("credit-reason").value,...(!get("credit-source-label").hidden?{creditSource:get<HTMLSelectElement>("credit-source").value}:{})});get("credit-message").textContent="Đã lưu. Người dùng tải lại trang để cập nhật số dư Credit.";get<HTMLInputElement>("credit-amount").value="0";await refreshAccounts();await onChanged?.();}catch(e){error(e);}finally{inFlight=false;button.disabled=false;}})();});
-  await refreshAccounts();
+  if(deferLoad)root.addEventListener("click",event=>{
+    if(inFlight||!(event.target as HTMLElement).closest('[data-admin-section="credits"]'))return;
+    inFlight=true;get<HTMLButtonElement>("credit-save").disabled=true;get<HTMLSelectElement>("credit-account").disabled=true;
+    void refreshAccounts().catch(error).finally(()=>{inFlight=false;get<HTMLButtonElement>("credit-save").disabled=false;get<HTMLSelectElement>("credit-account").disabled=false;});
+  });
+  else await refreshAccounts();
   return {openAccount:async(id:string)=>{if(inFlight)throw new Error("Vui lòng chờ giao dịch hiện tại hoàn tất.");inFlight=true;get<HTMLButtonElement>("credit-save").disabled=true;get<HTMLSelectElement>("credit-account").disabled=true;try{await refreshAccounts(id);get("credit-message").textContent="";get<HTMLInputElement>("credit-amount").value="0";}finally{inFlight=false;get<HTMLButtonElement>("credit-save").disabled=false;get<HTMLSelectElement>("credit-account").disabled=false;}}};
 }

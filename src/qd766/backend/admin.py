@@ -92,19 +92,15 @@ def directory(request: Request, provinceId: uuid.UUID | None = None):
 def accounts(request: Request):
     with request.app.state.session_factory() as db:
         administrator(request, db)
-        from .collection_permissions import can_collect
+        from .admin_accounts import account_projections
         users = list(db.scalars(select(UserAccount).order_by(UserAccount.created_at.desc()).limit(500)))
         department_ids = {value for a in users for value in (a.root_department_id, a.unit_department_id) if value}
         names = dict(db.execute(select(Department.id, Department.name).where(Department.id.in_(department_ids))).all())
+        projections = account_projections(db, users)
         return [{"id": str(a.id), "email": a.email, "name": a.display_name, "role": a.role,
                  "admitted": a.trial_admitted, "active": a.active, "accessTier": a.access_tier,
-                 "canCollect": request.app.state.settings.paid_requests_enabled and can_collect(db, a.id),
-                 "credits": credits(db,a)[0], "reservedCredits": credits(db,a)[1],
-                 "walletMode":"sources" if wallet_enabled(db,a.id) else "legacy",
-                 "subscription":subscription_summary(db,a),
-                 "canActivateTrial":bool(db.info.get("source_wallet_enabled") and a.active and a.trial_admitted
-                    and a.access_tier in {"agency","province"} and db.scalar(select(SubscriptionCycle.id).where(
-                        SubscriptionCycle.account_id==a.id)) is None),
+                 **projections[a.id],
+                 "canCollect": bool(request.app.state.settings.paid_requests_enabled and projections[a.id]["canCollect"]),
                  "provinceId": str(a.root_department_id) if a.root_department_id else None,
                  "provinceName": names.get(a.root_department_id),
                  "unitName": names.get(a.unit_department_id),

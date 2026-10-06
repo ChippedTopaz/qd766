@@ -11,6 +11,7 @@ __pycache__/
 /chrome-probe.log
 .env
 .env.public
+.env.gemini
 *.db
 /tests/runtime-backend/
 node_modules/

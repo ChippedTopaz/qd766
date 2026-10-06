@@ -5,8 +5,16 @@ body:has(#admin[aria-busy="false"]) #admin-startup{display:none}
 #admin-startup .admin-workspace{min-height:100dvh;display:grid;align-items:center}
 .account-filters{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) minmax(220px,1.3fr);gap:14px;align-items:end;margin-bottom:16px}
 .account-filters #search{width:100%;margin:0;height:42px}
-#accounts td:last-child{display:flex;flex-wrap:wrap;gap:8px;max-width:330px;white-space:normal}
-#accounts td:nth-child(4){white-space:normal;min-width:220px;max-width:360px}
+.admin-accounts-table{table-layout:fixed;min-width:1370px}
+.admin-accounts-table th:nth-child(1){width:200px}.admin-accounts-table th:nth-child(2){width:80px}
+.admin-accounts-table th:nth-child(3){width:180px}.admin-accounts-table th:nth-child(4){width:220px}
+.admin-accounts-table th:nth-child(5){width:105px}.admin-accounts-table th:nth-child(6){width:145px}
+.admin-accounts-table th:nth-child(7){width:190px}.admin-accounts-table th:nth-child(8){width:250px}
+#accounts td{vertical-align:middle;line-height:1.45;padding:12px;white-space:normal;overflow-wrap:anywhere}
+#accounts td small{font-size:11px}
+#accounts td:nth-child(3),#accounts td:nth-child(4){white-space:normal;word-break:normal;overflow-wrap:break-word}
+.account-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.account-actions button{white-space:nowrap;padding:9px 10px;font-size:12px;flex-shrink:0}
 @media(max-width:760px){.account-filters{grid-template-columns:1fr}.account-filters #search{height:44px}#admin-startup .admin-workspace{min-height:40dvh}}
 .collection-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px}.collection-toolbar h2{margin-bottom:4px}.collection-filters{display:flex;gap:16px;flex-wrap:wrap}.collection-filters label{min-width:190px}.collection-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:20px 0}.collection-stats article{background:#f4f7fe;border-radius:16px;padding:16px}.collection-stats strong{display:block;font-size:26px;margin-top:6px}.collection-notice{background:#f8fafc;border-radius:12px;padding:12px;font-size:13px}.collection-state{display:inline-block;border-radius:99px;padding:5px 10px;background:#eef2ff;color:#4338ca;font-size:12px}.state-success,.state-succeeded,.state-complete{background:#ecfdf5;color:#047857}.state-failed{background:#fef2f2;color:#dc2626}.state-halted,.state-paused,.state-incomplete{background:#fff7ed;color:#b45309}.collection-progress{display:grid;gap:6px;min-width:150px}.collection-progress progress{width:100%;height:8px;accent-color:#6366f1}.collection-probe{border:1px solid #e8eafd;border-radius:18px;padding:18px;margin:24px 0}.collection-id{display:block;font-size:10px;max-width:230px;overflow:hidden;text-overflow:ellipsis}.collection-error{color:#dc2626}@media(max-width:760px){.collection-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.collection-toolbar{align-items:flex-start}.collection-filters label{flex:1;min-width:140px}.collection-probe{padding:12px}}
 /* QD766 page loader: keep this block identical in bento.css and admin.css. */

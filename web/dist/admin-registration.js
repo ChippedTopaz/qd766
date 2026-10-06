@@ -1,5 +1,5 @@
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-export async function installRegistrationAdmin(root, api, onReview) {
+export async function installRegistrationAdmin(root, api, onReview, deferLoad = false) {
     const policy = await api('access-policy');
     if (!policy.sharedRegistrationEnabled)
         return;
@@ -93,6 +93,15 @@ export async function installRegistrationAdmin(root, api, onReview) {
     edit.querySelector('[data-cancel-edit]').addEventListener('click', () => { edit.hidden = true; editing = null; });
     edit.addEventListener('submit', event => { event.preventDefault(); if (editing)
         void action(pending, '[data-review-message]', async () => { await api(`admin/registrations/${editing}/assignment`, { provinceId: province.value, unitId: unit.value }); edit.hidden = true; editing = null; await loadPending(); }); });
-    await Promise.all([loadLinks(), loadPending()]);
+    if (deferLoad)
+        root.addEventListener('click', event => {
+            const key = event.target.closest('[data-admin-section]')?.dataset.adminSection;
+            if (key === 'invitations')
+                void action(links, '[data-link-message]', loadLinks);
+            if (key === 'registrations')
+                void action(pending, '[data-review-message]', loadPending);
+        });
+    else
+        await Promise.all([loadLinks(), loadPending()]);
 }
 //# sourceMappingURL=admin-registration.js.map

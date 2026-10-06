@@ -14,6 +14,7 @@ $ModeArguments = @()
 if ($Actions[0].Arguments -match '(?:^|\s)--real-wallet(?:\s|$)') { $ModeArguments += '--real-wallet' }
 if ($Actions[0].Arguments -match '(?:^|\s)--pause-paid-requests(?:\s|$)') { $ModeArguments += '--pause-paid-requests' }
 if ($Actions[0].Arguments -match '(?:^|\s)--shared-registration(?:\s|$)') { $ModeArguments += '--shared-registration' }
+if ($Actions[0].Arguments -match '(?:^|\s)--gemini-analysis(?:\s|$)') { $ModeArguments += '--gemini-analysis' }
 & $Python $Launcher @ModeArguments --check
 if ($LASTEXITCODE -ne 0) { throw 'Configuration invalid; current server was NOT stopped.' }
 Stop-ScheduledTask -TaskName $TaskName
@@ -49,8 +50,9 @@ $Policy = Invoke-RestMethod -Uri 'http://127.0.0.1:8769/api/v1/access-policy' -T
 $ExpectedWallet = $ModeArguments -contains '--real-wallet'
 $ExpectedPause = $ModeArguments -contains '--pause-paid-requests'
 $ExpectedRegistration = $ModeArguments -contains '--shared-registration'
+$ExpectedAnalysis = $ModeArguments -contains '--gemini-analysis'
 if ($Policy.loginRequired -ne $true -or $Policy.inviteRequired -ne $true -or $Policy.publicReadOnly -ne $true -or
-    $Policy.paidRequestsEnabled -ne $ExpectedWallet -or [bool]$Policy.sharedRegistrationEnabled -ne $ExpectedRegistration -or
+    $Policy.paidRequestsEnabled -ne $ExpectedWallet -or [bool]$Policy.sharedRegistrationEnabled -ne $ExpectedRegistration -or [bool]$Policy.geminiAnalysisEnabled -ne $ExpectedAnalysis -or
     ($ExpectedWallet -and ($Policy.defaultCollectionAccess -ne $true -or $Policy.collectionRequestsPaused -ne $ExpectedPause))) {
     throw 'Public backend runtime policy differs from registered Task. Do not deploy frontend; inspect before proceeding.'
 }

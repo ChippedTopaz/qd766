@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 const css=readFileSync(new URL("../admin.css",import.meta.url),"utf8");
-const mobile=css.slice(css.indexOf("@media(max-width:760px)"),css.indexOf("\n.collection-toolbar"));
+const start=css.indexOf("@media(max-width:760px)");
+const mobile=css.slice(start,css.indexOf("}}",start)+2);
 assert.match(mobile,/\.admin-sidebar nav\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
 assert.match(mobile,/min-height:48px/);
 assert.match(mobile,/white-space:normal/);

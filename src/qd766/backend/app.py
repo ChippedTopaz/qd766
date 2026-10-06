@@ -55,6 +55,7 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
         return {"publicReadOnly": resolved.public_read_only,
                 "groupExcelExportEnabled": True,
                 "collectionMonitorEnabled": True,
+                **({"geminiAnalysisEnabled": True} if resolved.gemini_analysis_enabled else {}),
                 "loginRequired": resolved.require_login,
                 "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": resolved.paid_requests_enabled,
                 "inviteRequired": resolved.invite_required,
@@ -95,6 +96,8 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
     app.include_router(admin_router)
     app.include_router(registration_router)
     app.include_router(user_collection_router)
+    from .analysis import router as analysis_router
+    app.include_router(analysis_router)
     from .daily_routes import router as daily_router
     app.include_router(daily_router)
     app.include_router(router)

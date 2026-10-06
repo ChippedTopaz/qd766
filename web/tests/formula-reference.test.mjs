@@ -58,5 +58,10 @@ for(const snapshot of Object.values(fixture.snapshots))for(const dataset of snap
 assert(observations>0,'Known metric maximums must agree with captured API fixtures');
 assert.match(html,/do quản trị viên cung cấp/);
 assert.doesNotMatch(html,/<script|fetch\(/);
-assert.match(referenceNotice('provide-online-tree'),/ngừng đối chiếu/);
+for(const group of formulaGroups){
+ const link=referenceNotice(group.id);
+ assert.match(link,new RegExp(`data-formula-group="${group.id}"`));
+ assert.match(link,/<button type="button"/);
+ assert.doesNotMatch(link,/<details|<summary|<p>/);
+}
 console.log('FORMULA_REFERENCE_OK: 6 groups, 21 ratios, exact thresholds, source ambiguities, no inferred online scores');

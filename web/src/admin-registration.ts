@@ -4,7 +4,7 @@ type Link={id:string;expiresAt:string;registeredCount:number;maxRegistrations:nu
 type Directory={provinces:Array<{id:string;name:string}>;units:Array<{id:string;name:string}>};
 const esc=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 
-export async function installRegistrationAdmin(root:HTMLElement,api:Api,onReview:()=>Promise<void>):Promise<void>{
+export async function installRegistrationAdmin(root:HTMLElement,api:Api,onReview:()=>Promise<void>,deferLoad=false):Promise<void>{
   const policy=await api<{sharedRegistrationEnabled?:boolean}>('access-policy');
   if(!policy.sharedRegistrationEnabled)return;
   const links=document.createElement('section');links.dataset.sharedLinks='true';
@@ -53,5 +53,9 @@ export async function installRegistrationAdmin(root:HTMLElement,api:Api,onReview
   province.addEventListener('change',()=>void action(pending,'[data-review-message]',()=>loadUnits()));
   edit.querySelector('[data-cancel-edit]')!.addEventListener('click',()=>{edit.hidden=true;editing=null;});
   edit.addEventListener('submit',event=>{event.preventDefault();if(editing)void action(pending,'[data-review-message]',async()=>{await api(`admin/registrations/${editing}/assignment`,{provinceId:province.value,unitId:unit.value});edit.hidden=true;editing=null;await loadPending();});});
-  await Promise.all([loadLinks(),loadPending()]);
+  if(deferLoad)root.addEventListener('click',event=>{const key=(event.target as HTMLElement).closest<HTMLElement>('[data-admin-section]')?.dataset.adminSection;
+    if(key==='invitations')void action(links,'[data-link-message]',loadLinks);
+    if(key==='registrations')void action(pending,'[data-review-message]',loadPending);
+  });
+  else await Promise.all([loadLinks(),loadPending()]);
 }

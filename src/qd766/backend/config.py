@@ -55,6 +55,9 @@ def _database_url_from_env() -> str:
 
 @dataclass(frozen=True)
 class Settings:
+    gemini_analysis_enabled: bool = False
+    gemini_api_key: str = field(default="", repr=False)
+    gemini_model: str = ""
     public_read_only: bool = False
     require_login: bool = False
     invite_required: bool = False
@@ -98,6 +101,9 @@ class Settings:
             if item.strip()
         )
         return cls(
+            gemini_analysis_enabled=_as_bool(os.getenv("QD766_GEMINI_ANALYSIS_ENABLED")),
+            gemini_api_key=os.getenv("QD766_GEMINI_API_KEY", ""),
+            gemini_model=os.getenv("QD766_GEMINI_MODEL", ""),
             public_read_only=_as_bool(os.getenv("QD766_PUBLIC_READ_ONLY")),
             require_login=_as_bool(os.getenv("QD766_REQUIRE_LOGIN")),
             invite_required=_as_bool(os.getenv("QD766_INVITE_REQUIRED")),

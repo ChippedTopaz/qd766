@@ -44,7 +44,7 @@ export const formulaGroups:FormulaGroup[] = [
 const esc=(v:string)=>v.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export function referenceNotice(id:GroupId):string {
  const group=formulaGroups.find(g=>g.id===id)!;
- return `<details class="formula-inline"><summary>∑ Công thức và điều kiện nghiệp vụ · ${esc(group.name)}</summary><p>Điểm tối đa đã xác định được trình bày trong sổ tay công thức; các mức chưa rõ không được tự phân bổ. Điểm API vẫn là điểm nguồn. ${id==='provide-online-tree'?'Đã ngừng đối chiếu theo phân bổ suy luận 2–4–6 vì thiếu căn cứ và hệ số đồng bộ.':''}</p><button class="text-button" data-formula-group="${id}">Mở sổ tay công thức →</button></details>`;
+ return `<button type="button" class="formula-inline formula-link" data-formula-group="${id}">∑ Công thức và điều kiện nghiệp vụ · ${esc(group.name)} <span aria-hidden="true">→</span></button>`;
 }
 function formulaCard(group:GroupId,f:Formula):string {
  const maximum=formulaMaximums[group].find(row=>row.formulaId===f.id)?.maximum??null;
