@@ -192,10 +192,15 @@ def _entity(entity: Entity, *, include_detail: bool) -> dict[str, Any]:
             for metric in entity.metrics
         ]
         result["parameters"] = entity.parameters
+    else:
+        result["metrics"] = []
+        # Retain volume history for period comparisons without transporting all
+        # historical component details at initial load.
+        result["parameters"] = {key: value for key, value in entity.parameters.items() if key == "totalReceived"}
     return result
 
 
-def _dataset(dataset: Dataset) -> dict[str, Any]:
+def _dataset(dataset: Dataset, *, include_detail: bool = True) -> dict[str, Any]:
     root = next(entity for entity in dataset.entities if entity.entity_kind == "root")
     children = [entity for entity in dataset.entities if entity.entity_kind == "child"]
     return {
@@ -204,10 +209,10 @@ def _dataset(dataset: Dataset) -> dict[str, Any]:
         "schemaKind": dataset.schema_kind,
         "formulaStatus": dataset.formula_status,
         "scorePolicy": dataset.score_policy,
-        "root": _entity(root, include_detail=True),
+        "root": _entity(root, include_detail=include_detail),
         # The analytical frontend needs metrics/parameters for the selected child,
         # not only for the provincial root. Keep one canonical response contract.
-        "children": [_entity(entity, include_detail=True) for entity in children],
+        "children": [_entity(entity, include_detail=include_detail) for entity in children],
         "raw": {"path": dataset.raw_path, "sha256": dataset.raw_sha256},
         "capture": {
             "capturedAt": dataset.snapshot.created_at.isoformat(),
@@ -221,6 +226,7 @@ def _dataset(dataset: Dataset) -> dict[str, Any]:
 def snapshot_payload(
     snapshot: Snapshot,
     national_summary: NationalSummarySnapshot | None = None,
+    *, include_detail: bool = True,
 ) -> dict[str, Any]:
     details_stale = _detail_snapshot_is_stale(snapshot)
     result = {
@@ -230,7 +236,7 @@ def snapshot_payload(
         "provinceAggregatedScore": _number(snapshot.province_aggregated_score),
         "provinceAggregatedMaximum": _number(snapshot.province_aggregated_maximum),
         "scorePolicy": snapshot.policy,
-        "datasets": [_dataset(dataset) for dataset in snapshot.datasets],
+        "datasets": [_dataset(dataset, include_detail=include_detail) for dataset in snapshot.datasets],
         "delivery": {
             "result": "database",
             "capturedAt": snapshot.created_at.isoformat(),
@@ -247,6 +253,8 @@ def snapshot_payload(
             ),
         },
     }
+    if not include_detail:
+        result["detailsLoaded"] = False
     if national_summary is not None and snapshot.scope == "all":
         row = next(
             (
@@ -351,6 +359,7 @@ def dashboard_payload(
     national_summaries: dict[
         tuple[str, int, int | None], NationalSummarySnapshot
     ] | None = None,
+    *, detail_snapshot_ids: set | None = None,
 ) -> dict[str, Any]:
     payload_snapshots: dict[str, dict[str, Any]] = {}
     for snapshot in snapshots:
@@ -359,7 +368,7 @@ def dashboard_payload(
             (snapshot.period_type, snapshot.year, snapshot.period_value)
         )
         payload_snapshots[f"{period_id}:{snapshot.scope}"] = snapshot_payload(
-            snapshot, summary
+            snapshot, summary, include_detail=detail_snapshot_ids is None or snapshot.id in detail_snapshot_ids
         )
 
     root = snapshots[0].root_department

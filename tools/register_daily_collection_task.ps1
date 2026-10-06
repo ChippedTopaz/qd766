@@ -4,7 +4,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 if (-not $Confirm) {
     & $Python (Join-Path $PSScriptRoot 'run_daily_collection.py')
-    Write-Output 'PLAN_ONLY: daily 02:00 Vietnam; old tasks/worker/database unchanged'
+    Write-Output 'PLAN_ONLY: daily 04:00 Vietnam; old tasks/worker/database unchanged'
     return
 }
 if (-not $Backup) { throw 'Fresh verified database backup is required' }
@@ -40,18 +40,18 @@ foreach ($Process in $WorkerProcesses) {
 $WorkerAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $PSScriptRoot 'start_controlled_worker.ps1')) -WorkingDirectory $ProjectRoot
 Set-ScheduledTask -TaskName 'QD766 Worker' -Action $WorkerAction | Out-Null
 $Action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $PSScriptRoot 'start_daily_collection.ps1')) -WorkingDirectory $ProjectRoot
-$Trigger = New-ScheduledTaskTrigger -Daily -At '02:00'
+$Trigger = New-ScheduledTaskTrigger -Daily -At '04:00'
 $Settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 15) -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 if ($Credential) {
     Register-ScheduledTask -TaskName 'QD766 Daily Collection' -Action $Action -Trigger $Trigger -Settings $Settings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -Force | Out-Null
 } else {
     $Principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName 'QD766 Daily Collection' -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Force | Out-Null
-    Write-Warning 'Interactive mode: Windows account must remain logged in at 02:00'
+    Write-Warning 'Interactive mode: Windows account must remain logged in at 04:00'
 }
 & $Python (Join-Path $PSScriptRoot 'activate_daily_policy.py') --confirm
 if ($LASTEXITCODE -ne 0) { throw 'Activation failed; keep collection paused and restore task XML if needed' }
 Start-ScheduledTask -TaskName 'QD766 Worker'
 Write-Output ('TASK_BACKUP='+$BackupRoot)
-Write-Output 'DAILY_TASK_REGISTERED=02:00 VIETNAM; historical data retained; paid requests unchanged'
+Write-Output 'DAILY_TASK_REGISTERED=04:00 VIETNAM; historical data retained; paid requests unchanged'
 Write-Output 'Daily task NOT started now. Restart public backend using the reviewed restart script.'

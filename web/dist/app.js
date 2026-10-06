@@ -6,6 +6,7 @@ import { buildLeadershipReport, buildLeadershipWorkbook, leadershipColors, leade
 import { parameterLabels } from "./parameter-labels.js";
 import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
+import { latestPeriod } from './period-choice.js';
 import { CollectionTracker } from "./collection-tracker.js";
 import { cleanLoginSearch } from "./login-url.js";
 import { loginView } from "./login-view.js";
@@ -20,7 +21,10 @@ import { mountTrialRegistration } from './trial-registration.js';
 import { pageLoader } from './page-loader.js';
 import { agencyComparison, orderAgencies } from './agency-comparison.js';
 import { annualDailyComparison } from './annual-daily-comparison.js';
+import { onlineIndicators } from './online-indicators.js';
+import { RecentDashboard } from './recent-dashboard.js';
 const root = document.querySelector("#app");
+const recentDashboards = new RecentDashboard();
 if (!root)
     throw new Error("Thiếu app root");
 const screens = [
@@ -341,7 +345,7 @@ function collectionLabel() {
     return `${data.province.name} · ${period().label} · ${catalogPreview.mode === "filtered" ? `${int(catalogPreview.selected)} TTHC sau lọc` : `${data.formality.code} · ${data.formality.name}`}`;
 }
 const catalogProvinceCode = () => data.province.code ?? provinceOptions.find(item => item.id === data.province.id)?.provinceCode ?? "";
-const initialPeriodFor = (loaded) => [...loaded.periods].reverse().find(item => item.type === "year" && Boolean(loaded.snapshots[`${item.id}:all`])) ?? [...loaded.periods].reverse().find(item => Boolean(loaded.snapshots[`${item.id}:all`]));
+const initialPeriodFor = (loaded) => latestPeriod(loaded.periods.filter(item => item.type === "year" && Boolean(loaded.snapshots[`${item.id}:all`]))) ?? latestPeriod(loaded.periods.filter(item => Boolean(loaded.snapshots[`${item.id}:all`])));
 function normalizeLoadedData(loaded) {
     if (loaded.formality.id) {
         for (const item of loaded.periods) {
@@ -441,7 +445,8 @@ function context() {
     if (state.screen === "formulas")
         return `<header class="contextbar formula-context"><strong>Sổ tay Bộ chỉ số 766</strong><span>Tra cứu công thức · Không phụ thuộc tỉnh hoặc kỳ đang chọn</span></header>`;
     const selectedPeriod = period();
-    const sameType = data.periods.filter(item => item.type === selectedPeriod.type && item.year === selectedPeriod.year);
+    const sameType = data.periods.filter(item => item.type === selectedPeriod.type && item.year === selectedPeriod.year)
+        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
     const years = [...new Set(data.periods.map(item => item.year))].sort((a, b) => b - a);
     const formalityScopeLabel = catalogPreview.mode === "single" && catalogPreview.selectedId ? `${data.formality.code} · ${data.formality.name}` : catalogPreview.mode === "filtered" && catalogPreview.selected ? `${int(catalogPreview.selected)} TTHC sau lọc` : "Theo thủ tục hành chính";
     const canSubmit = !publicReadOnly && !submittingCollection && !collectionTracker.hasActive(selectionKey()) && state.scope === "formality" && ["ready", "normal"].includes(state.demo) && (catalogPreview.mode === "filtered" ? catalogPreview.selected > 0 : Boolean(catalogPreview.selectedId));
@@ -627,10 +632,16 @@ function groupComparisonSummary(view) {
     }).join("");
     return `<section class="panel group-comparison" id="group-detail"><div class="panel-head"><div><p class="eyebrow">Tổng hợp 6 nhóm chỉ tiêu</p><h2>Điểm số và biến động theo kỳ</h2><p>${esc(view.name)} · ${esc(period().label)}${previousPeriod ? ` so với ${esc(previousPeriod.label)}` : " · chưa có kỳ trước cùng loại"}</p></div></div><div class="detail-columns"><div class="detail-metrics-card">${groupTableHeading("Điểm 6 nhóm chỉ tiêu")}<div class="table-wrap"><table class="summary-table"><thead><tr><th>Tên nhóm chỉ tiêu</th><th>Điểm số</th><th>Điểm kỳ trước</th><th>Tăng/giảm so với kỳ trước</th><th>Tăng/giảm thứ hạng</th></tr></thead><tbody>${rows}</tbody></table></div></div>${totalPeerComparison(view)}</div></section>`;
 }
-function onlineAnalysis(_entity) {
-    // Retired inferred 2–4–6 scoring: the supplied reference does not allocate maxima.
-    // Preserve raw parameters and official API scores in the existing table.
-    return null;
+function onlineAnalysis(entity) {
+    // Do not substitute provincial parameters for the selected child agency.
+    if (entity.departmentId !== data.province.id)
+        return null;
+    const indicators = onlineIndicators(entity.parameters);
+    if (!indicators.length)
+        return null;
+    const derived = indicators.map(r => `<tr><td>${esc(r.name)}<small class="online-indicator-formula">${esc(r.formula)}</small></td><td class="num">${int(r.numerator)}</td><td class="num">${int(r.denominator)}</td><td class="num">${pct(r.ratio)}</td><td colspan="3">Chưa có điểm thành phần từ nguồn</td></tr>`);
+    const raw = Object.entries(entity.parameters).filter(([, value]) => value !== null).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Số liệu nghiệp vụ thành phần")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td colspan="3">Tham số nguồn</td></tr>`);
+    return { rows: [...derived, ...raw], catalog: "", notice: '<p class="online-indicator-note">Các tỷ lệ dưới đây tính từ tham số nguồn để đối chiếu dashboard Cổng DVCQG, không phải công thức quy đổi điểm. Điểm nhóm giữ nguyên theo Cổng công bố. Tỷ lệ DVCTT phát sinh hồ sơ là của kỳ đang chọn; biểu đồ tháng cần số liệu riêng từng tháng.</p>' };
 }
 function progressDetail(entity) {
     const analysis = analyzeProgressScore(entity);
@@ -985,7 +996,14 @@ async function downloadAnalysisExcel(kind) {
 function bind() {
     loadDailyHistory();
     document.querySelectorAll('[data-daily-refresh]').forEach(el => el.addEventListener('click', () => { dailyHistoryCache.delete(dailyContext().key); render(); }));
-    document.querySelectorAll('[data-annual-observation]').forEach(el => el.addEventListener('change', () => { annualObservationDates.set(dailyContext().key, el.value); render(); }));
+    document.querySelectorAll('[data-annual-observation]').forEach(el => el.addEventListener('change', () => {
+        const context = dailyContext();
+        const days = dailyHistoryCache.get(context.key)?.history?.days ?? [];
+        if (el.value >= '2026-10-06' && days.some(day => day.reportDate === el.value))
+            annualObservationDates.set(context.key, el.value);
+        // Native calendar bounds disable pre-launch/future dates; gaps must not select fabricated data.
+        render();
+    }));
     document.querySelectorAll('[data-group-export]').forEach(button => button.addEventListener('click', () => {
         const group = state.selectedGroup ?? data.groupOrder[0];
         const current = period();
@@ -1007,6 +1025,7 @@ function bind() {
         selectedFormulaGroup = button.dataset.formulaGroup;
         state.screen = "formulas";
         render();
+        document.querySelector(`#formula-${selectedFormulaGroup}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }));
     document.querySelectorAll('[data-overview-tab]').forEach(button => {
         const activate = (tab) => {
@@ -1161,10 +1180,10 @@ function bind() {
     document.querySelector("[data-action=close-group-detail]")?.addEventListener("click", () => { state.selectedGroup = null; state.selectedMetric = null; render(); document.querySelector("#group-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }); });
     document.querySelector("#province-select")?.addEventListener("change", e => { void switchProvince(e.target.value); });
     document.querySelector("#unit-select")?.addEventListener("change", e => { state.unitId = e.target.value; state.selectedGroup = null; state.selectedMetric = null; saveSelectionUrl(); render(); });
-    document.querySelector("#period-type")?.addEventListener("change", e => { const type = e.target.value; const currentYear = period().year; const matches = data.periods.filter(item => item.type === type && item.year === currentYear); const fallback = data.periods.filter(item => item.type === type); const match = matches.at(-1) ?? fallback.at(-1); if (match)
+    document.querySelector("#period-type")?.addEventListener("change", e => { const type = e.target.value; const currentYear = period().year; const matches = data.periods.filter(item => item.type === type && item.year === currentYear); const fallback = data.periods.filter(item => item.type === type); const match = latestPeriod(matches) ?? latestPeriod(fallback); if (match)
         void selectPeriod(match.id); });
     document.querySelector("#period-value")?.addEventListener("change", e => { void selectPeriod(e.target.value); });
-    document.querySelector("#report-year")?.addEventListener("change", e => { const year = Number(e.target.value); const matches = data.periods.filter(item => item.type === period().type && item.year === year); const match = matches.at(-1); if (match)
+    document.querySelector("#report-year")?.addEventListener("change", e => { const year = Number(e.target.value); const matches = data.periods.filter(item => item.type === period().type && item.year === year); const match = latestPeriod(matches); if (match)
         void selectPeriod(match.id); });
     document.querySelector("#scope-select")?.addEventListener("change", e => { completionMessage = ""; state.scope = e.target.value; state.selectedGroup = null; state.selectedMetric = null; if (state.scope === "formality") {
         data.formality = { id: "", code: "", name: "" };
@@ -1462,7 +1481,7 @@ async function loadSelection() {
     const requestId = ++selectionRequest;
     const selected = period();
     const key = snapshotKey(selected.id, state.scope, data.formality.id);
-    if (data.snapshots[key]) {
+    if (data.snapshots[key] && data.snapshots[key].detailsLoaded !== false) {
         state.demo = "normal";
         render();
         return;
@@ -1509,10 +1528,14 @@ async function loadSelection() {
     render();
 }
 async function openProvince(rootDepartmentId, requestId) {
-    const response = await fetch(`/api/v1/dashboard?fast=true&root_department_id=${encodeURIComponent(rootDepartmentId)}`);
-    if (!response.ok)
-        throw new Error(`HTTP ${response.status}`);
-    const loaded = normalizeLoadedData(await response.json());
+    let loaded = recentDashboards.get(rootDepartmentId);
+    if (!loaded) {
+        const response = await fetch(`/api/v1/dashboard?fast=true&compact=true&root_department_id=${encodeURIComponent(rootDepartmentId)}`);
+        if (!response.ok)
+            throw new Error(`HTTP ${response.status}`);
+        loaded = normalizeLoadedData(await response.json());
+        recentDashboards.set(rootDepartmentId, loaded);
+    }
     if (requestId !== selectionRequest)
         return;
     const initialPeriod = initialPeriodFor(loaded);
@@ -1623,7 +1646,7 @@ async function start() {
         }
         const remembered = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
         const rememberedProvince = remembered.get("province");
-        const dashboardUrl = rememberedProvince ? `/api/v1/dashboard?fast=true&root_department_id=${encodeURIComponent(rememberedProvince)}` : "/api/v1/dashboard?fast=true";
+        const dashboardUrl = rememberedProvince ? `/api/v1/dashboard?fast=true&compact=true&root_department_id=${encodeURIComponent(rememberedProvince)}` : "/api/v1/dashboard?fast=true&compact=true";
         const [apiResponse, provincesResponse] = await Promise.all([fetch(dashboardUrl), fetch("/api/v1/dashboard/provinces")]);
         if (provincesResponse.ok)
             provinceOptions = await provincesResponse.json();
@@ -1639,6 +1662,7 @@ async function start() {
             data = normalizeLoadedData(await fixtureResponse.json());
         }
         const initialPeriod = initialPeriodFor(data);
+        recentDashboards.set(data.province.id, data);
         if (!initialPeriod)
             throw new Error("Chưa có kỳ báo cáo ban đầu hoàn chỉnh");
         state = { screen: "overview", periodId: initialPeriod.id, scope: "all", unitId: data.defaultUnitId, peerDimension: "total", selectedGroup: null, selectedMetric: null, search: "", demo: "normal", modal: "none" };
@@ -1648,6 +1672,8 @@ async function start() {
         const rememberedUnit = remembered.get("unit");
         if (rememberedUnit && data.units.some(item => item.departmentId === rememberedUnit))
             state.unitId = rememberedUnit;
+        if (data.snapshots[snapshotKey(state.periodId, "all", "")]?.detailsLoaded === false)
+            await loadSelection();
         document.title = "Hệ thống phân tích Bộ chỉ số 766";
         render();
         if (paidRequestsEnabled || canAcquire()) {

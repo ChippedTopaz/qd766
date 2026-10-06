@@ -9,7 +9,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, selectinload, with_loader_criteria
 
 from qd766.province_catalog import (
     PROVINCES,
@@ -998,10 +998,11 @@ def dashboard(
     session: DbSession,
     root_department_id: uuid.UUID | None = None,
     fast: bool = False,
+    compact: bool = False,
 ) -> dict | Response:
     public_read_only = request.app.state.settings.public_read_only
     root_department_id = getattr(request.state, "authorized_root_id", None) or root_department_id
-    cache_key = ("public:" if public_read_only else "office:") + (str(root_department_id) if root_department_id else "latest")
+    cache_key = ("public:" if public_read_only else "office:") + (str(root_department_id) if root_department_id else "latest") + (":compact" if compact else "")
 
     def load_dashboard() -> dict:
         resolved_root_id = root_department_id
@@ -1030,6 +1031,16 @@ def dashboard(
             Snapshot.scope == "all" if public_read_only else True,
             Snapshot.formality_id.is_(None) if public_read_only else True,
         ).subquery()
+        detail_ids = None
+        if compact:
+            metadata = list(session.scalars(select(Snapshot).where(
+                Snapshot.id.in_(select(versions.c.id).where(versions.c.version_number == 1)))))
+            annual = [item for item in metadata if item.period_type == "year"]
+            # Load the initial frontend period: newest year, or newest available period.
+            initial = max(annual, key=lambda item: item.year) if annual else max(metadata,
+                key=lambda item: (item.year, item.period_value or 0),
+                default=None)
+            detail_ids = {initial.id} if initial else set()
         statement = (
             select(Snapshot)
             .options(
@@ -1051,6 +1062,9 @@ def dashboard(
                 Snapshot.created_at.desc(),
             )
         )
+        if detail_ids is not None:
+            detailed_entities = select(Entity.id).join(Dataset, Dataset.id == Entity.dataset_id).where(Dataset.snapshot_id.in_(detail_ids))
+            statement = statement.options(with_loader_criteria(Metric, Metric.entity_id.in_(detailed_entities)))
         snapshots = _latest_snapshot_versions(
             list(session.scalars(statement).unique())
         )
@@ -1067,7 +1081,7 @@ def dashboard(
                 NationalSummarySnapshot.group_count == 6).order_by(NationalSummarySnapshot.captured_at.desc())):
             key = (summary.period_type, summary.year, summary.period_value)
             summaries.setdefault(key, summary)
-        return dashboard_payload(snapshots, formality, summaries)
+        return dashboard_payload(snapshots, formality, summaries, detail_snapshot_ids=detail_ids)
 
     payload, cache_result = request.app.state.dashboard_cache.get_or_load(
         cache_key,

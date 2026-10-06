@@ -52,6 +52,6 @@ export function installAdminLayout(root) {
         select(button.dataset.adminSection);
     }));
     select("accounts");
-    return { edit: () => { panels.accounts.prepend(form); select("accounts"); }, invite: () => { panels.invitations.insertBefore(form, invitations); select("invitations"); } };
+    return { credits: () => select("credits"), edit: () => { panels.accounts.prepend(form); select("accounts"); }, invite: () => { panels.invitations.insertBefore(form, invitations); select("invitations"); } };
 }
 //# sourceMappingURL=admin-layout.js.map

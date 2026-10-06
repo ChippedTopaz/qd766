@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import {annualDailyComparison} from '../dist/annual-daily-comparison.js';
 const day=(reportDate,totalScore)=>({reportDate,totalScore,rank:null,cohortKey:'same',groups:{}});
-const history={days:[day('2026-10-05',72),day('2026-10-04',70),day('2026-10-03',71)]};
+const history={days:[day('2026-10-08',72),day('2026-10-07',70),day('2026-10-06',71),day('2026-10-05',80)]};
 assert.match(annualDailyComparison(history),/\+2,00 điểm/);
-assert.match(annualDailyComparison(history,'2026-10-04'),/-1,00 điểm/);
-assert.match(annualDailyComparison(history,'2026-10-03'),/Chưa có ngày liền trước/);
+assert.match(annualDailyComparison(history,'2026-10-07'),/-1,00 điểm/);
+assert.match(annualDailyComparison(history,'2026-10-06'),/Chưa có ngày liền trước/);
+assert.match(annualDailyComparison(history),/type="date"/);
+assert.match(annualDailyComparison(history),/min="2026-10-06" max="2026-10-08"/);
+assert.doesNotMatch(annualDailyComparison(history),/2026-10-05|<select/);
+assert.match(annualDailyComparison({days:[day('2026-10-05',80)]}),/disabled/);
 assert.match(annualDailyComparison(null),/Chưa có lịch sử ngày/);
 assert.doesNotMatch(annualDailyComparison(null),/0,00 điểm/);
 assert.match(annualDailyComparison(history),/Điểm ngày chọn: 72,00 · Tham khảo/);

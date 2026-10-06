@@ -62,6 +62,7 @@ export interface Dataset {
 }
 
 export interface Snapshot {
+  detailsLoaded?: boolean;
   scope: Scope;
   formalityId: string | null;
   status: {

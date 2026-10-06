@@ -1,4 +1,4 @@
-export function installAdminLayout(root:HTMLElement):{edit:()=>void;invite:()=>void}{
+export function installAdminLayout(root:HTMLElement):{edit:()=>void;invite:()=>void;credits:()=>void}{
   const sections=Array.from(root.querySelectorAll<HTMLElement>(":scope > section"));
   const form=sections[0]!,accounts=sections[1]!,invitations=sections[2]!,audit=sections[3]!,credits=sections.find(s=>s.querySelector("#credit-form")),collection=sections.find(s=>s.dataset.collectionMonitor==="true");
   const workspace=document.createElement("div");workspace.className="admin-workspace";
@@ -35,5 +35,5 @@ export function installAdminLayout(root:HTMLElement):{edit:()=>void;invite:()=>v
     select(button.dataset.adminSection!);
   }));
   select("accounts");
-  return {edit:()=>{panels.accounts!.prepend(form);select("accounts");},invite:()=>{panels.invitations!.insertBefore(form,invitations);select("invitations");}};
+  return {credits:()=>select("credits"),edit:()=>{panels.accounts!.prepend(form);select("accounts");},invite:()=>{panels.invitations!.insertBefore(form,invitations);select("invitations");}};
 }

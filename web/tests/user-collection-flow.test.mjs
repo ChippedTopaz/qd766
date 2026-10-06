@@ -5,6 +5,8 @@ const original=structuredClone(Object.values(data.snapshots).find(s=>s.scope==='
 data.periods=[{id:'month-2026-10',label:'Tháng 10/2026',type:'month',year:2026,value:10}];
 const item={id:data.formality.id,code:data.formality.code,name:data.formality.name,available:false,executionLevels:[],field:'Lĩnh vực thử',publishingAgency:''};
 data.snapshots={'month-2026-10:all':original,'month-2026-10:formality':{...original,scope:'formality',formalityId:'different-formality'}};
+const compactRestore=process.argv.includes('--compact-restore');
+if(compactRestore)data.snapshots['month-2026-10:all']={...original,detailsLoaded:false,datasets:original.datasets.map(d=>({...d,root:{...d.root,metrics:[]},children:d.children.map(c=>({...c,metrics:[]}))}))};
 const root={innerHTML:'',setAttribute(){},querySelector(){return null}},controls=new Map(),calls=[],urls=[];
 function control(id){if(!controls.has(id))controls.set(id,{id:id.replace(/^#/,''),value:item.id,dataset:{},handlers:{},selectionStart:2,selectionEnd:2,selectionDirection:'none',focus(){document.activeElement=this;this.focusCount=(this.focusCount??0)+1;},setSelectionRange(start,end,direction){this.selectionStart=start;this.selectionEnd=end;this.selectionDirection=direction;},addEventListener(kind,cb){this.handlers[kind]=cb;}});return controls.get(id);}
 globalThis.document={title:'',getElementById:id=>control('#'+id),querySelector:s=>s==='#app'?root:['#province-select','#unit-select','#catalog-field'].includes(s)?null:s.startsWith('#')||s.startsWith('[data-action=')?control(s):null,
@@ -19,7 +21,7 @@ globalThis.fetch=async(url,options)=>{
   calls.push({url,method:options?.method??'GET',options});let body;
   if(url==='/api/v1/access-policy')body={publicReadOnly:true,paidRequestsEnabled:true,loginRequired:true,googleLoginEnabled:true};
   else if(url==='/api/v1/auth/me')body={name:'Tester',provinceId:data.province.id,csrfToken:'test-csrf',credits:10,canCollect:true};
-  else if(url==='/api/v1/dashboard?fast=true')body=data;
+  else if(url==='/api/v1/dashboard?fast=true&compact=true')body=data;
   else if(url==='/api/v1/dashboard/provinces')body=[];
   else if(url.includes('/province-rankings'))body=[];
   else if(url.includes('/preview?'))body={counts:{selected:1,available:0,missing:1},fields:['Lĩnh vực thử'],items:[item]};
@@ -27,14 +29,19 @@ globalThis.fetch=async(url,options)=>{
   else if(url==='/api/v1/me/collection-quote')body={quote:'signed-quote',items:[{...item,cost:3,owned:false}],totalCredits:3,availableCredits:10};
   else if(url==='/api/v1/me/formality-requests'&&options?.method==='POST')return new Promise(resolve=>{finishConfirmation=()=>{owned=true;rows=[{id:'request-1',state:'ready',formalityId:item.id,code:item.code,name:item.name,periodType:'month',year:2026,periodValue:10,creditCost:3,createdAt:'2026-10-03',error:null}];resolve({ok:true,json:async()=>({items:rows,availableCredits:7})});};});
   else if(url==='/api/v1/me/formality-requests')body={items:rows,availableCredits:10};
-  else if(url.includes('/selection?'))body={snapshot:{...original,scope:'formality',formalityId:item.id},metadata:{detailsAvailable:true,capturedAt:'2026-10-03T00:00:00Z'}};
+  else if(url.includes('/selection?'))body={snapshot:compactRestore?original:{...original,scope:'formality',formalityId:item.id},metadata:{detailsAvailable:true,capturedAt:'2026-10-03T00:00:00Z'}};
   else throw new Error('Unexpected URL '+url);
   return {ok:true,status:200,json:async()=>structuredClone(body)};
 };
 async function settle(){for(let i=0;i<10;i++)await new Promise(resolve=>setImmediate(resolve));}
 await import('../dist/app.js');await settle();
 assert.doesNotMatch(root.innerHTML,/Không thể tải dữ liệu/);
-if(process.argv.includes('--restore')){
+if(compactRestore){
+  assert(calls.some(c=>c.url.includes('/selection?')&&c.url.includes('scope=all')));
+  assert.equal(calls.filter(c=>c.method==='POST').length,0);
+  assert.doesNotMatch(root.innerHTML,/Không thể tải dữ liệu/);
+  console.log('COMPACT_RESTORE_OK: historical detail loaded via GET, no collection request');
+}else if(process.argv.includes('--restore')){
   assert(calls.some(c=>c.url.includes('/selection?')));assert.match(root.innerHTML,/Thủ tục đã khai thác/);
   assert.equal(calls.filter(c=>c.method==='POST').length,0);console.log('COLLECTION_RESTORE_OK: saved period/TTHC via own library, GET-only');
 }else{

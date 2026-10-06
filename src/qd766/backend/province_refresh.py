@@ -45,9 +45,9 @@ def choose_detail_refresh_period(
 VIETNAM = timezone(timedelta(hours=7))
 
 def daily_fresh_after(now: datetime) -> datetime:
-    """Daily 02:00 deadline with one hour to finish/retry; never an hourly TTL."""
+    """Daily 04:00 deadline with one hour to finish/retry; never an hourly TTL."""
     local=now.replace(tzinfo=VIETNAM) if now.tzinfo is None else now.astimezone(VIETNAM)
-    boundary=local.replace(hour=2,minute=0,second=0,microsecond=0)
+    boundary=local.replace(hour=4,minute=0,second=0,microsecond=0)
     return boundary-timedelta(days=1) if local<boundary+timedelta(hours=1) else boundary
 
 def daily_refresh_candidates(now: datetime, *, start_year: int = 2026) -> list[PeriodSelection]:

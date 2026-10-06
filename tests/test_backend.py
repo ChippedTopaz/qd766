@@ -242,6 +242,47 @@ class BackendTest(unittest.TestCase):
         admin = self.client.get("/api/v1/dashboard?fast=true").json()
         self.assertTrue(admin["snapshots"]["month-2026-08:all"]["datasets"][0]["root"]["metrics"])
 
+    def test_compact_dashboard_preserves_history_and_loads_selected_details(self):
+        month = snapshot_payload()
+        month["datasets"][0]["children"][0]["parameters"] = {"totalReceived": 42, "other": 99}
+        annual = copy.deepcopy(month)
+        annual["period"] = {"type": "year", "year": 2026}
+        annual["datasets"][0]["period"] = annual["period"]
+        with self.app.state.session_factory.begin() as db:
+            store_normalized_snapshot(db, month)
+            store_normalized_snapshot(db, annual)
+        full = self.client.get("/api/v1/dashboard?fast=true").json()
+        compact_response = self.client.get("/api/v1/dashboard?fast=true&compact=true")
+        self.assertEqual(compact_response.status_code, 200)
+        compact = compact_response.json()
+        self.assertEqual(compact["periods"], full["periods"])
+        self.assertEqual(compact["units"], full["units"])
+        self.assertEqual(compact["snapshots"]["year-2026:all"], full["snapshots"]["year-2026:all"])
+        historical = compact["snapshots"]["month-2026-08:all"]
+        self.assertFalse(historical["detailsLoaded"])
+        child = historical["datasets"][0]["children"][0]
+        original = full["snapshots"]["month-2026-08:all"]["datasets"][0]["children"][0]
+        for key in ("apiScore", "apiMaxScore", "apiRatio", "departmentId"):
+            self.assertEqual(child[key], original[key])
+        self.assertEqual(child["parameters"], {"totalReceived": 42})
+        self.assertEqual(child["metrics"], [])
+        selected = self.client.get("/api/v1/dashboard/selection", params={
+            "root_department_id": ROOT_ID, "period_type": "month", "year": 2026,
+            "period_value": 8, "scope": "all",
+        })
+        self.assertEqual(selected.status_code, 200)
+        self.assertEqual(selected.json()["snapshot"], full["snapshots"]["month-2026-08:all"])
+        with self.app.state.session_factory() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)), 0)
+
+    def test_compact_dashboard_without_annual_period_keeps_initial_details(self):
+        self.assertEqual(self.client.get("/api/v1/dashboard?compact=true").status_code, 404)
+        with self.app.state.session_factory.begin() as db:
+            store_normalized_snapshot(db, snapshot_payload())
+        full = self.client.get("/api/v1/dashboard?fast=true").json()
+        compact = self.client.get("/api/v1/dashboard?fast=true&compact=true").json()
+        self.assertEqual(compact, full)
+
     def test_database_password_is_safely_encoded(self):
         with patch.dict(
             "os.environ",

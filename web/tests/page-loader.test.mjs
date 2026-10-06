@@ -9,7 +9,7 @@ assert.match(markup,/Đang tải dữ liệu/);
 for(const name of ['index.html','admin.html']){
   const html=read(name);
   assert.match(html,/aria-busy="true"/);
-  assert.match(html,/page-loader-full/);
+  assert.match(html,name==='admin.html'?/id="admin-startup"[\s\S]*page-loader/:/page-loader-full/);
   assert.match(html,/<noscript>/);
   assert.doesNotMatch(html,/boot-side/);
 }

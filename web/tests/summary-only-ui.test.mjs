@@ -26,9 +26,10 @@ const groupSteps=[-1,1].map(step=>({...button(""),dataset:{groupStep:String(step
 const formulaButtons=data.groupOrder.map(id=>({...button(''),dataset:{formulaGroup:id}}));
 const trendButtons=data.groupOrder.map(id=>({...button(""),dataset:{trendToggle:id},attrs:{},setAttribute(key,value){this.attrs[key]=value;}}));
 const trendSeries=data.groupOrder.map(id=>({dataset:{trendSeries:id},attrs:{},setAttribute(key,value){this.attrs[key]=value;},removeAttribute(key){delete this.attrs[key];}}));
+const formulaScrolls=[];
 globalThis.document={
   title:"",
-  querySelector(selector){return selector==="#app"?appRoot:selector==="[data-action=export]"?exportButton:null;},
+  querySelector(selector){return selector==="#app"?appRoot:selector==="[data-action=export]"?exportButton:selector.startsWith('#formula-')?{scrollIntoView(options){formulaScrolls.push({selector,options});}}:null;},
   querySelectorAll(selector){return selector==="[data-formula-group]"?formulaButtons:selector==="[data-overview-tab]"?overviewTabs:selector==="[data-group-detail]"?groupButtons:selector==="[data-group-step]"?groupSteps:selector==="[data-nav]"?navs:selector==="[data-trend-toggle]"?trendButtons:selector==="[data-trend-series]"?trendSeries:[];},
 };
 globalThis.window={setTimeout};
@@ -40,7 +41,7 @@ globalThis.fetch=async(url,options)=>{
   calls.push({url,method:options?.method??"GET"});
   let body;
   if(url==="/api/v1/access-policy")body={publicReadOnly:true};
-  else if(url==="/api/v1/dashboard?fast=true")body=data;
+  else if(url==="/api/v1/dashboard?fast=true&compact=true")body=data;
   else if(url==="/api/v1/dashboard/provinces")body=[];
   else if(url.startsWith("/api/v1/dashboard/province-rankings"))body=Array.from({length:34},(_,i)=>({
     rootDepartmentId:i===0?rootId:"province-"+i,provinceName:"Tỉnh "+i,
@@ -53,6 +54,8 @@ globalThis.fetch=async(url,options)=>{
 await import("../dist/app.js");
 for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
 assert.match(appRoot.innerHTML,/Chỉ có điểm tổng hợp tỉnh/);
+const periodOptions=appRoot.innerHTML.match(/<select id="period-value">([\s\S]*?)<\/select>/)[1];
+assert(periodOptions.indexOf('value="month-2026-10"')<periodOptions.indexOf('value="month-2026-09"'));
 assert.match(appRoot.innerHTML,/Chi tiết: Chưa xác định/);
 assert.equal((appRoot.innerHTML.match(/data-trend-toggle=/g)||[]).length,6);
 trendButtons[0].handlers.click();
@@ -97,6 +100,7 @@ navs.find(n=>n.dataset.nav==="formulas").handlers.click();
 assert.match(appRoot.innerHTML,/Công thức tính Bộ chỉ số 766/);
 assert.equal((appRoot.innerHTML.match(/class="formula-card"/g)||[]).length,4);
 formulaButtons.find(button=>button.dataset.formulaGroup==='provide-online-tree').handlers.click();
+assert.deepEqual(formulaScrolls,[{selector:'#formula-provide-online-tree',options:{behavior:'smooth',block:'start'}}]);
 assert.match(appRoot.innerHTML,/id="formula-provide-online-tree"/);
 assert.doesNotMatch(appRoot.innerHTML,/id="formula-transparency"/);
 assert.equal((appRoot.innerHTML.match(/class="formula-card"/g)||[]).length,3);

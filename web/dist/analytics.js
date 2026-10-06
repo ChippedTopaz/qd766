@@ -75,10 +75,10 @@ export function peerStats(values, current) {
         gapToP75: current - p75,
     };
 }
-function unitTotal(snapshot, unitId) {
+function unitTotal(snapshot, unitId, indexes) {
     const entities = REQUIRED_GROUPS.map(group => {
         const dataset = snapshot.datasets.find(item => item.group === group);
-        return dataset ? entityFor(dataset, unitId) : null;
+        return indexes ? indexes.get(group)?.get(unitId) ?? null : dataset ? entityFor(dataset, unitId) : null;
     });
     if (entities.some((entity) => entity === null || entity.apiScore === null || entity.apiMaxScore === null)) {
         return { score: null, maximum: null };
@@ -93,13 +93,16 @@ export function allUnitTotals(snapshot, departmentLevel = "COMMUNE") {
     if (!first)
         return [];
     const progress = snapshot.datasets.find((dataset) => dataset.group === "dvc-progress-tree");
+    // Build per-group lookups once, rather than scanning every group's children
+    // for every agency (quadratic work on large provincial inventories).
+    const indexes = new Map(snapshot.datasets.map(dataset => [dataset.group, new Map([dataset.root, ...dataset.children].map(entity => [entity.departmentId, entity]))]));
     return first.children
         .filter((entity) => entity.departmentLevel === departmentLevel)
         .flatMap((entity) => {
-        const total = unitTotal(snapshot, entity.departmentId);
+        const total = unitTotal(snapshot, entity.departmentId, indexes);
         if (total.score === null || total.maximum === null || total.maximum === 0)
             return [];
-        const progressEntity = progress ? entityFor(progress, entity.departmentId) : null;
+        const progressEntity = progress ? indexes.get(progress.group)?.get(entity.departmentId) : null;
         const rawVolume = progressEntity?.parameters["totalReceived"];
         return [{
                 id: entity.departmentId,

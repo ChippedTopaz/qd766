@@ -17,4 +17,5 @@ node_modules/
 /netlify-public/
 .npm-cache/
 /data/discovery/
+/data/daily-collection/
 /data/config/departments.json

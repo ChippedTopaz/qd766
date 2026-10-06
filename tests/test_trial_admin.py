@@ -41,6 +41,18 @@ class TrialAdminTests(unittest.TestCase):
     def tearDown(self):
         self.client.close();self.app.state.engine.dispose()
 
+    def test_account_directory_includes_assigned_agency_name(self):
+        with self.app.state.session_factory.begin() as db:
+            a=UserAccount(external_subject="google:agency-name",display_name="Agency",
+                trial_admitted=True,access_tier="agency",root_department_id=uuid.UUID(ROOT_ID),
+                unit_department_id=uuid.UUID(CHILD_ID))
+            db.add(a);db.flush();account_id=str(a.id)
+        response=self.client.get("/api/v1/admin/accounts")
+        self.assertEqual(response.status_code,200)
+        row=next(a for a in response.json() if a["id"]==account_id)
+        self.assertEqual(row["provinceName"],"UBND tỉnh Phú Thọ")
+        self.assertEqual(row["unitName"],"Văn phòng UBND")
+
     def test_source_wallet_admin_grant_requires_explicit_source_and_is_idempotent(self):
         from dataclasses import replace
         from qd766.backend.wallet_access import enroll
