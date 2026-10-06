@@ -3,6 +3,7 @@ import uuid
 import logging
 import httpx
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from threading import BoundedSemaphore
 from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -16,7 +17,7 @@ from .user_collection import account_for, valid_period
 from .paid_requests import _locked_account
 from .wallet_access import enabled, active_subscription
 from .credit_wallet import reserve, finish, balance, WalletError, utc
-from .analysis_rules import findings, VERSION
+from .analysis_rules import findings, VERSION, number
 from .daily_history import history_payload
 from . import gemini_client
 
@@ -80,8 +81,16 @@ def source_evidence(db,selection):
     days=[day for day in days if utc(datetime.fromisoformat(day["capturedAt"]))<=utc(snapshot.created_at)]
     try:cards=findings(groups,days)
     except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+    period=PeriodSelection(selection.periodType,selection.year,selection.periodValue)
+    start,end=period.date_range()
+    captured_date=utc(snapshot.created_at).astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).date().isoformat()
+    # Aggregate numeric data only: no raw payloads, credentials or dossier identities.
+    context_groups=[{**group,'parameters':{key:value for key,value in group['parameters'].items()
+        if number(value) is not None}} for group in groups]
     return {"version":VERSION,"snapshotId":str(snapshot.id),"capturedAt":utc(snapshot.created_at).isoformat(),
         "organization":name,"context":context_of(selection),"findings":cards,
+        "groups":context_groups,"reportingPeriod":{"start":start,"end":end,"capturedDate":captured_date,
+            "endedAtCapture":captured_date>end},
         "coverage":len(groups),"limitations":["Số liệu tổng hợp không xác định được trạng thái từng hồ sơ.",
             "Kỳ đang diễn ra có thể bị ảnh hưởng bởi hồ sơ chưa có kết quả hoặc chưa đến bước thanh toán.",
             "Biến động ngày chỉ tham khảo; chưa xác minh tự động được mọi thay đổi công thức nguồn."]}

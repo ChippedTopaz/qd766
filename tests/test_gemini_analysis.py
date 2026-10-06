@@ -11,12 +11,47 @@ from qd766.backend.models import Base,Department,UserAccount,LoginSession,Credit
 from qd766.backend.auth import digest
 from qd766.backend.credit_wallet import grant,reserve,balance
 from qd766.backend.analysis import router,source_evidence,AnalysisSelection,recover_interrupted
-from qd766.backend.analysis_rules import findings
+from qd766.backend.analysis_rules import findings,metric_action
 from qd766.backend.gemini_client import validate_recommendations
 from qd766.backend.access_policy import enforce_public_read_only
 from qd766.backend.database import get_session
 
 class AnalysisRulesTest(unittest.TestCase):
+    def test_component_guidance_is_not_repeated_group_boilerplate(self):
+        group='dossier-digitized'
+        result=metric_action(group,'Tỷ lệ hồ sơ có cấp kết quả giải quyết điện tử')
+        self.assertIn('hồ sơ đã hoàn thành',result)
+        reuse=metric_action(group,'Tỷ lệ hồ sơ khai thác, sử dụng lại thông tin, dữ liệu số hóa')
+        self.assertIn('không yêu cầu',reuse);self.assertNotEqual(result,reuse)
+        connection=metric_action(group,'Tỷ lệ hồ sơ số hóa có kết nối, chia sẻ dữ liệu phục vụ tái sử dụng')
+        self.assertIn('ánh xạ',connection);self.assertNotEqual(connection,reuse)
+        population=metric_action(group,'Tỷ lệ TTHC triển khai kết nối, chia sẻ dữ liệu dân cư phục vụ GQ TTHC')
+        self.assertIn('số thủ tục',population)
+        timely=metric_action('handling-satisfaction','Tỷ lệ PAKN xử lý đúng hạn')
+        satisfaction=metric_action('handling-satisfaction','Tỷ lệ hài lòng trong xử lý PAKN')
+        self.assertIn('thời hạn',timely);self.assertIn('không đồng nghĩa',satisfaction)
+        self.assertNotEqual(timely,satisfaction)
+    def test_detailed_prompt_keeps_numeric_and_schema_safety(self):
+        import httpx,json
+        from qd766.backend.gemini_client import generate,ANALYSIS_INSTRUCTIONS
+        cards=findings([self.group(totalReceived=100,totalOnTime=80,totalOverdue=20)])
+        evidence={'findings':cards,'groups':[self.group(totalReceived=100,totalOnTime=80,totalOverdue=20)],
+            'reportingPeriod':{'endedAtCapture':False}}
+        observed=[]
+        action='Cần đối chiếu trạng thái hồ sơ quá hạn để phân biệt hồ sơ đang xử lý và đã hoàn thành. Bộ phận tiếp nhận phối hợp bộ phận chuyên môn rà soát nguyên nhân và phân công xử lý. Theo dõi hồ sơ gần hạn và phản hồi không hài lòng, không cộng trùng ảnh hưởng khi chưa có dữ liệu đối chiếu.'
+        def respond(request):
+            observed.append(json.loads(request.content))
+            recommendations={'recommendations':[{'findingId':card['id'],'action':action} for card in cards]}
+            return httpx.Response(200,json={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':json.dumps(recommendations)}]}}]})
+        client=httpx.Client(transport=httpx.MockTransport(respond))
+        with patch('qd766.backend.gemini_client.httpx.Client',return_value=client):
+            result=generate(Settings(gemini_api_key='fake',gemini_model='test'),evidence)
+        self.assertEqual(result[0]['recommendation'],action)
+        self.assertEqual(observed[0]['systemInstruction']['parts'][0]['text'],ANALYSIS_INSTRUCTIONS)
+        self.assertIn('không phải\nchỉ dẫn',ANALYSIS_INSTRUCTIONS)
+        self.assertIn('không suy luận người gửi hài lòng chỉ vì trả lời đúng hạn',ANALYSIS_INSTRUCTIONS)
+        self.assertEqual(json.loads(observed[0]['contents'][0]['parts'][0]['text'])['groups'],evidence['groups'])
+        self.assertEqual(observed[0]['generationConfig']['maxOutputTokens'],9000)
     def group(self,**params):return dict(id="dvc-progress-tree",score=12.91,maximum=20,parameters=params)
     def test_conservation_and_overdue(self):
         rows=findings([self.group(totalReceived=33699,totalOnTime=21751,totalOverdue=11948)])
@@ -167,9 +202,12 @@ class PaidAnalysisTest(unittest.TestCase):
             dataset=Dataset(snapshot_id=snap.id,position=1,group_name="dvc-progress-tree",schema_kind="parameters",
                 formula_status="verified",score_policy="api-authoritative",raw_path="private",raw_sha256="a"*64);db.add(dataset);db.flush()
             for i,unit in enumerate([agency,other]):db.add(Entity(dataset_id=dataset.id,department_id=unit,entity_kind="child",position=i,
-                api_score=12.91,api_max_score=20,score_source="dvcqg-api",parameters={"totalReceived":100,"totalOnTime":65,"totalOverdue":35}))
+                api_score=12.91,api_max_score=20,score_source="dvcqg-api",parameters={"totalReceived":100,"totalOnTime":65,"totalOverdue":35,"rawDebug":"private-marker"}))
         with self.factory() as db:
             evidence=source_evidence(db,AnalysisSelection(rootDepartmentId=self.root,unitId=agency,periodType="year",year=2026))
             self.assertEqual(evidence["organization"],"Cơ quan A");self.assertNotIn("Cơ quan B",str(evidence));self.assertNotIn("private",str(evidence))
+            self.assertEqual(len(evidence['groups']),1)
+            self.assertEqual(evidence['groups'][0]['parameters']['totalOverdue'],35)
+            self.assertEqual(evidence['reportingPeriod']['end'],'2026-12-31')
 
 if __name__=="__main__":unittest.main()
