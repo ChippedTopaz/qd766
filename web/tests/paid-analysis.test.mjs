@@ -3,7 +3,7 @@ import {renderPaidAnalysis,bindPaidAnalysis} from '../dist/paid-analysis.js';
 const selection={rootDepartmentId:'r',unitId:'u',periodType:'year',year:2026,periodValue:null,scope:'all',capturedAt:'2026-10-06T10:00:00Z'};
 const buttons={start:{},read:{},confirm:{},cancel:{}};let calls=[];let renders=0;let wallet;
 globalThis.window={confirm:()=>{throw new Error('Native browser confirmation must not be used');}};
-globalThis.document={querySelector:selector=>selector.includes('aria-labelledby')?null:({focus:()=>{},addEventListener:(_,handler)=>{buttons[selector.includes('start')?'start':selector.includes('confirm')?'confirm':selector.includes('cancel')?'cancel':'read'].click=handler;}}),querySelectorAll:selector=>selector.includes('cancel')?[{addEventListener:(_,handler)=>{buttons.cancel.click=handler;}}]:[]};
+globalThis.document={querySelector:selector=>(selector.includes('aria-labelledby')||selector.includes('cancel-job'))?null:({focus:()=>{},addEventListener:(_,handler)=>{buttons[selector.includes('start')?'start':selector.includes('confirm')?'confirm':selector.includes('cancel')?'cancel':'read'].click=handler;}}),querySelectorAll:selector=>selector.includes('cancel')?[{addEventListener:(_,handler)=>{buttons.cancel.click=handler;}}]:[]};
 let resolveRequest;
 globalThis.fetch=(url,options)=>{calls.push({url,options});return new Promise(resolve=>resolveRequest=resolve);};
 assert.match(renderPaidAnalysis(selection,true),/Phân tích - đánh giá/);

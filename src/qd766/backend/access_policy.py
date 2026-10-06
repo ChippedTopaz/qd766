@@ -58,7 +58,8 @@ async def enforce_public_read_only(request: Request, call_next):
         return await call_next(request)
     allowed = request.method in {"GET", "HEAD"}
     user_collection=request.app.state.settings.paid_requests_enabled
-    analysis_path=path in {"/api/v1/me/analysis","/api/v1/me/analysis/latest"}
+    analysis_path=path in {"/api/v1/me/analysis","/api/v1/me/analysis/latest","/api/v1/me/analysis/cancel"} or (
+        path.startswith('/api/v1/me/analysis/') and path.endswith('/status') and request.method in {'GET','HEAD'})
     user_path=analysis_path or path in {"/api/v1/me/credits","/api/v1/me/subscription/redemption","/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/formalities","/api/v1/me/notifications/read"}
     catalog_path=path.startswith("/api/v1/province-catalog/") and path.endswith("/preview")
     private_selection=path in {"/api/v1/dashboard/selection", "/api/v1/dashboard/group-export"} and request.query_params.get("scope")=="formality"
@@ -68,7 +69,7 @@ async def enforce_public_read_only(request: Request, call_next):
         allowed = allowed and not any(key.lower().replace("_", "") == "formalityid" for key in request.query_params)
         if user_collection and (user_path or catalog_path or private_selection):
             allowed=(request.method in {"GET","HEAD"} and path not in {"/api/v1/me/collection-quote","/api/v1/me/analysis"}) or (
-                request.method=="POST" and path in {"/api/v1/me/analysis","/api/v1/me/subscription/redemption","/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/notifications/read"})
+                request.method=="POST" and path in {"/api/v1/me/analysis","/api/v1/me/analysis/cancel","/api/v1/me/subscription/redemption","/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/notifications/read"})
     else:
         allowed = allowed and (path in {"/", "/index.html", "/admin.html", "/admin.css", "/styles.css", "/bento.css", "/collection.css", "/assets/logo-cchc.png"}
             or path.startswith("/dist/") and path.endswith(".js")

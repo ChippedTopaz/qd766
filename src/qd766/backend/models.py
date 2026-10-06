@@ -781,8 +781,9 @@ class GeminiAnalysis(Base):
     __tablename__ = "gemini_analyses"
     __table_args__ = (
         UniqueConstraint("account_id", "request_token", name="uq_gemini_analysis_token"),
-        CheckConstraint("state IN ('running', 'ready', 'failed')", name="ck_gemini_analysis_state"),
+        CheckConstraint("state IN ('queued', 'running', 'ready', 'failed', 'cancelled')", name="ck_gemini_analysis_state"),
         Index("ix_gemini_analysis_owner", "account_id", "created_at"),
+        Index("ix_gemini_analysis_queue", "state", "created_at", "id"),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"))
@@ -794,6 +795,15 @@ class GeminiAnalysis(Base):
     model: Mapped[str] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AnalysisQueueEntry(Base):
+    __tablename__ = "analysis_queue_entries"
+    analysis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("gemini_analyses.id", ondelete="RESTRICT"), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    worker_token: Mapped[uuid.UUID | None] = mapped_column(Uuid)
 
 
 class CollectionControl(Base):

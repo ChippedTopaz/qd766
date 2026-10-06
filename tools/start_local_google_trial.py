@@ -78,7 +78,7 @@ def main():
             require_login=True, invite_required=True, shared_registration_enabled=args.source_wallet, paid_requests_enabled=True, formality_credit_cost=5 if args.source_wallet else 3,
             trial_credits_enabled=True, trial_credit_management=True, local_google_trial=True,
             source_wallet_trial=args.source_wallet,
-            gemini_analysis_enabled=args.gemini_analysis,gemini_api_key=gemini.get("QD766_GEMINI_API_KEY",""),gemini_model=gemini.get("QD766_GEMINI_MODEL",""),
+            gemini_analysis_enabled=args.gemini_analysis,gemini_queue_enabled=args.gemini_analysis,gemini_api_key=gemini.get("QD766_GEMINI_API_KEY",""),gemini_model=gemini.get("QD766_GEMINI_MODEL",""),
             google_client_id=auth["QD766_GOOGLE_CLIENT_ID"], google_client_secret=auth["QD766_GOOGLE_CLIENT_SECRET"],
             google_redirect_uri="http://127.0.0.1:8771/api/v1/auth/google/callback")
         app = create_app(settings, web_root=ROOT / ".tmp-credit-trial" / "site")

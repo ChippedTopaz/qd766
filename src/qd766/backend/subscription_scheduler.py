@@ -61,6 +61,13 @@ async def local_credit_lifespan(app):
         validate_wallet_runtime(settings)
         await asyncio.to_thread(verify_real_wallet_schema, app.state.session_factory)
     stop = asyncio.Event()
+    analysis_tasks=[]
+    if getattr(settings,'gemini_queue_enabled',False):
+        from .analysis_queue import verify_schema,worker_loop
+        await asyncio.to_thread(verify_schema,app.state.engine)
+        analysis_tasks=[asyncio.create_task(worker_loop(app.state.session_factory,settings,stop),
+            name='analysis-queue-'+str(index)) for index in range(2)]
+        logger.info('ANALYSIS_QUEUE_ENABLED workers=2 waiting_limit=20 wait_minutes=10')
     app.state.credit_cycle_maintenance = {"state": "starting", "runs": 0}
     prefix = "REAL_CREDIT_CYCLES" if real else "LOCAL_CREDIT_CYCLES"
     task = asyncio.create_task(maintenance_loop(app.state.session_factory, stop,
@@ -71,3 +78,4 @@ async def local_credit_lifespan(app):
     finally:
         stop.set()
         await task
+        await asyncio.gather(*analysis_tasks)

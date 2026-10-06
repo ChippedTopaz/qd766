@@ -7,7 +7,7 @@ import { parameterLabels } from "./parameter-labels.js";
 import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
 import {renderPeerList} from './peer-list.js';
-import {renderPaidAnalysis,bindPaidAnalysis,clearPaidAnalysis} from './paid-analysis.js';
+import {renderPaidAnalysis,bindPaidAnalysis,clearPaidAnalysis,stopPaidAnalysisPolling} from './paid-analysis.js';
 import {latestPeriod} from './period-choice.js';
 import { CollectionTracker, type TrackedCollection } from "./collection-tracker.js";
 import { cleanLoginSearch } from "./login-url.js";
@@ -452,6 +452,7 @@ function unavailable(kind: DemoState): string {
 }
 
 function render(): void {
+  stopPaidAnalysisPolling();
   if(state.screen==="procedure")return shell(acquisitionPage());
   if (state.screen === "formulas") return shell(renderFormulaReference(selectedFormulaGroup));
   if (state.screen === "operations") return shell(operations());

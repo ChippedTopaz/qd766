@@ -26,6 +26,8 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
     resolved = settings or Settings.from_env()
     validate_auth_settings(resolved)
     validate_wallet_runtime(resolved)
+    if resolved.gemini_queue_enabled and not (resolved.gemini_analysis_enabled and resolved.source_wallet_enabled):
+        raise ValueError('Analysis queue requires explicitly enabled Gemini and source wallet')
     if resolved.shared_registration_enabled and not (resolved.require_login and resolved.invite_required and resolved.source_wallet_enabled):
         raise ValueError("Shared registration requires invite-only authentication and source wallet")
     if resolved.paid_requests_enabled and (not resolved.require_login or resolved.formality_credit_cost <= 0):
@@ -56,6 +58,7 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
                 "groupExcelExportEnabled": True,
                 "collectionMonitorEnabled": True,
                 **({"geminiAnalysisEnabled": True} if resolved.gemini_analysis_enabled else {}),
+                **({"geminiAnalysisQueueEnabled": True} if resolved.gemini_queue_enabled else {}),
                 "loginRequired": resolved.require_login,
                 "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": resolved.paid_requests_enabled,
                 "inviteRequired": resolved.invite_required,

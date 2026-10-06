@@ -55,6 +55,8 @@ def main():
             from qd766.backend.wallet_runtime import verify_real_wallet_schema
             verify_real_wallet_schema(app.state.session_factory,shared_registration=settings.shared_registration_enabled)
         if settings.gemini_analysis_enabled:
+            from qd766.backend.analysis_queue import verify_schema
+            if settings.gemini_queue_enabled:verify_schema(app.state.engine)
             from sqlalchemy import inspect
             from qd766.backend.models import GeminiAnalysis
             if not set(GeminiAnalysis.__table__.columns.keys()) <= {c['name'] for c in inspect(app.state.engine).get_columns('gemini_analyses')}:
@@ -66,7 +68,7 @@ def main():
     if args.check:
         app.state.engine.dispose()
         report("PUBLIC_CONFIG=PASS LOGIN_REQUIRED=True INVITE_REQUIRED=True ADMIN_ROLE_REQUIRED=True OPERATOR_API_BLOCKED=True "
-            f"PAID_REQUESTS={settings.paid_requests_enabled} REAL_WALLET={settings.real_wallet_enabled} REQUESTS_PAUSED={settings.wallet_requests_paused} SHARED_REGISTRATION={settings.shared_registration_enabled}")
+            f"PAID_REQUESTS={settings.paid_requests_enabled} REAL_WALLET={settings.real_wallet_enabled} REQUESTS_PAUSED={settings.wallet_requests_paused} SHARED_REGISTRATION={settings.shared_registration_enabled} GEMINI_ANALYSIS={settings.gemini_analysis_enabled} ANALYSIS_QUEUE={settings.gemini_queue_enabled}")
         report("Wallet schema/connectivity verified read-only." if settings.real_wallet_enabled else "Database connectivity NOT verified.")
         report("Real Google login and DVCQG collection are NOT verified by this check.")
         return 0

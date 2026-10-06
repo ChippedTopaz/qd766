@@ -7,10 +7,10 @@ from threading import BoundedSemaphore
 from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, func, or_, and_
 from sqlalchemy.orm import Session, selectinload
 from qd766.periods import PeriodSelection
-from .models import GeminiAnalysis, Snapshot, Dataset, Entity
+from .models import GeminiAnalysis, AnalysisQueueEntry, Snapshot, Dataset, Entity
 from .database import get_session
 from .user_collection import account_for, valid_period
 from .paid_requests import _locked_account
@@ -52,6 +52,7 @@ def recover_interrupted(db,account_id,now):
     # Same account lock used for admission/settlement. No provider retry or second charge.
     for row in db.scalars(select(GeminiAnalysis).where(GeminiAnalysis.account_id==account_id,
             GeminiAnalysis.state=="running",GeminiAnalysis.created_at<now-timedelta(minutes=5))):
+        if inspect(db.connection()).has_table('analysis_queue_entries') and db.get(AnalysisQueueEntry,row.id):continue
         finish(db,account_id,request_key="analysis:"+str(row.id),outcome="refund",now=now)
         row.state="failed";row.finished_at=now
 
@@ -87,12 +88,17 @@ def source_evidence(db,selection):
 
 def serialize(row,db):
     values=balance(db,row.account_id,now=datetime.now(timezone.utc))
+    position=db.scalar(select(func.count()).select_from(GeminiAnalysis).where(GeminiAnalysis.state=='queued',
+        or_(GeminiAnalysis.created_at<row.created_at,and_(GeminiAnalysis.created_at==row.created_at,GeminiAnalysis.id<=row.id)))) if row.state=='queued' else None
     return {"id":str(row.id),"requestToken":str(row.request_token),"state":row.state,"context":row.context,"createdAt":utc(row.created_at).isoformat(),
         "availableCredits":values["available"],"reservedCredits":values["reserved"],
-        "credits":COST if row.state=="ready" else 0,"heldCredits":COST if row.state=="running" else 0,
+        "credits":COST if row.state=="ready" else 0,"heldCredits":COST if row.state in {'queued','running'} else 0,
+        "queuePosition":position,"queueWaitMinutes":10,
         "result":row.result,"capturedAt":row.evidence["capturedAt"],"message":
-        "Phân tích thất bại. Credit đã được hoàn." if row.state=="failed" else
-        "Lượt phân tích đang xử lý. Nếu bị gián đoạn, kiểm tra lại sau năm phút để đối soát và hoàn Credit." if row.state=="running" else ""}
+        "Đang chờ phân tích. Credit được giữ, chưa ghi nhận thu." if row.state=='queued' else
+        "Đã hủy lượt phân tích. Credit đã được hoàn." if row.state=='cancelled' else
+        "Phân tích không hoàn tất hoặc hết thời gian chờ. Credit đã được hoàn." if row.state=="failed" else
+        "Lượt phân tích đang xử lý. Credit chỉ ghi nhận khi kết quả được lưu thành công." if row.state=="running" else ""}
 
 @router.get("/latest")
 def latest(request:Request,response:Response,db:Db,root_department_id:uuid.UUID,unit_id:uuid.UUID,
@@ -115,6 +121,8 @@ def analyze(selection:AnalysisConfirmation,request:Request,response:Response,db:
     response.headers["Cache-Control"]="no-store"
     account=account_for(request,db);authorize(account,selection)
     if not inspect(db.bind).has_table("gemini_analyses"):raise HTTPException(503,"Tính năng phân tích chưa được cài đặt.")
+    if request.app.state.settings.gemini_queue_enabled:
+        return enqueue(selection,request,response,db,account)
     _locked_account(db,account.id)
     recover_interrupted(db,account.id,datetime.now(timezone.utc))
     old=db.scalar(select(GeminiAnalysis).where(GeminiAnalysis.account_id==account.id,GeminiAnalysis.request_token==selection.token))
@@ -167,3 +175,63 @@ def analyze(selection:AnalysisConfirmation,request:Request,response:Response,db:
             # Leave durable running hold for safe reconciliation; never charge without saved result.
             raise HTTPException(503,"Chưa xác nhận được kết quả. Hãy xem lại lượt phân tích trước khi gửi mới.")
     finally:SLOTS.release()
+
+
+def enqueue(selection,request,response,db,account):
+    from .analysis_queue import admission_lock,check_capacity,recover_account,WAIT_MINUTES
+    settings=request.app.state.settings
+    if not inspect(db.bind).has_table('analysis_queue_entries'):
+        raise HTTPException(503,'Hàng chờ phân tích chưa được cài đặt. Chưa giữ Credit.')
+    with admission_lock(db):
+        _locked_account(db,account.id);now=datetime.now(timezone.utc)
+        recover_account(db,account.id,now)
+        old=db.scalar(select(GeminiAnalysis).where(GeminiAnalysis.account_id==account.id,GeminiAnalysis.request_token==selection.token))
+        if old:
+            if old.context!=context_of(selection):raise HTTPException(409,'Mã xác nhận không khớp lựa chọn.')
+            db.commit();response.status_code=202 if old.state in {'queued','running'} else 200
+            return serialize(old,db)
+        if not settings.gemini_analysis_enabled or not settings.gemini_api_key or not settings.gemini_model:
+            raise HTTPException(503,'Phân tích chưa được cấu hình. Chưa giữ Credit.')
+        if settings.wallet_requests_paused:raise HTTPException(503,'Tạm dừng yêu cầu sử dụng Credit mới.')
+        if not enabled(db,account.id):raise HTTPException(403,'Tài khoản chưa được kích hoạt ví Credit.')
+        if not active_subscription(db,account.id,now=now):raise HTTPException(403,'Subscription đã hết hạn.')
+        if db.scalar(select(GeminiAnalysis.id).where(GeminiAnalysis.account_id==account.id,GeminiAnalysis.state.in_(['queued','running']))):
+            raise HTTPException(409,'Tài khoản đang có một lượt chờ hoặc đang phân tích.')
+        check_capacity(db)
+        if balance(db,account.id,now=now)['available']<COST:raise HTTPException(402,'Tài khoản của bạn không đủ Credit để phân tích (20 Credit).')
+        evidence=source_evidence(db,selection)
+        if not evidence['findings']:raise HTTPException(409,'Chưa đủ dữ liệu để phân tích. Chưa giữ Credit.')
+        row=GeminiAnalysis(id=uuid.uuid4(),account_id=account.id,request_token=selection.token,
+            context=context_of(selection),evidence=evidence,model=settings.gemini_model,created_at=now,state='queued')
+        db.add(row);db.flush()
+        db.add(AnalysisQueueEntry(analysis_id=row.id,expires_at=now+timedelta(minutes=WAIT_MINUTES)))
+        try:reserve(db,account.id,COST,request_key='analysis:'+str(row.id),now=now);db.commit()
+        except WalletError as error:db.rollback();raise HTTPException(402,'Không đủ Credit để phân tích.') from error
+        response.status_code=202
+        return serialize(row,db)
+
+
+@router.get('/{analysis_id}/status')
+def status(analysis_id:uuid.UUID,request:Request,response:Response,db:Db):
+    response.headers['Cache-Control']='no-store'
+    account=account_for(request,db)
+    row=db.scalar(select(GeminiAnalysis).where(GeminiAnalysis.id==analysis_id,GeminiAnalysis.account_id==account.id))
+    if row is None:raise HTTPException(404,'Không tìm thấy lượt phân tích.')
+    authorize(account,AnalysisSelection(**row.context))
+    return serialize(row,db)
+
+
+@router.post('/cancel')
+def cancel(selection:AnalysisConfirmation,request:Request,response:Response,db:Db):
+    response.headers['Cache-Control']='no-store'
+    account=account_for(request,db);authorize(account,selection)
+    _locked_account(db,account.id)
+    row=db.scalar(select(GeminiAnalysis).where(GeminiAnalysis.account_id==account.id,GeminiAnalysis.request_token==selection.token))
+    if row is None:raise HTTPException(404,'Không tìm thấy lượt phân tích.')
+    if row.context!=context_of(selection):raise HTTPException(409,'Lựa chọn không khớp lượt phân tích.')
+    if row.state=='queued':
+        now=datetime.now(timezone.utc)
+        finish(db,account.id,request_key='analysis:'+str(row.id),outcome='refund',now=now)
+        row.state='cancelled';row.finished_at=now;db.commit()
+    elif row.state=='running':raise HTTPException(409,'Lượt phân tích đã bắt đầu; không thể hủy khi đang xử lý.')
+    return serialize(row,db)

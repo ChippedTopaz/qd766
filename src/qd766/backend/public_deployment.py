@@ -79,5 +79,5 @@ def public_settings(office: dict[str, str], public: dict[str, str], *, real_wall
             formality_credit_cost=5,shared_registration_enabled=shared_registration)
         validate_wallet_runtime(settings)
     if gemini_analysis:
-        settings=replace(settings,gemini_analysis_enabled=True,gemini_api_key=gemini["QD766_GEMINI_API_KEY"],gemini_model=gemini["QD766_GEMINI_MODEL"])
+        settings=replace(settings,gemini_analysis_enabled=True,gemini_queue_enabled=not settings.wallet_requests_paused,gemini_api_key=gemini["QD766_GEMINI_API_KEY"],gemini_model=gemini["QD766_GEMINI_MODEL"])
     return settings

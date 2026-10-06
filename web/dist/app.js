@@ -7,7 +7,7 @@ import { parameterLabels } from "./parameter-labels.js";
 import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
 import { renderPeerList } from './peer-list.js';
-import { renderPaidAnalysis, bindPaidAnalysis, clearPaidAnalysis } from './paid-analysis.js';
+import { renderPaidAnalysis, bindPaidAnalysis, clearPaidAnalysis, stopPaidAnalysisPolling } from './paid-analysis.js';
 import { latestPeriod } from './period-choice.js';
 import { CollectionTracker } from "./collection-tracker.js";
 import { cleanLoginSearch } from "./login-url.js";
@@ -542,6 +542,7 @@ function unavailable(kind) {
     return `${title("Chưa đủ dữ liệu lịch sử", "Hệ thống chưa có chuỗi kỳ đồng nhất để so sánh.")}<div class="empty-state"><h2>Cần tối thiểu hai kỳ cùng loại</h2><p>Hiện có Tháng 8/2026, Quý III/2026 và Năm 2026. Ba kỳ này khác độ dài nên không được ghép thành một xu hướng.</p><button class="btn" data-state="normal">Quay lại báo cáo</button></div>`;
 }
 function render() {
+    stopPaidAnalysisPolling();
     if (state.screen === "procedure")
         return shell(acquisitionPage());
     if (state.screen === "formulas")
