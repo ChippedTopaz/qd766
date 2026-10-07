@@ -154,11 +154,12 @@ def admin_question(q):
         'state':q.state,'locked':q.locked,'revision':q.revision}
 
 @router.get('/api/v1/admin/trivia')
-def bank(request:Request,q:str=Query('',max_length=200),offset:int=Query(0,ge=0),limit:int=Query(100,ge=1,le=100)):
+def bank(request:Request,q:str=Query('',max_length=200),offset:int=Query(0,ge=0),limit:int=Query(10,ge=1,le=100),state:Literal['draft','published','retired']|None=None):
     with request.app.state.session_factory() as db:
         administrator(request,db)
         if not ready(db):return {'available':False,'questions':[],'total':0}
         predicate=TriviaQuestion.prompt.icontains(q.strip().casefold(),autoescape=True)
+        if state is not None:predicate=predicate & (TriviaQuestion.state==state)
         counts=select(TriviaAnswer.question_id,func.count().label('attempts'),
             func.count(func.distinct(TriviaAnswer.account_id)).label('users')).where(TriviaAnswer.correct.is_(True)).group_by(TriviaAnswer.question_id).subquery()
         rows=db.execute(select(TriviaQuestion,counts.c.attempts,counts.c.users).outerjoin(counts,counts.c.question_id==TriviaQuestion.id)
@@ -193,8 +194,12 @@ def save_question(payload,request,question_id=None):
             if payload.revision!=q.revision:raise HTTPException(409,'Câu hỏi đã được sửa ở nơi khác. Hãy tải lại.')
             if q.locked and (q.prompt!=payload.prompt or q.choices!=payload.choices or q.correct_index!=payload.correctIndex or q.explanation!=payload.explanation):
                 raise HTTPException(409,'Câu hỏi đã công khai được khóa nội dung. Hãy tạo câu hỏi mới.')
+            if not q.locked and len(payload.choices)>3:
+                raise HTTPException(422,'Câu hỏi chỉ được có 2–3 đáp án A–C.')
             q.revision+=1
-        else:q=TriviaQuestion();db.add(q)
+        else:
+            if len(payload.choices)>3:raise HTTPException(422,'Câu hỏi chỉ được có 2–3 đáp án A–C.')
+            q=TriviaQuestion();db.add(q)
         q.prompt=payload.prompt;q.choices=payload.choices;q.correct_index=payload.correctIndex
         q.explanation=payload.explanation;q.state=payload.state
         q.locked=bool(q.locked) or payload.state=='published'
@@ -243,6 +248,25 @@ async def import_questions(request:Request):
 
 @router.post('/api/v1/admin/trivia/{question_id}')
 def update_question(question_id:uuid.UUID,payload:QuestionInput,request:Request):return save_question(payload,request,question_id)
+
+class PublishQuestionInput(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    revision:int=Field(ge=1,strict=True)
+
+@router.post('/api/v1/admin/trivia/{question_id}/publish')
+def publish_question(question_id:uuid.UUID,payload:PublishQuestionInput,request:Request):
+    with request.app.state.session_factory.begin() as db:
+        actor=administrator(request,db,write=True)
+        trivia_gate(db)
+        if not ready(db):raise HTTPException(503,'Hỏi - đáp nhanh chưa được kích hoạt.')
+        q=db.scalar(select(TriviaQuestion).where(TriviaQuestion.id==question_id).with_for_update())
+        if q is None:raise HTTPException(404,'Không tìm thấy câu hỏi.')
+        if q.revision!=payload.revision:raise HTTPException(409,'Câu hỏi đã thay đổi. Hãy tải lại trước khi duyệt.')
+        if q.state!='draft':raise HTTPException(409,'Chỉ duyệt công khai câu đang là Nháp.')
+        if len(q.choices)>3:raise HTTPException(422,'Hãy sửa bản nháp còn tối đa 3 đáp án trước khi duyệt.')
+        q.state='published';q.locked=True;q.revision+=1
+        db.flush();audit(db,actor,'trivia_question_published',questionId=str(q.id),revision=q.revision)
+        return admin_question(q)
 
 class DeleteQuestionInput(BaseModel):
     model_config=ConfigDict(extra='forbid')

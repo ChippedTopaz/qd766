@@ -7,7 +7,8 @@ import unicodedata
 import zipfile
 from xml.etree import ElementTree as ET
 
-HEADERS=['Câu hỏi','Đáp án A','Đáp án B','Đáp án C','Đáp án D','Đáp án E','Đáp án F','Đáp án đúng','Giải thích']
+HEADERS=['Câu hỏi','Đáp án A','Đáp án B','Đáp án C','Đáp án đúng','Giải thích']
+LEGACY_HEADERS=['Câu hỏi','Đáp án A','Đáp án B','Đáp án C','Đáp án D','Đáp án E','Đáp án F','Đáp án đúng','Giải thích']
 NS={'s':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 MAX_FILE=2*1024*1024
 
@@ -67,19 +68,26 @@ def read_questions(encoded,validate):
                     else:cells[ord(col)-65]=value.strip()
                 rows.append((number,cells))
             if len(rows)>501 or len({n for n,_ in rows})!=len(rows):raise ValueError('Số dòng hoặc dòng lặp không hợp lệ.')
-            if next((cells for n,cells in rows if n==1),None)!=HEADERS:raise ValueError('Tên và thứ tự cột không đúng file mẫu.')
+            header=next((cells for n,cells in rows if n==1),None)
+            legacy=header==LEGACY_HEADERS
+            if not legacy and header!=HEADERS+['']*3:raise ValueError('Tên và thứ tự cột không đúng file mẫu.')
             questions=[]
             for number,cells in rows:
                 if number==1 or not any(cells):continue
                 try:
-                    choices=cells[1:7]
+                    if legacy:
+                        if any(cells[4:7]):raise ValueError('Chỉ hỗ trợ A–C.')
+                        answer=cells[7].upper();explanation=cells[8]
+                    else:
+                        if any(cells[6:]):raise ValueError('Dữ liệu ngoài mẫu 6 cột.')
+                        answer=cells[4].upper();explanation=cells[5]
+                    choices=cells[1:4]
                     while choices and not choices[-1]:choices.pop()
-                    answer=cells[7].upper()
-                    if answer not in 'ABCDEF' or len(answer)!=1:raise ValueError('Đáp án đúng phải là A, B, C, D, E hoặc F.')
-                    q=validate(prompt=cells[0],choices=choices,correctIndex=ord(answer)-65,explanation=cells[8])
+                    if answer not in 'ABC' or len(answer)!=1:raise ValueError('Đáp án đúng phải là A, B hoặc C.')
+                    q=validate(prompt=cells[0],choices=choices,correctIndex=ord(answer)-65,explanation=explanation)
                     questions.append((number,q))
                 except ValueError:
-                    errors.append({'row':number,'message':'Kiểm tra câu hỏi (5–1000 ký tự), 2–6 đáp án liên tục (mỗi đáp án tối đa 400 ký tự, không trùng), đáp án đúng A–F và giải thích tối đa 2000 ký tự.'})
+                    errors.append({'row':number,'message':'Kiểm tra câu hỏi (5–1000 ký tự), 2–3 đáp án A–C liên tục (mỗi đáp án tối đa 400 ký tự, không trùng), đáp án đúng A–C và giải thích tối đa 2000 ký tự. File cũ phải để trống D, E, F.'})
             if not questions and not errors:raise ValueError('File chưa có câu hỏi.')
             return questions,errors
     except (zipfile.BadZipFile,KeyError,IndexError,ET.ParseError,UnicodeError,OverflowError,RuntimeError,NotImplementedError):

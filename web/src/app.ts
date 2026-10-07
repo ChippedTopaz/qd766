@@ -28,6 +28,7 @@ import {type DailyHistory} from './daily-history.js';
 import {annualDailyComparison} from './annual-daily-comparison.js';
 import {onlineIndicators} from './online-indicators.js';
 import {RecentDashboard} from './recent-dashboard.js';
+import {lastAdminProvince,rememberAdminProvince,clearAdminProvince} from './admin-province-preference.js';
 import type { AppData, Entity, GroupId, Scope, ScreenId, Snapshot, Suggestion, UnitGroupView, UnitView } from "./types.js";
 import type TomSelectControl from "tom-select";
 
@@ -55,7 +56,7 @@ let loginRequired=false;
 let googleLoginEnabled=false;
 let localSimulation=false;
 let localGoogleTrial=false;
-let signedInUser:{name:string;email?:string;provinceId:string|null;csrfToken:string;credits:number;reservedCredits?:number;canCollect?:boolean;role?:string;accessTier?:string;unitId?:string|null}|null=null;
+let signedInUser:{id?:string;name:string;email?:string;provinceId:string|null;csrfToken:string;credits:number;reservedCredits?:number;canCollect?:boolean;role?:string;accessTier?:string;unitId?:string|null}|null=null;
 const agencyRestricted = () => signedInUser?.accessTier === "agency" && signedInUser.role !== "admin";
 const canSelectUnit = (id:string) => (!agencyRestricted() || id === signedInUser?.unitId) && data.units.some(item=>item.departmentId===id);
 let data: AppData;
@@ -371,7 +372,7 @@ function nav(): string {
   return html.replace("</nav>",collection+admin+"</nav>").replace(/<div class="side-meta">[\s\S]*?<\/div><\/div><\/aside>$/,signedInUser?account+"</aside>":'$&');
 }
 function baseNav(): string {
-return `<aside class="sidebar"><div class="brand"><span class="brand-mark"><img class="cchc-logo" src="/assets/logo-cchc.png" alt="Cải cách hành chính" width="40" height="40"></span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item=>!publicReadOnly||!["procedure","operations","suggestions"].includes(item.id)).map((item)=>`<button data-nav="${item.id}" class="${state.screen===item.id?"active":""}" aria-current="${state.screen===item.id?"page":"false"}"><span class="nav-icon" aria-hidden="true">${icon(({overview:"shield",time:"chart",peers:"monitor",procedure:"document",suggestions:"star",quality:"shield",operations:"clock",formulas:"document"})[item.id])}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
+return `<aside class="sidebar"><div class="brand"><span class="brand-mark"><img class="cchc-logo" src="/assets/logo-cchc.png" alt="Cải cách hành chính" width="40" height="40"></span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item=>(item.id!=="quality"||signedInUser?.role==="admin")&&(!publicReadOnly||!["procedure","operations","suggestions"].includes(item.id))).map((item)=>`<button data-nav="${item.id}" class="${state.screen===item.id?"active":""}" aria-current="${state.screen===item.id?"page":"false"}"><span class="nav-icon" aria-hidden="true">${icon(({overview:"shield",time:"chart",peers:"monitor",procedure:"document",suggestions:"star",quality:"shield",operations:"clock",formulas:"document"})[item.id])}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
 }
 
 function context(): string {
@@ -384,7 +385,7 @@ function context(): string {
   const canSubmit=!publicReadOnly&&!submittingCollection&&!collectionTracker.hasActive(selectionKey())&&state.scope==="formality"&&["ready","normal"].includes(state.demo)&&(catalogPreview.mode==="filtered"?catalogPreview.selected>0:Boolean(catalogPreview.selectedId));
   const selectedProvinceId=pendingProvinceId||data.province.id;
   const provinceItems=(provinceOptions.length?provinceOptions:[{id:data.province.id,name:data.province.name,departmentCode:null,provinceCode:data.province.code??null,snapshotCount:0,latestSnapshotAt:null,available:true}]).slice().sort((left,right)=>alphabet.compare(displayProvinceName(left.name),displayProvinceName(right.name))).map(item=>`<option value="${esc(item.id)}" ${item.id===selectedProvinceId?"selected":""}>${esc(displayProvinceName(item.name))}${item.available?"":" · chưa có dữ liệu"}</option>`).join("");
-return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type==="month"?"selected":""}>Tháng</option><option value="quarter" ${selectedPeriod.type==="quarter"?"selected":""}>Quý</option><option value="year" ${selectedPeriod.type==="year"?"selected":""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item=>`<option value="${item.id}" ${item.id===state.periodId?"selected":""}>${item.type==="month"?`Tháng ${item.value}`:item.type==="quarter"?`Quý ${item.value}`:"Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year=>`<option value="${year}" ${year===selectedPeriod.year?"selected":""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope==="all"?"selected":""}>Tất cả thủ tục hành chính</option>${!canAcquire()?"":`<option value="formality" ${state.scope==="formality"?"selected":""}>Theo thủ tục hành chính</option>`}</select></label></div><div class="context-bottom">${state.scope==="formality"&&state.screen!=="procedure"?`<label class="field saved-formality"><span>Thủ tục đã khai thác</span><select id="saved-formality"><option value="">${libraryLoading?"Đang đọc danh sách…":"Chọn thủ tục đã khai thác"}</option>${library.map(item=>`<option value="${esc(item.id)}" ${item.id===data.formality.id?"selected":""}>${esc(item.code+" · "+item.name)}</option>`).join("")}</select></label>`:""}<div class="context-actions">${!signedInUser&&googleLoginEnabled?`<a class="btn" href="/api/v1/auth/google/start">Đăng nhập Google</a>`:""}${canAcquire()?`<button class="btn" data-action="new-collection">+ Tra cứu TTHC khác</button>`:""}${collectionNotices()}<button class="btn" data-action="open-quality">${data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]?.delivery?.detailsAvailable===false?"● Chỉ có điểm tổng hợp":"● Chất lượng dữ liệu"}</button><button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></div></header>`;
+return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type==="month"?"selected":""}>Tháng</option><option value="quarter" ${selectedPeriod.type==="quarter"?"selected":""}>Quý</option><option value="year" ${selectedPeriod.type==="year"?"selected":""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item=>`<option value="${item.id}" ${item.id===state.periodId?"selected":""}>${item.type==="month"?`Tháng ${item.value}`:item.type==="quarter"?`Quý ${item.value}`:"Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year=>`<option value="${year}" ${year===selectedPeriod.year?"selected":""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope==="all"?"selected":""}>Tất cả thủ tục hành chính</option>${!canAcquire()?"":`<option value="formality" ${state.scope==="formality"?"selected":""}>Theo thủ tục hành chính</option>`}</select></label></div><div class="context-bottom">${state.scope==="formality"&&state.screen!=="procedure"?`<label class="field saved-formality"><span>Thủ tục đã khai thác</span><select id="saved-formality"><option value="">${libraryLoading?"Đang đọc danh sách…":"Chọn thủ tục đã khai thác"}</option>${library.map(item=>`<option value="${esc(item.id)}" ${item.id===data.formality.id?"selected":""}>${esc(item.code+" · "+item.name)}</option>`).join("")}</select></label>`:""}<div class="context-actions">${!signedInUser&&googleLoginEnabled?`<a class="btn" href="/api/v1/auth/google/start">Đăng nhập Google</a>`:""}${canAcquire()?`<button class="btn" data-action="new-collection">+ Tra cứu TTHC khác</button>`:""}${collectionNotices()}${signedInUser?.role==="admin"?`<button class="btn" data-action="open-quality">${data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]?.delivery?.detailsAvailable===false?"● Chỉ có điểm tổng hợp":"● Chất lượng dữ liệu"}</button>`:""}<button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></div></header>`;
 }
 
 function shell(content: string): void {
@@ -993,7 +994,7 @@ function bind(): void {
     const response=await fetch("/api/v1/auth/logout",{method:"POST",headers:{"X-QD766-CSRF":signedInUser.csrfToken}});
     if(response.ok)window.location.assign("/");else window.alert("Chưa đăng xuất được. Vui lòng thử lại.");
   });
-  document.querySelectorAll<HTMLElement>("[data-nav]").forEach(el=>el.addEventListener("click",()=>{const destination=el.dataset.nav as ScreenId;state.screen=destination;if(destination==="overview")overviewTab="overview";if(destination==="procedure"){void openAcquisition();return;}if(destination==="formulas"){render()}else if(destination==="operations"){state.demo="normal";render();void loadOperations()}else if(data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]){state.demo="normal";render()}else if(state.scope==="formality"&&!catalogPreview.selectedId){state.demo="ready";render();void loadCatalogPreview()}else{void loadSelection()}scrollTo(0,0)}));
+  document.querySelectorAll<HTMLElement>("[data-nav]").forEach(el=>el.addEventListener("click",()=>{const destination=el.dataset.nav as ScreenId;if(destination==="quality"&&signedInUser?.role!=="admin")return;state.screen=destination;if(destination==="overview")overviewTab="overview";if(destination==="procedure"){void openAcquisition();return;}if(destination==="formulas"){render()}else if(destination==="operations"){state.demo="normal";render();void loadOperations()}else if(data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]){state.demo="normal";render()}else if(state.scope==="formality"&&!catalogPreview.selectedId){state.demo="ready";render();void loadCatalogPreview()}else{void loadSelection()}scrollTo(0,0)}));
   document.querySelectorAll<HTMLElement>("[data-state]").forEach(el=>el.addEventListener("click",()=>{state.demo=el.dataset.state as DemoState;render()}));
   document.querySelectorAll<HTMLElement>("[data-agency-level]").forEach(el=>el.addEventListener("click",()=>{agencyLevel=el.dataset.agencyLevel as AgencyLevel;state.search="";render()}));
   document.querySelectorAll<HTMLElement>("[data-peer-unit]").forEach(el=>el.addEventListener("click",()=>{
@@ -1033,7 +1034,7 @@ function bind(): void {
   }));
   document.querySelector<HTMLElement>("[data-action=close-modal]")?.addEventListener("click",()=>{state.modal="none";render()});
   document.querySelector<HTMLElement>("[data-action=print]")?.addEventListener("click",()=>window.print());
-  document.querySelector<HTMLElement>("[data-action=open-quality]")?.addEventListener("click",()=>{state.screen="quality";render()});
+  document.querySelector<HTMLElement>("[data-action=open-quality]")?.addEventListener("click",()=>{if(signedInUser?.role!=="admin")return;state.screen="quality";render()});
   document.querySelector<HTMLElement>("[data-action=retry-selection]")?.addEventListener("click",()=>{if(pendingProvinceId)void switchProvince(pendingProvinceId);else void loadSelection()});
   document.querySelectorAll<HTMLElement>("[data-action=submit-statistics]").forEach(el=>el.addEventListener("click",()=>{void prepareCollection()}));
   document.querySelector<HTMLElement>("[data-action=dismiss-completion]")?.addEventListener("click",()=>{completionMessage="";render()});
@@ -1237,6 +1238,7 @@ async function openProvince(rootDepartmentId:string,requestId:number):Promise<vo
   const initialPeriod=initialPeriodFor(loaded);
   if(!initialPeriod)throw new Error("Tỉnh/thành phố chưa có kỳ báo cáo hoàn chỉnh");
   data=loaded;
+  rememberAdminProvince(signedInUser,data.province.id);
   creditQuote=null;confirmationToken="";myRequests=[];
   pendingProvinceId="";
   document.title="Hệ thống phân tích Bộ chỉ số 766";
@@ -1325,9 +1327,15 @@ async function start(): Promise<void> {
     }
     startPresence();
     const remembered=typeof location!=="undefined"?new URLSearchParams(location.search):new URLSearchParams();
-    const rememberedProvince=remembered.get("province");
+    const explicitProvince=remembered.get("province");
+    const rememberedProvince=explicitProvince||lastAdminProvince(signedInUser);
     const dashboardUrl=rememberedProvince?`/api/v1/dashboard?fast=true&compact=true&root_department_id=${encodeURIComponent(rememberedProvince)}`:"/api/v1/dashboard?fast=true&compact=true";
-    const [apiResponse,provincesResponse]=await Promise.all([fetch(dashboardUrl),fetch("/api/v1/dashboard/provinces")]);
+    let [apiResponse,provincesResponse]=await Promise.all([fetch(dashboardUrl),fetch("/api/v1/dashboard/provinces")]);
+    // Only a stale local preference can fall back. Never override an explicit link or an auth error.
+    if(rememberedProvince&&!explicitProvince&&[403,404,422].includes(apiResponse.status)){
+      clearAdminProvince(signedInUser);
+      apiResponse=await fetch("/api/v1/dashboard?fast=true&compact=true");
+    }
     if(provincesResponse.ok)provinceOptions=await provincesResponse.json() as ProvinceOption[];
     if(apiResponse.ok){
       data=normalizeLoadedData(await apiResponse.json() as AppData);
@@ -1348,6 +1356,7 @@ async function start(): Promise<void> {
     if(data.snapshots[snapshotKey(state.periodId,"all","")]?.detailsLoaded===false)await loadSelection();
     document.title="Hệ thống phân tích Bộ chỉ số 766";
     render();
+    rememberAdminProvince(signedInUser,data.province.id);
     if(paidRequestsEnabled||canAcquire()){
       await loadLibrary();
       if(remembered.get("scope")==="formality"){

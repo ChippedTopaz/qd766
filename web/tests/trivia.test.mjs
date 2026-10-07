@@ -31,7 +31,7 @@ handlers['choice:0']();await handlers['[data-trivia-submit]']();await settle();
 assert.match(html,/Tiếp sau 15 giây/);const afterAnswer=calls.length;
 clock+=14000;tick();await settle();assert.equal(calls.length,afterAnswer,'wait the full 15 seconds');
 bindTrivia('csrf');clock+=1000;tick();tick();await settle();assert.equal(calls.length,afterAnswer+1,'one GET, no duplicate or re-scoring');assert.equal(calls.at(-1).options.method,undefined);assert.match(html,/Gửi đáp án/);
-correct=false;handlers['choice:1']();await handlers['[data-trivia-submit]']();await settle();assert.match(html,/Chưa đúng/);
+correct=false;handlers['choice:1']();await handlers['[data-trivia-submit]']();await settle();assert.match(html,/Chưa đúng\. Đáp án &lt;script&gt;/);assert(!html.includes('Chuỗi đúng đã về 0'));
 const afterWrong=calls.length;globalThis.document.hidden=true;clock+=16000;tick();await settle();assert.equal(calls.length,afterWrong,'no background assignment while tab hidden');
 globalThis.document.hidden=false;visibility();await settle();assert.equal(calls.length,afterWrong+1,'resume advances overdue result');
 handlers['choice:0']();await handlers['[data-trivia-submit]']();await settle();clock+=15000;failNext=true;tick();await settle();const failedCalls=calls.length;

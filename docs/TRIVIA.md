@@ -19,21 +19,28 @@ ngẫu nhiên câu chưa làm trong lượt, không lặp; không xáo đáp án
 lý hạn cũ rồi giao câu tiếp. Không tải lại dashboard mỗi giây: chỉ cập nhật đồng hồ
 trong khung Trivia; gọi API lúc chuyển câu, gửi đáp án hoặc làm lại.
 
-Quản trị > Ngân hàng Hỏi - đáp nhanh: nhập câu hỏi, 2–6 đáp án, một đáp án đúng,
+Quản trị > Ngân hàng Hỏi - đáp nhanh: nhập câu hỏi, 2–3 đáp án A–C, một đáp án đúng,
 giải thích tùy chọn, trạng thái Nháp/Công khai/Thu hồi. Sau công khai, khóa nội dung
 để không thay đổi đáp án của người đã trả lời. Có thể thu hồi hoặc tạo câu mới.
 Ngân hàng tải khi mở menu, không chặn tải dashboard; Trivia không polling nền.
+Tạo mới/Mở dùng hộp thoại; lưu thành công đóng hộp, lỗi giữ nguyên nội dung.
+Lỗi xác thực/tải ngân hàng không được báo nhầm là thiếu schema.
 Menu sidebar tên Hỏi đáp nhanh. Danh mục có STT theo trang/kết quả tìm kiếm, tìm
-theo nội dung câu hỏi và phân trang 100 dòng. Lượt đúng cộng tất cả các lượt chơi,
+theo nội dung câu hỏi, lọc Công khai/Nháp/Thu hồi và phân trang 10 câu. Câu Nháp
+có nút Duyệt công khai, lưu và khóa nội dung ngay trong một giao dịch có kiểm tra
+revision/CSRF/quyền quản trị. Câu cũ đã công khai giữ nguyên nội dung/lịch sử.
+Lượt đúng cộng tất cả các lượt chơi,
 người đúng đếm tài khoản duy nhất; mở danh sách để xem tên, email, số lượt đúng và
-lần đúng gần nhất. Dữ liệu danh sách chỉ trả qua API quản trị đã xác thực, không
-đưa vào API câu hỏi/điểm của người chơi. Đồng hồ nằm bên phải cùng hàng tiêu đề.
+lần đúng gần nhất. Danh sách người trả lời đúng giữ 100 người/trang.
+Dữ liệu danh sách chỉ trả qua API quản trị đã xác thực, không đưa vào API
+câu hỏi/điểm của người chơi. Đồng hồ nằm bên phải cùng hàng tiêu đề.
 
 ## Nhập Excel
 
 Quản trị > Hỏi đáp nhanh > Nhập câu hỏi từ Excel: tải file mẫu, điền sheet
-`CauHoi`, giữ dòng tiêu đề 9 cột: Câu hỏi, Đáp án A–F, Đáp án đúng, Giải thích.
-Xóa/thay câu ví dụ ở dòng 2. Đáp án đúng ghi một chữ A–F; ít nhất hai đáp án,
+`CauHoi`, giữ dòng tiêu đề 6 cột: Câu hỏi, Đáp án A–C, Đáp án đúng, Giải thích.
+File mẫu cũ 9 cột vẫn được nhận nếu D, E, F để trống.
+Xóa/thay câu ví dụ ở dòng 2. Đáp án đúng ghi một chữ A–C; ít nhất hai đáp án,
 không bỏ trống ở giữa. Tối đa 500 câu, file .xlsx tối đa 2 MB.
 
 Bấm Kiểm tra file để xem trước, lỗi theo dòng và các câu trùng. Có lỗi thì không

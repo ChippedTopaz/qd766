@@ -8,8 +8,8 @@ export function importReport(report) {
 export function installTriviaImport(section, api, onSaved) {
     const panel = document.createElement('details');
     panel.className = 'trivia-import';
-    panel.innerHTML = `<summary>Nhập câu hỏi từ Excel</summary><p>Tải file mẫu, điền sheet <strong>CauHoi</strong>. Mỗi dòng là một câu hỏi, đáp án đúng ghi A–F. Tối đa 500 câu/file, 2 MB. Câu trùng được bỏ qua; câu mới lưu Nháp.</p><div class="actions"><a class="trivia-template" href="/assets/trivia-question-template.xlsx" download="Mau-cau-hoi-766.xlsx">Tải Excel mẫu</a><label>Chọn file .xlsx<input data-trivia-import-file type="file" accept=".xlsx"></label><button type="button" data-trivia-import-check>Kiểm tra file</button><button type="button" class="primary" data-trivia-import-save disabled>Lưu câu hỏi mới</button></div><p data-trivia-import-status role="status"></p><div data-trivia-import-report></div>`;
-    section.querySelector('form').before(panel);
+    panel.innerHTML = `<summary>Nhập câu hỏi từ Excel</summary><p>Điền sheet <strong>CauHoi</strong>, mỗi dòng một câu, 2–3 đáp án A–C. Tối đa 500 câu/file, 2 MB. Câu trùng bỏ qua; câu mới lưu Nháp. File mẫu cũ cần để trống D, E, F.</p><div class="actions"><a class="trivia-template" href="/assets/trivia-question-template.xlsx" download="Mau-cau-hoi-766.xlsx">Tải Excel mẫu</a><label>Chọn file .xlsx<input data-trivia-import-file type="file" accept=".xlsx"></label><button type="button" data-trivia-import-check>Kiểm tra file</button><button type="button" class="primary" data-trivia-import-save disabled>Lưu câu hỏi mới</button></div><p data-trivia-import-status role="status"></p><div data-trivia-import-report></div>`;
+    section.querySelector('.trivia-bank-filters').before(panel);
     const file = panel.querySelector('[data-trivia-import-file]'), check = panel.querySelector('[data-trivia-import-check]'), save = panel.querySelector('[data-trivia-import-save]');
     const status = panel.querySelector('[data-trivia-import-status]'), preview = panel.querySelector('[data-trivia-import-report]');
     let encoded = '', busy = false;

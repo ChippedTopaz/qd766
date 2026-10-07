@@ -105,6 +105,50 @@ class TriviaTests(unittest.TestCase):
         self.assertEqual(self.client.post(url,json=payload,headers=self.headers).status_code,200)
         self.login('agency');self.assertEqual(self.answer(q).status_code,409);self.assertIsNone(self.current()['question'])
 
+    def test_bank_ten_per_page_and_state_filter_with_search(self):
+        for i in range(12):self.create(prompt=f'Câu hỏi phân trang kiểm tra số {i}?',state='draft')
+        self.create(prompt='Câu hỏi đã công khai?')
+        self.create(prompt='Câu hỏi đã thu hồi?',state='retired')
+        first=self.client.get('/api/v1/admin/trivia?state=draft').json()
+        self.assertEqual(first['total'],12);self.assertEqual(len(first['questions']),10)
+        second=self.client.get('/api/v1/admin/trivia?state=draft&offset=10&limit=10').json()
+        self.assertEqual(len(second['questions']),2)
+        self.assertTrue(set(q['id'] for q in first['questions']).isdisjoint(q['id'] for q in second['questions']))
+        for state in ('published','retired'):
+            result=self.client.get('/api/v1/admin/trivia?state='+state).json()
+            self.assertEqual(result['total'],1);self.assertEqual(result['questions'][0]['state'],state)
+        self.assertEqual(self.client.get('/api/v1/admin/trivia?state=draft&q=thu%20h%E1%BB%93i').json()['total'],0)
+        self.assertEqual(self.client.get('/api/v1/admin/trivia?state=invalid').status_code,422)
+
+    def test_quick_publish_requires_admin_csrf_revision_and_draft(self):
+        q=self.create(state='draft');url=f"/api/v1/admin/trivia/{q['id']}/publish"
+        payload={'revision':q['revision']}
+        self.assertEqual(self.client.post(url,json=payload).status_code,403)
+        self.login('agency');self.assertEqual(self.client.post(url,json=payload,headers=self.headers).status_code,403)
+        self.login('owner')
+        self.assertEqual(self.client.post(url,json={'revision':q['revision']+1},headers=self.headers).status_code,409)
+        response=self.client.post(url,json=payload,headers=self.headers);self.assertEqual(response.status_code,200,response.text)
+        published=response.json();self.assertEqual(published['state'],'published');self.assertTrue(published['locked'])
+        self.assertEqual(published['choices'],q['choices']);self.assertEqual(published['revision'],q['revision']+1)
+        self.assertEqual(self.client.post(url,json=payload,headers=self.headers).status_code,409)
+        self.assertEqual(self.client.post(url,json={'revision':published['revision']},headers=self.headers).status_code,409)
+        self.login('agency');self.assertEqual(self.current()['question']['id'],q['id'])
+        with self.app.state.session_factory() as db:self.assertEqual(db.get(UserAccount,self.ids['agency']).credit_balance,123)
+
+    def test_max_three_new_choices_preserves_locked_legacy(self):
+        payload=dict(prompt='Câu hỏi có bốn đáp án?',choices=['Một','Hai','Ba','Bốn'],correctIndex=3,state='draft')
+        self.assertEqual(self.client.post('/api/v1/admin/trivia',json=payload,headers=self.headers).status_code,422)
+        q=self.create()
+        with self.app.state.session_factory.begin() as db:
+            legacy=db.get(TriviaQuestion,uuid.UUID(q['id']));legacy.choices=payload['choices'];legacy.correct_index=3
+        legacy=self.client.get('/api/v1/admin/trivia').json()['questions'][0]
+        old={k:legacy[k] for k in ('prompt','choices','correctIndex','explanation','revision')};old['state']='retired'
+        changed=self.client.post('/api/v1/admin/trivia/'+q['id'],json=old,headers=self.headers)
+        self.assertEqual(changed.status_code,200,changed.text);self.assertEqual(changed.json()['choices'],payload['choices'])
+        with self.app.state.session_factory.begin() as db:
+            draft=db.get(TriviaQuestion,uuid.UUID(q['id']));draft.state='draft';draft.locked=False
+        self.assertEqual(self.client.post(f"/api/v1/admin/trivia/{q['id']}/publish",json={'revision':changed.json()['revision']},headers=self.headers).status_code,422)
+
     def test_bad_questions_and_wrong_methods(self):
         self.login('owner')
         payload=dict(prompt='Câu hỏi kiểm tra?',choices=['Trùng','Trùng'],correctIndex=0)

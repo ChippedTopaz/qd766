@@ -3,13 +3,13 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 from sqlalchemy import select,func
 import test_trivia
-from qd766.backend.trivia_import import HEADERS,read_questions
+from qd766.backend.trivia_import import HEADERS,LEGACY_HEADERS,read_questions
 from qd766.backend.trivia import QuestionInput
 from qd766.backend.models import TriviaQuestion,UserAccount,TriviaAnswer
 
-def xlsx(rows,extra=None):
+def xlsx(rows,extra=None,headers=HEADERS):
     xml='<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
-    for n,cells in enumerate([HEADERS,*rows],1):
+    for n,cells in enumerate([headers,*rows],1):
         xml+=f'<row r="{n}">'+''.join(f'<c r="{chr(65+i)}{n}" t="inlineStr"><is><t>{escape(v)}</t></is></c>' for i,v in enumerate(cells))+'</row>'
     xml+='</sheetData></worksheet>'
     files={'xl/workbook.xml':'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="CauHoi" r:id="rId1"/></sheets></workbook>',
@@ -21,7 +21,7 @@ def xlsx(rows,extra=None):
         for name,data in files.items():z.writestr(name,data)
     return base64.b64encode(buf.getvalue()).decode()
 
-ROW=['Câu hỏi nhập mới bằng Excel?','Đúng','Sai','','','','','A','Giải thích mẫu']
+ROW=['Câu hỏi nhập mới bằng Excel?','Đúng','Sai','','A','Giải thích mẫu']
 
 class ImportTests(unittest.TestCase):
     def setUp(self):
@@ -42,11 +42,11 @@ class ImportTests(unittest.TestCase):
             self.assertTrue(all(u.credit_balance==123 for u in db.scalars(select(UserAccount))))
             self.assertEqual(db.scalar(select(func.count()).select_from(TriviaAnswer)),0)
     def test_errors_block_entire_file_and_report_excel_line(self):
-        bad=ROW.copy();bad[7]='F';file=xlsx([ROW,bad])
+        bad=ROW.copy();bad[4]='F';file=xlsx([ROW,bad])
         report=self.post(file).json();self.assertFalse(report['valid']);self.assertEqual(report['errors'][0]['row'],3)
         self.assertEqual(self.post(file,True).status_code,422);self.assertEqual(self.count(),0)
     def test_case_whitespace_duplicate_never_overwrites_published(self):
-        q=self.fixture.create(prompt=ROW[0]);row=ROW.copy();row[0]='  CÂU HỎI  NHẬP MỚI BẰNG EXCEL? ';row[7]='B'
+        q=self.fixture.create(prompt=ROW[0]);row=ROW.copy();row[0]='  CÂU HỎI  NHẬP MỚI BẰNG EXCEL? ';row[4]='B'
         self.assertEqual(self.post(xlsx([row]),True).json()['saved'],0)
         with self.fixture.app.state.session_factory() as db:
             found=db.scalar(select(TriviaQuestion));self.assertEqual(found.correct_index,0);self.assertTrue(found.locked)
@@ -68,8 +68,16 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(errors,[]);self.assertEqual(len(questions),1);self.assertEqual(questions[0][1].correctIndex,0)
     def test_empty_choices_gap_duplicates_and_answer_validation(self):
         variants=[]
-        for index,value in ((1,''),(2,'Đúng'),(7,'AB'),(7,'1'),(0,'abc'),(8,'x'*2001)):
+        for index,value in ((1,''),(2,'Đúng'),(4,'AB'),(4,'1'),(0,'abc'),(5,'x'*2001)):
             row=ROW.copy();row[index]=value;variants.append(row)
         report=self.post(xlsx(variants)).json();self.assertFalse(report['valid']);self.assertEqual(len(report['errors']),len(variants))
+
+    def test_legacy_template_accepts_blank_def_and_rejects_extra_answers(self):
+        legacy=[ROW[0],ROW[1],ROW[2],'','','','','A',ROW[5]]
+        self.assertEqual(self.post(xlsx([legacy],headers=LEGACY_HEADERS),True).json()['saved'],1)
+        legacy[0]='Câu cũ có đáp án thứ tư?';legacy[3]='Thứ ba';legacy[4]='Thứ tư'
+        report=self.post(xlsx([legacy],headers=LEGACY_HEADERS)).json()
+        self.assertFalse(report['valid']);self.assertEqual(report['errors'][0]['row'],2)
+        self.assertEqual(self.count(),1)
 
 if __name__=='__main__':unittest.main()

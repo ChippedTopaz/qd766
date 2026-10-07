@@ -12,7 +12,7 @@ export function triviaMarkup():string{
   let body='',actions='';
   if(question){
     body=`<p class="trivia-question">${esc(question.prompt)}</p><div class="trivia-choices">${choices}</div>`;
-    if(result)body+=`<p class="trivia-feedback" role="status">${result.timedOut?'Hết 60 giây. Chuỗi đúng đã về 0.':result.correct?'Đúng! +1 điểm.':'Chưa đúng. Chuỗi đúng đã về 0.'} ${esc(result.explanation)}</p>`;
+    if(result)body+=`<p class="trivia-feedback" role="status">${result.timedOut?'Hết 60 giây.':result.correct?'Đúng! +1 điểm.':'Chưa đúng.'} ${esc(result.explanation)}</p>`;
     actions=result?`<button type="button" data-trivia-next ${busy?'disabled':''}>Câu tiếp theo</button>`:
       `<button type="button" data-trivia-submit ${busy||choice===null?'disabled':''}>${busy?'Đang gửi…':'Gửi đáp án'}</button>`;
   }else{

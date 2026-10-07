@@ -40,7 +40,9 @@ const calls=[];
 globalThis.fetch=async(url,options)=>{
   calls.push({url,method:options?.method??"GET"});
   let body;
-  if(url==="/api/v1/access-policy")body={publicReadOnly:true};
+  if(url==="/api/v1/access-policy")body={publicReadOnly:true,googleLoginEnabled:true};
+  else if(url==="/api/v1/auth/me")body={name:'Admin test',role:'admin',accessTier:'nationwide',provinceId:rootId,csrfToken:'test',credits:100};
+  else if(url==="/api/v1/me/trivia")body={available:false,question:null};
   else if(url==="/api/v1/dashboard?fast=true&compact=true")body=data;
   else if(url==="/api/v1/dashboard/provinces")body=[];
   else if(url.startsWith("/api/v1/dashboard/province-rankings"))body=Array.from({length:34},(_,i)=>({
