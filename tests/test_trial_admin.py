@@ -277,7 +277,7 @@ class TrialAdminTests(unittest.TestCase):
                 self.assertEqual(peer['parameters'],{})
                 self.assertIn('comparisonPoints',peer)
                 for point in peer['comparisonPoints'].values():
-                    self.assertEqual(set(point),{'label','score','maximum'})
+                    self.assertEqual(set(point),{'score','maximum'})
         self.assertEqual(self.client.get("/api/v1/dashboard?root_department_id="+ROOT_ID).json(), original)
         self.assertEqual(client.get("/api/v1/dashboard?root_department_id="+TAY_NINH_ROOT_ID).status_code, 403)
         selection=client.get("/api/v1/dashboard/selection?period_type=month&year=2026&period_value=8").json()

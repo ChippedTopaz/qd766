@@ -13,7 +13,7 @@ ownEntity.metrics.push({code:'comparison-test',name:'Chỉ tiêu đối chiếu 
 for(const dataset of snapshot.datasets)for(const entity of dataset.children){
   if(entity.departmentId!==own.departmentId){entity.metrics=[];entity.parameters={};}
 }
-otherEntity.comparisonPoints={'raw:comparison-test':{label:'Chỉ tiêu đối chiếu thử',score:2,maximum:4}};
+otherEntity.comparisonPoints={'raw:comparison-test':{score:2,maximum:4}};
 // Deliberately send extra units: the client must not treat comparison evidence as scope.
 data.defaultUnitId=other.departmentId;
 data.periods=[9,10].map(value=>({id:`month-2026-${value}`,label:`Tháng ${value}/2026`,type:'month',year:2026,value,provisional:false}));

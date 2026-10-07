@@ -40,7 +40,7 @@ export interface Entity {
   scoreSource: "dvcqg-api" | "dvcqg-national-summary";
   metrics: Metric[];
   parameters: Record<string, unknown>;
-  comparisonPoints?: Record<string,{label:string;score:number;maximum:number|null}>;
+  comparisonPoints?: Record<string,{score:number;maximum:number|null}>;
 }
 
 export interface CaptureInfo {

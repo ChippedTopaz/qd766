@@ -1,6 +1,7 @@
 import { installTrialCreditManager } from "./trial-credit-admin.js";
 import { filterAdminAccounts, accountUnitOptions } from "./admin-account-filters.js";
 import { installAdminLayout } from "./admin-layout.js";
+import { installTriviaBank } from './admin-trivia.js';
 import { presenceBadge, startPresence } from './presence.js';
 import { installAnalysisConfiguration } from "./admin-analysis-configuration.js";
 import { installCollectionMonitor } from "./admin-collection.js";
@@ -143,6 +144,7 @@ async function start() {
         showAccounts();
         installCollectionMonitor(root, api);
         installAnalysisConfiguration(root, api);
+        installTriviaBank(root, api);
         layout = installAdminLayout(root);
         root.addEventListener("click", event => { const key = event.target.closest("[data-admin-section]")?.dataset.adminSection; if (key === "invitations")
             void run(loadInvitations); if (key === "audit")

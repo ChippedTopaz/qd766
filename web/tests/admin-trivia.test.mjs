@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {triviaBankRows,triviaCorrectUsers} from '../dist/admin-trivia.js';
+const q={id:'q1',prompt:'Câu hỏi <script>',state:'published',correctAttempts:3,correctUsers:2};
+const html=triviaBankRows([q],100);
+assert.match(html,/<td>101<\/td>/);assert.match(html,/Lượt đúng/);assert.match(html,/>3<\/td>/);assert.match(html,/2 người · Xem/);assert.match(html,/&lt;script&gt;/);assert.ok(!html.includes('<script>'));
+const people=triviaCorrectUsers([{id:'u',name:'Người <script>',email:'a&b@example.invalid',correctAttempts:2,lastCorrectAt:'2026-10-07T00:00:00Z'}]);
+assert.match(people,/a&amp;b/);assert.ok(!people.includes('<script>'));
+assert.match(triviaCorrectUsers([]),/Chưa có người trả lời đúng/);
+const source=await readFile(new URL('../src/admin-trivia.ts',import.meta.url),'utf8');
+assert.match(source,/encodeURIComponent\(query\)/);assert.match(source,/correct-users/);assert.match(source,/250/);
+assert.ok(!source.includes("querySelector<HTMLElement>('[data-trivia-people]')"),'detail panel selector must never target the opener button');
+assert.match(source,/data-trivia-people-panel/);
+const layout=await readFile(new URL('../src/admin-layout.ts',import.meta.url),'utf8');assert.match(layout,/\['trivia','Hỏi đáp nhanh'\]/);
+console.log('ADMIN_TRIVIA_PASS: numbering, separate attempt/user counts, escaping, search and pagination');

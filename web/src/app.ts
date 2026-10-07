@@ -22,6 +22,7 @@ import {openGroupExport} from './group-export.js';
 import {mountTrialRegistration} from './trial-registration.js';
 import {pageLoader} from './page-loader.js';
 import {presenceBadge,startPresence} from './presence.js';
+import {triviaMarkup,bindTrivia} from './trivia.js';
 import {agencyComparison, orderAgencies, type AgencyLevel} from './agency-comparison.js';
 import {type DailyHistory} from './daily-history.js';
 import {annualDailyComparison} from './annual-daily-comparison.js';
@@ -364,9 +365,10 @@ const unitOptions = () => {
 
 function nav(): string {
   const html=baseNav();
+  const account=signedInUser?accountMenu(signedInUser).replace(/(<div class="account-zone"[^>]*>)/,'$1'+triviaMarkup()):'';
   const collection=publicReadOnly&&paidRequestsEnabled&&canAcquire()?`<button type="button" data-nav="procedure" class="${state.screen==="procedure"?"active":""}"><span class="nav-icon" aria-hidden="true">${icon("document")}</span><span>Theo TTHC</span></button>`:"";
   const admin=signedInUser?.role==="admin"?`<button type="button" data-action="open-admin" title="Quản trị dùng thử"><span class="nav-icon" aria-hidden="true">${icon("shield")}</span><span>Quản trị dùng thử</span></button>`:"";
-  return html.replace("</nav>",collection+admin+"</nav>").replace(/<div class="side-meta">[\s\S]*?<\/div><\/div><\/aside>$/,signedInUser?accountMenu(signedInUser)+"</aside>":'$&');
+  return html.replace("</nav>",collection+admin+"</nav>").replace(/<div class="side-meta">[\s\S]*?<\/div><\/div><\/aside>$/,signedInUser?account+"</aside>":'$&');
 }
 function baseNav(): string {
 return `<aside class="sidebar"><div class="brand"><span class="brand-mark"><img class="cchc-logo" src="/assets/logo-cchc.png" alt="Cải cách hành chính" width="40" height="40"></span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item=>!publicReadOnly||!["procedure","operations","suggestions"].includes(item.id)).map((item)=>`<button data-nav="${item.id}" class="${state.screen===item.id?"active":""}" aria-current="${state.screen===item.id?"page":"false"}"><span class="nav-icon" aria-hidden="true">${icon(({overview:"shield",time:"chart",peers:"monitor",procedure:"document",suggestions:"star",quality:"shield",operations:"clock",formulas:"document"})[item.id])}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
@@ -418,6 +420,7 @@ root.innerHTML = `<div class="app-shell enterprise-mode ${["overview","formulas"
   }
   bind();
   if(signedInUser)bindAccountMenu(signedInUser);
+  if(signedInUser)bindTrivia(signedInUser.csrfToken);
   if(queryCaret){
     const query=document.getElementById(activeQuery!.id) as HTMLInputElement|null;
     query?.focus({preventScroll:true});
@@ -594,7 +597,7 @@ function progressDetail(entity:Entity):string|null {
 interface ComparisonPoint {label:string;score:number;maximum:number|null}
 function metricPoint(entity:Entity,key:string):ComparisonPoint|null{
   const comparison=entity.comparisonPoints?.[key];
-  if(comparison&&Number.isFinite(comparison.score))return comparison;
+  if(comparison&&Number.isFinite(comparison.score))return {label:key,...comparison};
   if(key==="progress:on-time"){
     const result=analyzeProgressScore(entity);
     return result?.calculatedScore===null||result?.calculatedScore===undefined?null:{label:"Tỷ lệ hồ sơ giải quyết đúng hạn",score:result.calculatedScore,maximum:result.maxScore};

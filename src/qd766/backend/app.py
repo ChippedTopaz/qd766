@@ -100,6 +100,8 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
     app.add_middleware(DashboardGZipMiddleware)
     app.include_router(auth_router)
     app.include_router(admin_router)
+    from .trivia import router as trivia_router
+    app.include_router(trivia_router)
     from .analysis_configuration import router as analysis_configuration_router
     app.include_router(analysis_configuration_router)
     app.include_router(registration_router)

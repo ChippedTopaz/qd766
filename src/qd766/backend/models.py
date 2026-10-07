@@ -280,6 +280,48 @@ class UserAccount(Base):
     )
 
 
+class TriviaQuestion(Base):
+    __tablename__ = 'trivia_questions'
+    __table_args__ = (CheckConstraint("state IN ('draft','published','retired')", name='ck_trivia_state'),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    prompt: Mapped[str] = mapped_column(Text)
+    choices: Mapped[list] = mapped_column(JSON)
+    correct_index: Mapped[int] = mapped_column(Integer)
+    explanation: Mapped[str] = mapped_column(Text, default='')
+    state: Mapped[str] = mapped_column(String(16), default='draft')
+    locked: Mapped[bool] = mapped_column(default=False)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TriviaProfile(Base):
+    __tablename__ = 'trivia_profiles'
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('user_accounts.id', ondelete='CASCADE'), primary_key=True)
+    pending_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('trivia_questions.id', ondelete='SET NULL'))
+    pending_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    round_id: Mapped[uuid.UUID] = mapped_column(Uuid, default=uuid.uuid4)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    streak: Mapped[int] = mapped_column(Integer, default=0)
+    best: Mapped[int] = mapped_column(Integer, default=0)
+    answered: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TriviaAnswer(Base):
+    __tablename__ = 'trivia_answers'
+    __table_args__ = (Index('ix_trivia_answers_question_correct_account','question_id','correct','account_id'),)
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('user_accounts.id', ondelete='CASCADE'), primary_key=True)
+    question_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('trivia_questions.id', ondelete='RESTRICT'), primary_key=True)
+    round_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    choice: Mapped[int | None] = mapped_column(Integer)
+    timed_out: Mapped[bool] = mapped_column(default=False)
+    correct: Mapped[bool] = mapped_column()
+    score_after: Mapped[int] = mapped_column(Integer)
+    streak_after: Mapped[int] = mapped_column(Integer)
+    best_after: Mapped[int] = mapped_column(Integer)
+    answered_after: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AccountCollectionPermission(Base):
     """Separate capability: province/agency scope and paid plan do not imply collection permission."""
     __tablename__ = "account_collection_permissions"

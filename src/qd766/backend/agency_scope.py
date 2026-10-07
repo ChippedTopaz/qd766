@@ -11,7 +11,7 @@ def comparison_points(entity, group):
     for metric in entity.get('metrics', []):
         if numeric(metric.get('apiScore')):
             maximum = metric.get('apiMaxScore')
-            points['raw:' + metric['code']] = {'label': metric['name'], 'score': metric['apiScore'],
+            points['raw:' + metric['code']] = {'score': metric['apiScore'],
                 'maximum': maximum if numeric(maximum) else None}
     if group == 'dvc-progress-tree':
         params = entity.get('parameters', {})
@@ -21,8 +21,7 @@ def comparison_points(entity, group):
         if numeric(received) and numeric(on_time) and numeric(maximum):
             overdue = overdue if overdue is not None else max(0, received - on_time)
             if numeric(overdue) and received > 0 and on_time >= 0 and overdue >= 0 and received == on_time + overdue:
-                points['progress:on-time'] = {'label': 'Tỷ lệ hồ sơ giải quyết đúng hạn',
-                    'score': on_time / received * maximum, 'maximum': maximum}
+                points['progress:on-time'] = {'score': on_time / received * maximum, 'maximum': maximum}
     return points
 
 
@@ -39,6 +38,9 @@ def restrict_agency(payload: dict, unit_id) -> dict:
     def snapshot(item):
         item["provinceAggregatedScore"] = None
         item["provinceAggregatedMaximum"] = None
+        level = next((child.get('departmentLevel') for dataset in item.get('datasets', [])
+            for child in dataset.get('children', []) if child.get('departmentId') == unit_id
+            and child.get('departmentLevel') in {'COMMUNE', 'PROVINCE'}), None)
         for dataset in item.get("datasets", []):
             dataset["raw"] = {"path": "", "sha256": ""}
             root = dataset.get("root", {})
@@ -47,7 +49,8 @@ def restrict_agency(payload: dict, unit_id) -> dict:
                 root[key] = None
             for child in dataset.get("children", []):
                 if child.get("departmentId") != unit_id:
-                    child['comparisonPoints'] = comparison_points(child, dataset.get('group'))
+                    child['comparisonPoints'] = comparison_points(child, dataset.get('group')) if (
+                        level is not None and child.get('departmentLevel') == level) else {}
                     score_only(child)
     if "snapshots" in result:
         result["units"] = [unit for unit in result.get("units", []) if unit.get("departmentId") == unit_id]

@@ -55,6 +55,15 @@ async def enforce_public_read_only(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
+    if path in {'/api/v1/me/trivia','/api/v1/me/trivia/answer','/api/v1/me/trivia/restart'}:
+        expected='GET' if path=='/api/v1/me/trivia' else 'POST'
+        if request.method!=expected:return JSONResponse(status_code=405,content={'detail':'Method not allowed'})
+        # Trivia handlers authenticate admitted accounts and validate CSRF for answers.
+        # This capability is independent of paid collection and province selection.
+        response=await call_next(request)
+        response.headers['Cache-Control']='no-store'
+        response.headers['Referrer-Policy']='no-referrer'
+        return response
     if not request.app.state.settings.public_read_only:
         return await call_next(request)
     allowed = request.method in {"GET", "HEAD"}

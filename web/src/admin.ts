@@ -1,6 +1,7 @@
 import {installTrialCreditManager} from "./trial-credit-admin.js";
 import {filterAdminAccounts,accountUnitOptions} from "./admin-account-filters.js";
 import {installAdminLayout} from "./admin-layout.js";
+import {installTriviaBank} from './admin-trivia.js';
 import {presenceBadge,startPresence} from './presence.js';
 import {installAnalysisConfiguration} from "./admin-analysis-configuration.js";
 import {installCollectionMonitor} from "./admin-collection.js";
@@ -89,7 +90,7 @@ async function start(){try{
     installTrialCreditManager(root,initialApi,refresh,true).then(manager=>{creditManager=manager;}),
     installRegistrationAdmin(root,initialApi,async()=>{await refresh();filterUnits();},true)
   ]);
-  filterUnits();showAccounts();installCollectionMonitor(root,api);installAnalysisConfiguration(root,api);layout=installAdminLayout(root);
+  filterUnits();showAccounts();installCollectionMonitor(root,api);installAnalysisConfiguration(root,api);installTriviaBank(root,api);layout=installAdminLayout(root);
   root.addEventListener("click",event=>{const key=(event.target as HTMLElement).closest<HTMLElement>("[data-admin-section]")?.dataset.adminSection;if(key==="invitations")void run(loadInvitations);if(key==="audit")void run(loadAudit);});
   // Agency choices belong to the invitation form, not the initial account screen.
   get("unit").innerHTML='<option value="">Chọn cơ quan</option>';
