@@ -111,6 +111,8 @@ def run_one(factory,settings,*,clock=None,generate=None):
         job=None
         with factory() as db:
             with admission_lock(db):
+                from .analysis_feature import feature_state
+                maintenance=not feature_state(db)['enabled']
                 # Fixed FIFO order for all workers; claim and running limit atomically.
                 if db.scalar(select(func.count()).select_from(GeminiAnalysis).where(GeminiAnalysis.state=='running'))>=2:
                     db.rollback();return None
@@ -128,7 +130,7 @@ def run_one(factory,settings,*,clock=None,generate=None):
                 if permitted and account.role!='admin' and account.access_tier!='national':
                     permitted=str(account.root_department_id)==context['rootDepartmentId']
                     if account.access_tier=='agency':permitted=permitted and str(account.unit_department_id)==context['unitId']
-                if (entry is None or utc(entry.expires_at)<=now or not permitted or
+                if (maintenance or entry is None or utc(entry.expires_at)<=now or not permitted or
                         not active_subscription(db,row.account_id,now=now)):
                     finish(db,row.account_id,request_key='analysis:'+str(row.id),outcome='refund',now=now)
                     row.state='failed';row.finished_at=now;db.commit();return 'refunded'

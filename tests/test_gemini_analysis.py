@@ -58,6 +58,52 @@ class AnalysisRulesTest(unittest.TestCase):
         self.assertEqual(json.loads(observed[0]['contents'][0]['parts'][0]['text'])['groups'],evidence['groups'])
         self.assertEqual(observed[0]['generationConfig']['maxOutputTokens'],9000)
     def group(self,**params):return dict(id="dvc-progress-tree",score=12.91,maximum=20,parameters=params)
+    def test_group_provider_context_isolated_and_result_order_preserved(self):
+        import httpx,json
+        from qd766.backend.gemini_client import generate,GROUP_INSTRUCTIONS
+        progress=self.group(totalReceived=100,totalOnTime=80,totalOverdue=20)
+        digitized=dict(id='dossier-digitized',score=8,maximum=22,parameters={'digitizedCount':12})
+        groups=[progress,digitized]
+        cards=findings(groups)
+        evidence={'findings':cards,'groups':groups,'reportingPeriod':{'endedAtCapture':False},
+            'comparisons':{'dvc-progress-tree':{'periods':[{'label':'PROGRESS_PERIOD_ONLY'}]},
+                'dossier-digitized':{'periods':[{'label':'DIGITIZED_PERIOD_ONLY'}]}},
+            'analysisConfiguration':{'version':7,'mode':'groups','groups':{
+                'dvc-progress-tree':{'guidance':'PROGRESS_ONLY_GUIDANCE','knowledge':'PROGRESS_ONLY_KNOWLEDGE'},
+                'dossier-digitized':{'guidance':'DIGITIZED_ONLY_GUIDANCE','knowledge':'DIGITIZED_ONLY_KNOWLEDGE'},
+                'transparency':{'guidance':'UNUSED_GUIDANCE','knowledge':'UNUSED_KNOWLEDGE'}}}}
+        observed=[]
+        def respond(request):
+            body=json.loads(request.content);observed.append(body)
+            data=json.loads(body['contents'][0]['parts'][0]['text'])
+            rows=[{'findingId':card['id'],'action':'Rà soát dữ liệu và phối hợp bộ phận chuyên môn đối chiếu quy trình.'} for card in reversed(data['findings'])]
+            return httpx.Response(200,json={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':json.dumps({'recommendations':rows})}]}}]})
+        client=httpx.Client(transport=httpx.MockTransport(respond))
+        with patch('qd766.backend.gemini_client.httpx.Client',return_value=client):
+            result=generate(Settings(gemini_api_key='fake',gemini_model='test'),evidence)
+        self.assertEqual(len(observed),2)
+        self.assertEqual([card['id'] for card in result],[card['id'] for card in cards])
+        for body in observed:
+            raw=json.dumps(body);data=json.loads(body['contents'][0]['parts'][0]['text'])
+            key=data['analysisConfiguration']['groupId']
+            self.assertEqual(len(data['groups']),1)
+            self.assertTrue(all(card['groupId']==key for card in data['findings']))
+            self.assertEqual(data['groups'][0]['id'],key)
+            self.assertEqual(data['comparisons'],evidence['comparisons'][key])
+            self.assertNotIn('UNUSED_',raw)
+            forbidden='DIGITIZED_ONLY' if key=='dvc-progress-tree' else 'PROGRESS_ONLY'
+            self.assertNotIn(forbidden,raw)
+            self.assertTrue(body['systemInstruction']['parts'][0]['text'].startswith(GROUP_INSTRUCTIONS))
+        self.assertEqual(evidence['analysisConfiguration']['groups']['transparency']['knowledge'],'UNUSED_KNOWLEDGE')
+
+    def test_group_budget_expires_without_provider_call(self):
+        from qd766.backend.gemini_client import generate
+        cards=findings([self.group(totalReceived=10,totalOnTime=9,totalOverdue=1)])
+        evidence={'findings':cards,'groups':[],'analysisConfiguration':{'version':1,'mode':'groups',
+            'groups':{'dvc-progress-tree':{'guidance':'Test guidance','knowledge':''}}}}
+        with patch('qd766.backend.gemini_client.time.monotonic',side_effect=[0,181]),patch('qd766.backend.gemini_client.httpx.Client') as client:
+            with self.assertRaises(TimeoutError):generate(Settings(gemini_api_key='fake',gemini_model='test'),evidence)
+        client.return_value.__enter__.return_value.post.assert_not_called()
     def test_conservation_and_overdue(self):
         rows=findings([self.group(totalReceived=33699,totalOnTime=21751,totalOverdue=11948)])
         self.assertEqual(rows[0]["id"],"overdue");self.assertIn("11948/33699",rows[0]["evidence"])
@@ -99,7 +145,8 @@ class PaidAnalysisTest(unittest.TestCase):
                 grant(db,aid,12,source="subscription",operation_key="sub",now=self.now,expires_at=self.now+timedelta(days=1))
                 grant(db,aid,100,source="purchased",operation_key="buy",now=self.now)
         self.client=TestClient(self.app);self.client.cookies.set("qd766_session","session-0")
-        self.body=dict(rootDepartmentId=str(self.root),unitId=str(self.root),periodType="year",year=2026,periodValue=None,token=str(uuid.uuid4()),expectedCredits=20)
+        self.body=dict(rootDepartmentId=str(self.root),unitId=str(self.root),periodType="year",year=2026,periodValue=None,token=str(uuid.uuid4()),expectedCredits=20,
+            groupIds=['dvc-progress-tree','dossier-digitized','handling-satisfaction','formality-online-payment-tree'])
         cards=findings([dict(id="dvc-progress-tree",score=12.91,maximum=20,parameters=dict(totalReceived=100,totalOnTime=65,totalOverdue=35))])
         self.evidence=dict(capturedAt=self.now.isoformat(),findings=cards,limitations=[])
         self.source=patch("qd766.backend.analysis.source_evidence",return_value=self.evidence);self.source.start()
@@ -118,11 +165,65 @@ class PaidAnalysisTest(unittest.TestCase):
         saved=self.client.get("/api/v1/me/analysis/latest",params=self.query())
         self.assertEqual(saved.status_code,200,saved.text);self.assertEqual(saved.json()["analysis"]["id"],result.json()["id"])
         self.generate.assert_called_once()
+    def test_selected_groups_cost_once_and_price_tampering_rejected(self):
+        from qd766.backend.analysis_rules import LABELS
+        self.assertEqual(self.post(groupIds=['dvc-progress-tree'],expectedCredits=20).status_code,422)
+        self.assertEqual(self.post(groupIds=['dvc-progress-tree','dvc-progress-tree'],expectedCredits=10).status_code,422)
+        self.assertEqual(self.post(groupIds=[],expectedCredits=0).status_code,422)
+        self.assertEqual(self.post(groupIds=['fake'],expectedCredits=5).status_code,422)
+        one=self.post(groupIds=['dvc-progress-tree'],expectedCredits=5)
+        self.assertEqual(one.status_code,200,one.text);self.assertEqual(one.json()['credits'],5)
+        self.assertEqual(one.json()['availableCredits'],107)
+        self.assertEqual(self.post(groupIds=['dvc-progress-tree'],expectedCredits=5).json()['id'],one.json()['id'])
+        all_groups=list(LABELS)
+        six=self.post(groupIds=all_groups,expectedCredits=30,token=str(uuid.uuid4()))
+        self.assertEqual(six.json()['credits'],30);self.assertEqual(six.json()['availableCredits'],77)
+        self.assertEqual(self.post(groupIds=all_groups,expectedCredits=5,token=str(uuid.uuid4())).status_code,422)
+        self.assertEqual(self.post(groupIds=['transparency'],expectedCredits=5).status_code,409)
+        with self.factory() as db:
+            events=list(db.scalars(select(CreditWalletEvent).where(CreditWalletEvent.kind=='charge')))
+            self.assertEqual(sorted(event.amount for event in events),[5,30])
+    def test_five_credit_failure_refunds_and_legacy_result_stays_twenty(self):
+        self.generate.side_effect=TimeoutError('failure')
+        result=self.post(groupIds=['dvc-progress-tree'],expectedCredits=5)
+        self.assertEqual(result.json()['state'],'failed');self.assertEqual(result.json()['availableCredits'],112)
+        self.assertEqual(result.json()['heldCredits'],0)
+        from qd766.backend.analysis import serialize
+        with self.factory() as db:
+            old=GeminiAnalysis(id=uuid.uuid4(),account_id=self.ids[0],request_token=uuid.uuid4(),context={},
+                evidence={'capturedAt':self.now.isoformat()},result={'cards':[]},model='legacy',created_at=self.now,state='ready')
+            self.assertEqual(serialize(old,db)['credits'],20)
     def test_provider_failure_refunds_and_replay_does_not_call_again(self):
         self.generate.side_effect=TimeoutError("private provider error")
         result=self.post();self.assertEqual(result.json()["state"],"failed");self.assertEqual(result.json()["availableCredits"],112)
         self.assertNotIn("private",result.text);self.assertEqual(self.post().json()["state"],"failed");self.generate.assert_called_once()
         with self.factory() as db:self.assertEqual(balance(db,self.ids[0],now=self.now)["reserved"],0)
+    def test_multiple_groups_one_charge_or_full_refund(self):
+        import httpx,json
+        self.provider.stop()
+        groups=[dict(id='dvc-progress-tree',score=12,maximum=20,parameters=dict(totalReceived=10,totalOnTime=9,totalOverdue=1)),
+                dict(id='dossier-digitized',score=8,maximum=22,parameters={})]
+        self.evidence.update(groups=groups,findings=findings(groups),analysisConfiguration={'mode':'groups','version':1,
+            'groups':{group['id']:{'guidance':'Phân tích nghiệp vụ riêng của nhóm.','knowledge':''} for group in groups}})
+        for succeeds in (True,False):
+            with self.subTest(succeeds=succeeds):
+                requests=[]
+                def respond(request):
+                    data=json.loads(json.loads(request.content)['contents'][0]['parts'][0]['text']);requests.append(data)
+                    if not succeeds and len(requests)==2:return httpx.Response(400)
+                    rows=[dict(findingId=card['id'],action='Đối chiếu nghiệp vụ và phối hợp xử lý nguyên nhân.') for card in data['findings']]
+                    return httpx.Response(200,json={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':json.dumps({'recommendations':rows})}]}}]})
+                client=httpx.Client(transport=httpx.MockTransport(respond))
+                with patch('qd766.backend.gemini_client.httpx.Client',return_value=client):result=self.post(token=str(uuid.uuid4()))
+                self.assertEqual(result.json()['state'],'ready' if succeeds else 'failed')
+                self.assertEqual(len(requests),2)
+                with self.factory() as db:
+                    job=result.json()['id']
+                    events=list(db.scalars(select(CreditWalletEvent).where(CreditWalletEvent.event_key.in_([kind+':analysis:'+job for kind in ('reserve','charge','refund')]))))
+                    self.assertEqual(sum(event.kind=='reserve' for event in events),1)
+                    self.assertEqual(sum(event.kind=='charge' for event in events),int(succeeds))
+                    self.assertEqual(sum(event.kind=='refund' for event in events),int(not succeeds))
+                    self.assertEqual(balance(db,self.ids[0],now=self.now)['reserved'],0)
     def test_http_503_retries_share_one_hold_and_charge_or_refund(self):
         import httpx,json
         self.provider.stop()

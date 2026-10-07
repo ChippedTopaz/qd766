@@ -55,6 +55,8 @@ def main():
             from qd766.backend.wallet_runtime import verify_real_wallet_schema
             verify_real_wallet_schema(app.state.session_factory,shared_registration=settings.shared_registration_enabled)
         if settings.gemini_analysis_enabled:
+            from qd766.backend.analysis_feature import verify_schema as verify_analysis_feature_schema
+            verify_analysis_feature_schema(app.state.engine)
             from qd766.backend.analysis_queue import verify_schema
             if settings.gemini_queue_enabled:verify_schema(app.state.engine)
             from sqlalchemy import inspect

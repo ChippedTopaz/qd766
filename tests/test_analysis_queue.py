@@ -40,6 +40,31 @@ class QueueTest(unittest.TestCase):
         result=self.cancel(); self.assertEqual(result.status_code,200,result.text)
         self.assertEqual(result.json()['state'],'cancelled'); self.assertEqual(result.json()['availableCredits'],112)
         self.cancel(); self.assertEqual(self.event_count('refund'),1); self.assertIsNone(self.work())
+    def test_selected_group_queue_fee_cancel_and_order_replay(self):
+        result=self.f.post(groupIds=['dvc-progress-tree'],expectedCredits=5)
+        self.assertEqual(result.json()['heldCredits'],5);self.assertEqual(result.json()['availableCredits'],107)
+        body={**self.f.body,'groupIds':['dvc-progress-tree'],'expectedCredits':5}
+        cancelled=self.f.client.post('/api/v1/me/analysis/cancel',json=body,headers={'X-QD766-CSRF':'csrf-0'})
+        self.assertEqual(cancelled.status_code,200,cancelled.text);self.assertEqual(cancelled.json()['availableCredits'],112)
+        self.assertEqual(self.event_count('refund'),1)
+        token=str(uuid.uuid4())
+        first=self.f.post(token=token,groupIds=['dossier-digitized','dvc-progress-tree'],expectedCredits=10)
+        replay=self.f.post(token=token,groupIds=['dvc-progress-tree','dossier-digitized'],expectedCredits=10)
+        self.assertEqual(first.json()['id'],replay.json()['id']);self.assertEqual(first.json()['heldCredits'],10)
+        self.assertEqual(self.work(),'ready')
+        ready=self.f.client.get('/api/v1/me/analysis/'+first.json()['id']+'/status').json()
+        self.assertEqual(ready['credits'],10);self.assertEqual(ready['availableCredits'],102)
+    def test_legacy_twenty_credit_queued_job_can_still_be_cancelled(self):
+        value=self.f.post().json()
+        with self.f.factory.begin() as db:
+            row=db.get(GeminiAnalysis,uuid.UUID(value['id']))
+            row.context={key:item for key,item in row.context.items() if key!='groupIds'}
+            row.evidence={key:item for key,item in row.evidence.items() if key!='billing'}
+        body={key:item for key,item in self.f.body.items() if key!='groupIds'}
+        cancelled=self.f.client.post('/api/v1/me/analysis/cancel',json=body,headers={'X-QD766-CSRF':'csrf-0'})
+        self.assertEqual(cancelled.status_code,200,cancelled.text)
+        self.assertEqual(cancelled.json()['availableCredits'],112)
+        self.assertEqual(self.event_count('refund'),1);self.assertEqual(self.event_count('charge'),0)
     def test_status_other_account_and_capacity_before_hold(self):
         value=self.f.post().json(); self.f.client.cookies.set('qd766_session','session-1')
         self.assertEqual(self.f.client.get('/api/v1/me/analysis/'+value['id']+'/status').status_code,404)

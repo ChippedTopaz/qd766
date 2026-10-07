@@ -468,9 +468,10 @@ function render(): void {
 }
 
 function analysisSelection(){
-  const selected=period();const snap=snapshot();
+  const selected=period();const snap=snapshot();const view=unit();
   return {rootDepartmentId:data.province.id,unitId:state.unitId,periodType:selected.type,year:selected.year,
-    periodValue:selected.value??null,scope:state.scope,capturedAt:snap.delivery?.detailsCapturedAt??snap.delivery?.capturedAt??''};
+    periodValue:selected.value??null,scope:state.scope,capturedAt:snap.delivery?.detailsCapturedAt??snap.delivery?.capturedAt??'',
+    organization:view.name,periodLabel:selected.label,availableGroups:view.groups.filter(group=>group.entity?.apiScore!==null&&group.entity?.apiScore!==undefined&&group.entity?.apiMaxScore!==null&&group.entity?.apiMaxScore!==undefined&&group.entity.apiMaxScore>0).map(group=>group.id)};
 }
 
 function overview(): string {

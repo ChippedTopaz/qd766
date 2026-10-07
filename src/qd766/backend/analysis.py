@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from threading import BoundedSemaphore
 from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field,field_validator,model_validator
 from sqlalchemy import inspect, select, func, or_, and_
 from sqlalchemy.orm import Session, selectinload
 from qd766.periods import PeriodSelection
@@ -17,14 +17,23 @@ from .user_collection import account_for, valid_period
 from .paid_requests import _locked_account
 from .wallet_access import enabled, active_subscription
 from .credit_wallet import reserve, finish, balance, WalletError, utc
-from .analysis_rules import findings, VERSION, number
+from .analysis_rules import findings, VERSION, number,LABELS
+from .analysis_configuration import GroupId
 from .daily_history import history_payload
 from . import gemini_client
 
 router=APIRouter(prefix="/api/v1/me/analysis",tags=["analysis"])
 Db=Annotated[Session,Depends(get_session)]
-COST=20
+LEGACY_COST=20
+GROUP_COST=5
 SLOTS=BoundedSemaphore(2)
+
+@router.get('/availability')
+def availability(request:Request,response:Response,db:Db):
+    from .analysis_feature import feature_state,UNAVAILABLE
+    response.headers['Cache-Control']='no-store';account_for(request,db)
+    available=feature_state(db)['enabled'] and request.app.state.settings.gemini_analysis_enabled
+    return {'available':available,'message':'' if available else UNAVAILABLE}
 
 class AnalysisSelection(BaseModel):
     model_config=ConfigDict(extra="forbid")
@@ -33,13 +42,38 @@ class AnalysisSelection(BaseModel):
     periodType:Literal["month","quarter","year"]
     year:int=Field(ge=2026,le=2100)
     periodValue:int|None=Field(default=None,ge=1,le=12)
+    groupIds:list[GroupId]|None=Field(default=None,min_length=1,max_length=6)
+    @field_validator('groupIds')
+    @classmethod
+    def unique_groups(cls,value):
+        if value is None:return None
+        if len(value)!=len(set(value)):raise ValueError('Không được chọn trùng nhóm chỉ tiêu.')
+        return sorted(value,key=lambda key:list(LABELS).index(key))
 
 class AnalysisConfirmation(AnalysisSelection):
     token:uuid.UUID
-    expectedCredits:Literal[20]
+    groupIds:list[GroupId]=Field(min_length=1,max_length=6)
+    expectedCredits:int=Field(strict=True,ge=5,le=30)
+    @model_validator(mode='after')
+    def verify_cost(self):
+        if self.expectedCredits!=GROUP_COST*len(self.groupIds):raise ValueError('Credit không khớp các nhóm đã chọn. Tải lại giao diện để xác nhận.')
+        return self
+
+class AnalysisCancellation(AnalysisSelection):
+    token:uuid.UUID
+    expectedCredits:int=Field(strict=True,ge=5,le=30)
 
 def context_of(selection):
-    return selection.model_dump(mode="json",exclude={"token","expectedCredits"})
+    context=selection.model_dump(mode="json",exclude={"token","expectedCredits"})
+    if context.get('groupIds') is None:context.pop('groupIds',None)
+    return context
+
+def evidence_for_selection(db,selection):
+    evidence=source_evidence(db,selection)
+    selected=set(selection.groupIds)
+    evidence={**evidence,'findings':[card for card in evidence['findings'] if card['groupId'] in selected]}
+    evidence['billing']={'version':'per-group-v1','groupIds':selection.groupIds,'unitCredits':GROUP_COST,'credits':GROUP_COST*len(selection.groupIds)}
+    return evidence
 
 def authorize(account,selection):
     valid_period(selection.periodType,selection.year,selection.periodValue)
@@ -60,21 +94,27 @@ def recover_interrupted(db,account_id,now):
 def source_evidence(db,selection):
     query=select(Snapshot).where(Snapshot.root_department_id==selection.rootDepartmentId,
         Snapshot.scope=="all",Snapshot.period_type==selection.periodType,Snapshot.year==selection.year,
-        Snapshot.period_value==selection.periodValue).order_by(Snapshot.created_at.desc()).limit(1)
+        Snapshot.period_value==selection.periodValue,Snapshot.state=='complete').order_by(Snapshot.created_at.desc(),Snapshot.id.desc()).limit(1)
     snapshot=db.scalar(query)
     if snapshot is None:raise HTTPException(409,"Chưa có dữ liệu chi tiết để phân tích.")
-    pairs=db.execute(select(Dataset,Entity).join(Entity).where(Dataset.snapshot_id==snapshot.id,
-        Entity.department_id==selection.unitId).options(selectinload(Entity.metrics),selectinload(Entity.department))).all()
+    statement=select(Dataset,Entity).join(Entity).where(Dataset.snapshot_id==snapshot.id,Entity.department_id==selection.unitId)
+    if selection.groupIds:statement=statement.where(Dataset.group_name.in_(selection.groupIds))
+    pairs=db.execute(statement.options(selectinload(Entity.metrics),selectinload(Entity.department))).all()
     groups=[];name=""
     for dataset,entity in pairs:
         name=entity.department.name
         groups.append(dict(id=dataset.group_name,score=float(entity.api_score) if entity.api_score is not None else None,
+            formulaVersion=dataset.details.get('formulaVersion',snapshot.policy.get('formulaVersion')),
             maximum=float(entity.api_max_score) if entity.api_max_score is not None else None,parameters=entity.parameters,
             metrics=[dict(code=m.code,name=m.name,numerator=float(m.numerator) if m.numerator is not None else None,
                 denominator=float(m.denominator) if m.denominator is not None else None,
                 score=float(m.api_score) if m.api_score is not None else None,
                 maximum=float(m.api_max_score) if m.api_max_score is not None else None) for m in entity.metrics]))
     if not groups:raise HTTPException(409,"Cơ quan chưa có dữ liệu trong kỳ này.")
+    if selection.groupIds:
+        available={group['id'] for group in groups if number(group['score']) is not None and number(group['maximum']) is not None and group['maximum']>0}
+        missing=set(selection.groupIds)-available
+        if missing:raise HTTPException(409,'Chưa đủ điểm để phân tích: '+', '.join(LABELS[key] for key in LABELS if key in missing)+'. Chưa giữ Credit.')
     days=history_payload(db,selection.rootDepartmentId,selection.unitId,
         PeriodSelection(selection.periodType,selection.year,selection.periodValue),3)["days"] if inspect(db.bind).has_table("daily_observations") else []
     # Do not compare observations captured after the analyzed snapshot.
@@ -89,11 +129,21 @@ def source_evidence(db,selection):
         if number(value) is not None}} for group in groups]
     from .analysis_configuration import configuration
     analysis_configuration=configuration(db)
+    comparisons={}
+    if selection.groupIds:
+        from .analysis_comparisons import comparison_evidence,add_comparison_findings
+        from .analysis_configuration import default_groups
+        comparisons=comparison_evidence(db,snapshot,selection.unitId,context_groups)
+        cards=add_comparison_findings([card for card in cards if card['groupId'] in selection.groupIds],context_groups,comparisons)
+        configs=analysis_configuration.get('groups',default_groups())
+        analysis_configuration={'version':analysis_configuration['version'],'mode':'groups',
+            'groups':{key:configs[key] for key in selection.groupIds}}
     return {"version":VERSION,"snapshotId":str(snapshot.id),"capturedAt":utc(snapshot.created_at).isoformat(),
         "organization":name,"context":context_of(selection),"findings":cards,
         "groups":context_groups,"reportingPeriod":{"start":start,"end":end,"capturedDate":captured_date,
             "endedAtCapture":captured_date>end},
         "analysisConfiguration":analysis_configuration,
+        'comparisons':comparisons,
         "coverage":len(groups),"limitations":["Số liệu tổng hợp không xác định được trạng thái từng hồ sơ.",
             "Kỳ đang diễn ra có thể bị ảnh hưởng bởi hồ sơ chưa có kết quả hoặc chưa đến bước thanh toán.",
             "Biến động ngày chỉ tham khảo; chưa xác minh tự động được mọi thay đổi công thức nguồn."]}
@@ -104,7 +154,8 @@ def serialize(row,db):
         or_(GeminiAnalysis.created_at<row.created_at,and_(GeminiAnalysis.created_at==row.created_at,GeminiAnalysis.id<=row.id)))) if row.state=='queued' else None
     return {"id":str(row.id),"requestToken":str(row.request_token),"state":row.state,"context":row.context,"createdAt":utc(row.created_at).isoformat(),
         "availableCredits":values["available"],"reservedCredits":values["reserved"],
-        "credits":COST if row.state=="ready" else 0,"heldCredits":COST if row.state in {'queued','running'} else 0,
+        "credits":row.evidence.get('billing',{}).get('credits',LEGACY_COST) if row.state=="ready" else 0,
+        "heldCredits":row.evidence.get('billing',{}).get('credits',LEGACY_COST) if row.state in {'queued','running'} else 0,
         "queuePosition":position,"queueWaitMinutes":10,
         "result":row.result,"capturedAt":row.evidence["capturedAt"],"message":
         "Đang chờ phân tích. Credit được giữ, chưa ghi nhận thu." if row.state=='queued' else
@@ -141,6 +192,8 @@ def analyze(selection:AnalysisConfirmation,request:Request,response:Response,db:
     if old:
         if old.context!=context_of(selection):raise HTTPException(409,"Mã xác nhận không khớp lựa chọn.")
         db.commit();return serialize(old,db)
+    from .analysis_feature import require_available
+    require_available(db)
     settings=request.app.state.settings
     if not settings.gemini_analysis_enabled or not settings.gemini_api_key or not settings.gemini_model:
         raise HTTPException(503,"Phân tích Gemini chưa được cấu hình. Không sử dụng Credit.")
@@ -150,15 +203,16 @@ def analyze(selection:AnalysisConfirmation,request:Request,response:Response,db:
     if not active_subscription(db,account.id,now=now):raise HTTPException(403,"Subscription đã hết hạn. Vui lòng gia hạn để phân tích.")
     if db.scalar(select(GeminiAnalysis.id).where(GeminiAnalysis.account_id==account.id,GeminiAnalysis.state=="running")):
         raise HTTPException(409,"Tài khoản đang có một lượt phân tích. Vui lòng chờ hoàn thành.")
-    if balance(db,account.id,now=now)["available"]<COST:raise HTTPException(402,"Tài khoản của bạn không đủ Credit để phân tích (20 Credit).")
-    evidence=source_evidence(db,selection)
+    cost=GROUP_COST*len(selection.groupIds)
+    if balance(db,account.id,now=now)["available"]<cost:raise HTTPException(402,f"Tài khoản không đủ {cost} Credit để phân tích các nhóm đã chọn.")
+    evidence=evidence_for_selection(db,selection)
     if not evidence["findings"]:raise HTTPException(409,"Chưa đủ phát hiện để phân tích. Không sử dụng Credit.")
     if not SLOTS.acquire(blocking=False):raise HTTPException(503,"Phân tích đang bận. Vui lòng thử lại; chưa sử dụng Credit.")
     try:
         row=GeminiAnalysis(id=uuid.uuid4(),account_id=account.id,request_token=selection.token,context=context_of(selection),
             evidence=evidence,model=settings.gemini_model,created_at=now,state="running")
         db.add(row)
-        try:reserve(db,account.id,COST,request_key="analysis:"+str(row.id),now=now);db.commit()
+        try:reserve(db,account.id,cost,request_key="analysis:"+str(row.id),now=now);db.commit()
         except WalletError as exc:db.rollback();raise HTTPException(402,"Không đủ Credit để phân tích.") from exc
         job_id=row.id;account_id=account.id
         # No open DB transaction during Gemini. A client disconnect cannot create a duplicate run.
@@ -203,6 +257,8 @@ def enqueue(selection,request,response,db,account):
             if old.context!=context_of(selection):raise HTTPException(409,'Mã xác nhận không khớp lựa chọn.')
             db.commit();response.status_code=202 if old.state in {'queued','running'} else 200
             return serialize(old,db)
+        from .analysis_feature import require_available
+        require_available(db)
         if not settings.gemini_analysis_enabled or not settings.gemini_api_key or not settings.gemini_model:
             raise HTTPException(503,'Phân tích chưa được cấu hình. Chưa giữ Credit.')
         if settings.wallet_requests_paused:raise HTTPException(503,'Tạm dừng yêu cầu sử dụng Credit mới.')
@@ -211,14 +267,15 @@ def enqueue(selection,request,response,db,account):
         if db.scalar(select(GeminiAnalysis.id).where(GeminiAnalysis.account_id==account.id,GeminiAnalysis.state.in_(['queued','running']))):
             raise HTTPException(409,'Tài khoản đang có một lượt chờ hoặc đang phân tích.')
         check_capacity(db)
-        if balance(db,account.id,now=now)['available']<COST:raise HTTPException(402,'Tài khoản của bạn không đủ Credit để phân tích (20 Credit).')
-        evidence=source_evidence(db,selection)
+        cost=GROUP_COST*len(selection.groupIds)
+        if balance(db,account.id,now=now)['available']<cost:raise HTTPException(402,f'Tài khoản không đủ {cost} Credit để phân tích các nhóm đã chọn.')
+        evidence=evidence_for_selection(db,selection)
         if not evidence['findings']:raise HTTPException(409,'Chưa đủ dữ liệu để phân tích. Chưa giữ Credit.')
         row=GeminiAnalysis(id=uuid.uuid4(),account_id=account.id,request_token=selection.token,
             context=context_of(selection),evidence=evidence,model=settings.gemini_model,created_at=now,state='queued')
         db.add(row);db.flush()
         db.add(AnalysisQueueEntry(analysis_id=row.id,expires_at=now+timedelta(minutes=WAIT_MINUTES)))
-        try:reserve(db,account.id,COST,request_key='analysis:'+str(row.id),now=now);db.commit()
+        try:reserve(db,account.id,cost,request_key='analysis:'+str(row.id),now=now);db.commit()
         except WalletError as error:db.rollback();raise HTTPException(402,'Không đủ Credit để phân tích.') from error
         response.status_code=202
         return serialize(row,db)
@@ -235,13 +292,14 @@ def status(analysis_id:uuid.UUID,request:Request,response:Response,db:Db):
 
 
 @router.post('/cancel')
-def cancel(selection:AnalysisConfirmation,request:Request,response:Response,db:Db):
+def cancel(selection:AnalysisCancellation,request:Request,response:Response,db:Db):
     response.headers['Cache-Control']='no-store'
     account=account_for(request,db);authorize(account,selection)
     _locked_account(db,account.id)
     row=db.scalar(select(GeminiAnalysis).where(GeminiAnalysis.account_id==account.id,GeminiAnalysis.request_token==selection.token))
     if row is None:raise HTTPException(404,'Không tìm thấy lượt phân tích.')
     if row.context!=context_of(selection):raise HTTPException(409,'Lựa chọn không khớp lượt phân tích.')
+    if selection.expectedCredits!=row.evidence.get('billing',{}).get('credits',LEGACY_COST):raise HTTPException(409,'Credit không khớp lượt phân tích đã xác nhận.')
     if row.state=='queued':
         now=datetime.now(timezone.utc)
         finish(db,account.id,request_key='analysis:'+str(row.id),outcome='refund',now=now)

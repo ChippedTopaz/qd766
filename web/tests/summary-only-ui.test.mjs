@@ -77,8 +77,8 @@ assert.doesNotMatch(appRoot.innerHTML,/class="bento-top"|class="split bento-insi
 groupSteps[1].handlers.click();
 assert.match(appRoot.innerHTML,new RegExp(data.groupLabels[data.groupOrder[2]]));
 overviewTabs[2].handlers.click();
-assert.match(appRoot.innerHTML,/Vấn đề cần ưu tiên/);
-assert.match(appRoot.innerHTML,/Kết quả tốt cần duy trì/);
+assert.match(appRoot.innerHTML,/Phân tích điểm số/);
+assert.doesNotMatch(appRoot.innerHTML,/Kết quả tốt cần duy trì|analysis-group-result/);
 assert.doesNotMatch(appRoot.innerHTML,/class="bento-top"|overview-group-nav/);
 overviewTabs[0].handlers.click();
 assert.match(appRoot.innerHTML,/class="bento-top"/);

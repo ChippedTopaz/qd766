@@ -7,7 +7,7 @@ from alembic.operations import Operations
 from alembic.migration import MigrationContext
 import test_gemini_analysis as fixture
 from qd766.backend.analysis_configuration import router,configuration,DEFAULT_GUIDANCE
-from qd766.backend.models import UserAccount,AnalysisConfigHead,AnalysisConfigRevision,AdminAudit,GeminiAnalysis
+from qd766.backend.models import UserAccount,AnalysisConfigHead,AnalysisConfigRevision,AnalysisGroupConfigRevision,AdminAudit,GeminiAnalysis
 from qd766.backend.analysis_queue import run_one
 
 class ConfigurationTest(unittest.TestCase):
@@ -64,6 +64,7 @@ class ConfigurationTest(unittest.TestCase):
         with self.f.factory() as db:
             row=db.get(GeminiAnalysis,uuid.UUID(result.json()['id']));self.assertEqual(row.result['configurationVersion'],1)
     def test_additive_migration(self):
+        AnalysisGroupConfigRevision.__table__.drop(self.f.engine)
         AnalysisConfigHead.__table__.drop(self.f.engine);AnalysisConfigRevision.__table__.drop(self.f.engine)
         path=Path(__file__).resolve().parents[1]/'alembic/versions/20261007_0020_analysis_configuration.py'
         spec=importlib.util.spec_from_file_location('config_migration',path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
@@ -71,5 +72,60 @@ class ConfigurationTest(unittest.TestCase):
             with Operations.context(MigrationContext.configure(connection)):module.upgrade()
         for model in (AnalysisConfigHead,AnalysisConfigRevision):
             self.assertEqual(set(model.__table__.columns.keys()),{c['name'] for c in inspect(self.f.engine).get_columns(model.__tablename__)})
+
+    def test_group_edit_preserves_other_groups_and_legacy(self):
+        self.save()
+        before=self.f.client.get(self.path).json()
+        self.assertEqual(len(before['groups']),6)
+        saved=self.save(expectedVersion=1,groupId='dossier-digitized',knowledge='Kiến thức riêng cho số hóa.')
+        self.assertEqual(saved.status_code,200,saved.text)
+        current=self.f.client.get(self.path).json()
+        self.assertEqual(current['mode'],'groups')
+        self.assertEqual(current['groups']['dossier-digitized']['knowledge'],'Kiến thức riêng cho số hóa.')
+        for key in before['groups']:
+            if key!='dossier-digitized':self.assertEqual(current['groups'][key],before['groups'][key])
+        old=self.f.client.get(self.path,params={'version':1}).json()
+        self.assertEqual(old['legacyConfiguration']['knowledge'],self.payload['knowledge'])
+        self.assertEqual(self.save(expectedVersion=1,groupId='transparency').status_code,409)
+        self.assertEqual(self.save(expectedVersion=2,groupId='unknown').status_code,422)
+        self.assertEqual(self.save(expectedVersion=2,groupId='transparency',knowledge='x'*10001).status_code,422)
+        self.assertEqual(self.save(expectedVersion=2,groupId='transparency',guidance='x'*4001).status_code,422)
+        self.assertEqual(self.save(expectedVersion=2).status_code,409,'An old shared-config client must not undo group mode')
+        with self.f.factory() as db:
+            runtime=configuration(db)
+            self.assertNotIn('knowledge',runtime)
+            self.assertNotIn('guidance',runtime)
+            self.assertEqual(db.scalar(select(func.count()).select_from(AnalysisGroupConfigRevision)),6)
+        next_save=self.save(expectedVersion=2,groupId='transparency',knowledge='Kiến thức riêng cho công khai.')
+        self.assertEqual(next_save.status_code,200,next_save.text)
+        self.assertEqual(self.f.client.get(self.path).json()['groups']['dossier-digitized'],current['groups']['dossier-digitized'])
+
+    def test_group_schema_missing_retains_legacy_and_blocks_save(self):
+        self.save();AnalysisGroupConfigRevision.__table__.drop(self.f.engine)
+        current=self.f.client.get(self.path).json()
+        self.assertFalse(current['groupSchemaReady'])
+        self.assertEqual(self.save(expectedVersion=1,groupId='transparency').status_code,503)
+        with self.f.factory() as db:self.assertEqual(configuration(db)['knowledge'],self.payload['knowledge'])
+
+    def test_group_configuration_pinned(self):
+        self.save(groupId='dossier-digitized')
+        self.f.app.state.settings=replace(self.f.app.state.settings,gemini_queue_enabled=True)
+        self.f.source.stop()
+        with patch('qd766.backend.analysis.source_evidence',side_effect=lambda db,_:{**self.f.evidence,'analysisConfiguration':configuration(db)}):
+            result=self.f.post();self.assertEqual(result.status_code,202,result.text)
+        self.save(expectedVersion=1,groupId='dossier-digitized',knowledge='Kiến thức mới chưa áp dụng vào hàng chờ.')
+        observed=[]
+        def generate(settings,evidence):observed.append(evidence);return self.f.evidence['findings']
+        self.assertEqual(run_one(self.f.factory,self.f.app.state.settings,generate=generate),'ready')
+        self.assertEqual(observed[0]['analysisConfiguration']['groups']['dossier-digitized']['knowledge'],self.payload['knowledge'])
+
+    def test_group_migration_does_not_change_legacy(self):
+        self.save();AnalysisGroupConfigRevision.__table__.drop(self.f.engine)
+        path=Path(__file__).resolve().parents[1]/'alembic/versions/20261007_0021_analysis_group_configuration.py'
+        spec=importlib.util.spec_from_file_location('group_config_migration',path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        with self.f.engine.begin() as connection:
+            with Operations.context(MigrationContext.configure(connection)):module.upgrade()
+        self.assertEqual(self.f.client.get(self.path).json()['knowledge'],self.payload['knowledge'])
+        self.assertTrue(self.f.client.get(self.path).json()['groupSchemaReady'])
 
 if __name__=='__main__':unittest.main()

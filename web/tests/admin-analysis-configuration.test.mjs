@@ -1,16 +1,24 @@
 import assert from 'node:assert/strict';
 import {installAnalysisConfiguration} from '../dist/admin-analysis-configuration.js';
 const nodes=new Map();
-const node=()=>({value:'',disabled:false,textContent:'',innerHTML:'',handlers:{},setAttribute(){},addEventListener(key,fn){this.handlers[key]=fn;}});
-const section={...node(),dataset:{},querySelector(selector){if(!nodes.has(selector))nodes.set(selector,node());return nodes.get(selector);}};
+const node=()=>({value:'',disabled:false,textContent:'',innerHTML:'',handlers:{},after(){},setAttribute(){},addEventListener(key,fn){this.handlers[key]=fn;}});
+const groupIds=['transparency','dvc-progress-tree','provide-online-tree','dossier-digitized','handling-satisfaction','formality-online-payment-tree'];
+const buttons=groupIds.map(id=>({...node(),dataset:{aiConfigGroup:id}}));
+const markers=groupIds.map(id=>({...node(),dataset:{aiDraft:id}}));
+const section={...node(),dataset:{},prepend(){},querySelectorAll(selector){return selector==='[data-ai-config-group]'?buttons:markers;},querySelector(selector){if(!nodes.has(selector))nodes.set(selector,node());return nodes.get(selector);}};
 globalThis.document={createElement:()=>section};
 const root={...node(),append(element){assert.equal(element,section);}};
 let config={version:1,activeVersion:1,guidance:'Hướng dẫn đã duyệt cần phân tích cụ thể.',knowledge:'Kiến thức đã duyệt',defaultGuidance:'Hướng dẫn mặc định đủ dài.',schemaReady:true,rules:['Không thêm <script>'],history:[{version:1,note:'<script> sửa',actor:'Quản trị',at:'2026-10-07T00:00:00Z'}]};
+config.groups=Object.fromEntries(groupIds.map(id=>[id,{guidance:'Hướng dẫn riêng cho '+id,knowledge:'Kiến thức '+id}]));
+config.defaultGroups=Object.fromEntries(groupIds.map(id=>[id,{guidance:'Hướng dẫn mặc định cho '+id,knowledge:''}]));
+config.groupSchemaReady=true;
+config.feature={enabled:true,revision:0,schemaReady:true};
 let calls=[];
 const api=async(path,body)=>{
   calls.push({path,body});
-  if(body){assert.equal(body.expectedVersion,1);config={...config,version:2,activeVersion:2,guidance:body.guidance,knowledge:body.knowledge};return {version:2,message:'Đã lưu'};}
-  return path.includes('?version=0')?{...config,version:0,guidance:config.defaultGuidance,knowledge:''}:{...config};
+  if(path.endsWith('/feature')){assert.equal(body.expectedRevision,config.feature.revision);config.feature={enabled:body.enabled,revision:config.feature.revision+1,schemaReady:true};return structuredClone(config.feature);}
+  if(body){assert.equal(body.expectedVersion,1);assert.equal(body.groupId,'transparency');config={...config,version:2,activeVersion:2,groups:{...config.groups,[body.groupId]:{guidance:body.guidance,knowledge:body.knowledge}}};return {version:2,message:'Đã lưu'};}
+  return path.includes('?version=0')?structuredClone({...config,version:0,groups:config.defaultGroups}):structuredClone(config);
 };
 installAnalysisConfiguration(root,api);assert.equal(calls.length,0,'Do not delay initial admin load');
 assert.equal(section.dataset.analysisConfiguration,'true');
@@ -19,6 +27,11 @@ root.handlers.click({target:{closest:()=>({dataset:{adminSection:'ai-configurati
 assert.equal(calls.length,1);assert.equal(nodes.get('#ai-config-save').disabled,false);
 assert.match(nodes.get('#ai-config-rules').innerHTML,/&lt;script&gt;/);
 assert.doesNotMatch(nodes.get('#ai-config-version').innerHTML,/<script>/);
+const choose=id=>section.handlers.click({target:{closest:()=>({dataset:{aiConfigGroup:id}})}});
+choose('dossier-digitized');nodes.get('#ai-config-knowledge').value='Bản nháp số hóa chưa lưu';nodes.get('#ai-config-knowledge').handlers.input();
+choose('transparency');assert.equal(nodes.get('#ai-config-knowledge').value,'Kiến thức transparency');
+choose('dossier-digitized');assert.equal(nodes.get('#ai-config-knowledge').value,'Bản nháp số hóa chưa lưu');
+choose('transparency');assert.equal(calls.length,1,'Switching group must not call API');
 nodes.get('#ai-config-default').handlers.click();assert.equal(calls.length,1,'Reset only modifies draft');
 assert.equal(nodes.get('#ai-config-knowledge').value,'');
 nodes.get('#ai-config-version').value='0';nodes.get('#ai-config-load-version').handlers.click();await flush();
@@ -28,6 +41,13 @@ const event={preventDefault(){}};nodes.get('#ai-config-form').handlers.submit(ev
 assert.equal(calls.filter(c=>c.body).length,1,'Double submit prevented');
 assert.equal(nodes.get('#ai-config-save').disabled,false);
 assert.match(nodes.get('#ai-config-status').textContent,/phiên bản 2/);
+choose('dossier-digitized');assert.equal(nodes.get('#ai-config-knowledge').value,'Bản nháp số hóa chưa lưu','Other group draft retained after save');
+assert.equal(config.groups['dossier-digitized'].knowledge,'Kiến thức dossier-digitized','Other saved group unchanged');
 root.handlers.click({target:{closest:()=>({dataset:{adminSection:'ai-configuration'}})}});await flush();
 assert.equal(calls.length,4,'Re-entering panel does not automatically reload or save');
-console.log('ADMIN_ANALYSIS_CONFIG_UI_OK: lazy GET, safe rendering, draft-only restore, explicit save, double-click guard');
+nodes.get('#ai-feature-toggle').handlers.click();nodes.get('#ai-feature-toggle').handlers.click();await flush();
+assert.equal(calls.length,5,'Double toggle prevented');assert.equal(config.feature.enabled,false);
+assert.match(nodes.get('#ai-feature-status').textContent,/Tính năng tạm thời không khả dụng do đang trong quá trình nâng cấp\./);
+assert.equal(nodes.get('#ai-config-knowledge').value,'Bản nháp số hóa chưa lưu');assert.equal(config.activeVersion,2,'Toggle does not create prompt version');
+nodes.get('#ai-feature-toggle').handlers.click();await flush();assert.equal(config.feature.enabled,true);
+console.log('ADMIN_ANALYSIS_CONFIG_UI_OK: six groups, independent drafts, single-group save, safe history restore, lazy GET, double-click guard');
