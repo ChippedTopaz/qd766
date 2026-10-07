@@ -152,7 +152,8 @@ def run_one(factory,settings,*,clock=None,generate=None):
                 finish(db,account_id,request_key='analysis:'+str(job_id),outcome='refund',now=now)
                 row.state='failed'
             else:
-                row.result={'cards':cards,'limitations':evidence['limitations'],'version':VERSION,'model':model}
+                row.result={'cards':cards,'limitations':evidence['limitations'],'version':VERSION,'model':model,
+                    'configurationVersion':evidence.get('analysisConfiguration',{}).get('version',0)}
                 finish(db,account_id,request_key='analysis:'+str(job_id),outcome='charge',now=now)
                 row.state='ready'
             row.finished_at=now

@@ -797,6 +797,24 @@ class GeminiAnalysis(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AnalysisConfigRevision(Base):
+    __tablename__ = 'analysis_config_revisions'
+    __table_args__ = (CheckConstraint('version > 0',name='ck_analysis_config_version'),)
+    version: Mapped[int] = mapped_column(Integer,primary_key=True,autoincrement=False)
+    guidance: Mapped[str] = mapped_column(Text)
+    knowledge: Mapped[str] = mapped_column(Text)
+    note: Mapped[str] = mapped_column(String(500))
+    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('user_accounts.id',ondelete='RESTRICT'))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AnalysisConfigHead(Base):
+    __tablename__ = 'analysis_config_head'
+    __table_args__ = (CheckConstraint('id = 1',name='ck_analysis_config_singleton'),)
+    id: Mapped[int] = mapped_column(Integer,primary_key=True,autoincrement=False)
+    version: Mapped[int] = mapped_column(ForeignKey('analysis_config_revisions.version',ondelete='RESTRICT'))
+
+
 class AnalysisQueueEntry(Base):
     __tablename__ = "analysis_queue_entries"
     analysis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("gemini_analyses.id", ondelete="RESTRICT"), primary_key=True)

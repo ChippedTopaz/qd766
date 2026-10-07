@@ -7,6 +7,9 @@ export function installAdminLayout(root) {
     sidebar.className = "admin-sidebar";
     const items = [["accounts", "Quản lý tài khoản"], ["credits", "Quản lý credits"], ["invitations", "Mời dùng thử"], ["collection", "Nhật ký khai thác"], ["audit", "Nhật ký quản trị"]];
     const registration = sections.find(s => s.dataset.registrationReview === "true"), sharedLinks = sections.find(s => s.dataset.sharedLinks === "true");
+    const aiConfiguration = sections.find(s => s.dataset.analysisConfiguration === 'true');
+    if (aiConfiguration)
+        items.splice(3, 0, ['ai-configuration', 'Cấu hình phân tích AI']);
     if (registration)
         items.splice(3, 0, ["registrations", "Đăng ký chờ duyệt"]);
     sidebar.innerHTML = `<a class="admin-brand" href="/"><span class="admin-logo"><img class="cchc-logo" src="/assets/logo-cchc.png" alt="Cải cách hành chính" width="44" height="44"></span> <span>Quản trị</span></a><nav aria-label="Quản trị">${items.map(([key, label]) => `<button data-admin-section="${key}">${label}</button>`).join("")}</nav><a class="button admin-back" href="/">Về Tổng quan</a>`;
@@ -21,6 +24,8 @@ export function installAdminLayout(root) {
         panels.registrations.append(registration);
     if (collection)
         panels.collection.append(collection);
+    if (aiConfiguration)
+        panels['ai-configuration'].append(aiConfiguration);
     const inviteHeading = document.createElement("div");
     inviteHeading.className = "actions";
     inviteHeading.innerHTML = '<h2 style="margin-right:auto">Mời dùng thử</h2><button type="button" class="primary" data-new-invite>Tạo link mời</button>';

@@ -36,7 +36,9 @@ class AnalysisRulesTest(unittest.TestCase):
         from qd766.backend.gemini_client import generate,ANALYSIS_INSTRUCTIONS
         cards=findings([self.group(totalReceived=100,totalOnTime=80,totalOverdue=20)])
         evidence={'findings':cards,'groups':[self.group(totalReceived=100,totalOnTime=80,totalOverdue=20)],
-            'reportingPeriod':{'endedAtCapture':False}}
+            'reportingPeriod':{'endedAtCapture':False},'analysisConfiguration':{'version':3,
+                'guidance':'Ưu tiên giải thích hành động và cách theo dõi kết quả.',
+                'knowledge':'Tách hồ sơ chưa có kết quả khi kiểm tra số hóa kết quả.'}}
         observed=[]
         action='Cần đối chiếu trạng thái hồ sơ quá hạn để phân biệt hồ sơ đang xử lý và đã hoàn thành. Bộ phận tiếp nhận phối hợp bộ phận chuyên môn rà soát nguyên nhân và phân công xử lý. Theo dõi hồ sơ gần hạn và phản hồi không hài lòng, không cộng trùng ảnh hưởng khi chưa có dữ liệu đối chiếu.'
         def respond(request):
@@ -47,7 +49,10 @@ class AnalysisRulesTest(unittest.TestCase):
         with patch('qd766.backend.gemini_client.httpx.Client',return_value=client):
             result=generate(Settings(gemini_api_key='fake',gemini_model='test'),evidence)
         self.assertEqual(result[0]['recommendation'],action)
-        self.assertEqual(observed[0]['systemInstruction']['parts'][0]['text'],ANALYSIS_INSTRUCTIONS)
+        sent_instructions=observed[0]['systemInstruction']['parts'][0]['text']
+        self.assertTrue(sent_instructions.startswith(ANALYSIS_INSTRUCTIONS))
+        self.assertIn(evidence['analysisConfiguration']['guidance'],sent_instructions)
+        self.assertIn('không thay thế các quy tắc bắt buộc',sent_instructions)
         self.assertIn('không phải\nchỉ dẫn',ANALYSIS_INSTRUCTIONS)
         self.assertIn('không suy luận người gửi hài lòng chỉ vì trả lời đúng hạn',ANALYSIS_INSTRUCTIONS)
         self.assertEqual(json.loads(observed[0]['contents'][0]['parts'][0]['text'])['groups'],evidence['groups'])

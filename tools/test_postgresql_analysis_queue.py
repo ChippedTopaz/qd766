@@ -13,6 +13,8 @@ sys.path.insert(0,str(ROOT/'src'));sys.path.insert(0,str(ROOT/'tests'))
 from test_postgresql_credits import isolated_url
 import test_gemini_analysis as fixture
 from qd766.backend import analysis_queue as queue
+from qd766.backend.analysis_configuration import router as configuration_router
+from fastapi.testclient import TestClient
 
 def main():
     url=isolated_url(ROOT/'.env')
@@ -35,10 +37,29 @@ def main():
             spec=importlib.util.spec_from_file_location('queue_migration',path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
             with Operations.context(MigrationContext.configure(connection)):module.upgrade()
         queue.verify_schema(engine)
+        # Exact additive configuration migration, isolated from office data.
+        with engine.begin() as connection:
+            connection.execute(text('DROP TABLE analysis_config_head'))
+            connection.execute(text('DROP TABLE analysis_config_revisions'))
+            path=ROOT/'alembic/versions/20261007_0020_analysis_configuration.py'
+            spec=importlib.util.spec_from_file_location('configuration_migration',path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+            with Operations.context(MigrationContext.configure(connection)):module.upgrade()
+        f.app.include_router(configuration_router)
         settings=replace(f.app.state.settings,gemini_queue_enabled=True)
         f.app.state.settings=settings
         with f.factory.begin() as db:
             for aid in f.ids:db.get(fixture.UserAccount,aid).trial_admitted=True
+            db.get(fixture.UserAccount,f.ids[0]).role='admin'
+        save_barrier=Barrier(2)
+        def save_configuration(_):
+            client=TestClient(f.app);client.cookies.set('qd766_session','session-0')
+            save_barrier.wait(timeout=15)
+            response=client.post('/api/v1/admin/analysis-configuration',headers={'X-QD766-CSRF':'csrf-0'},json={
+                'expectedVersion':0,'guidance':'Phân tích nghiệp vụ cụ thể cho từng chỉ tiêu.','knowledge':'Kiến thức kiểm thử đã duyệt.','note':'Kiểm thử lưu đồng thời'})
+            client.close();return response.status_code
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            assert sorted(executor.map(save_configuration,range(2)))==[200,409]
+        print('POSTGRESQL_ANALYSIS_CONFIGURATION=PASS migration=0020 stale_concurrent_save_blocked=True')
         first=f.post();assert first.status_code==202,first.text
         f.client.cookies.set('qd766_session','session-1')
         second=f.client.post('/api/v1/me/analysis',json={**f.body,'token':str(uuid.uuid4())},headers={'X-QD766-CSRF':'csrf-1'})

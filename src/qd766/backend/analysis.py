@@ -87,10 +87,13 @@ def source_evidence(db,selection):
     # Aggregate numeric data only: no raw payloads, credentials or dossier identities.
     context_groups=[{**group,'parameters':{key:value for key,value in group['parameters'].items()
         if number(value) is not None}} for group in groups]
+    from .analysis_configuration import configuration
+    analysis_configuration=configuration(db)
     return {"version":VERSION,"snapshotId":str(snapshot.id),"capturedAt":utc(snapshot.created_at).isoformat(),
         "organization":name,"context":context_of(selection),"findings":cards,
         "groups":context_groups,"reportingPeriod":{"start":start,"end":end,"capturedDate":captured_date,
             "endedAtCapture":captured_date>end},
+        "analysisConfiguration":analysis_configuration,
         "coverage":len(groups),"limitations":["Số liệu tổng hợp không xác định được trạng thái từng hồ sơ.",
             "Kỳ đang diễn ra có thể bị ảnh hưởng bởi hồ sơ chưa có kết quả hoặc chưa đến bước thanh toán.",
             "Biến động ngày chỉ tham khảo; chưa xác minh tự động được mọi thay đổi công thức nguồn."]}
@@ -174,7 +177,8 @@ def analyze(selection:AnalysisConfirmation,request:Request,response:Response,db:
         try:
             _locked_account(db,account_id);row=db.get(GeminiAnalysis,job_id,populate_existing=True)
             if row.state=="running":
-                row.result={"cards":cards,"limitations":evidence["limitations"],"version":VERSION,"model":settings.gemini_model}
+                row.result={"cards":cards,"limitations":evidence["limitations"],"version":VERSION,"model":settings.gemini_model,
+                    'configurationVersion':evidence.get('analysisConfiguration',{}).get('version',0)}
                 row.state="ready";row.finished_at=datetime.now(timezone.utc)
                 finish(db,account_id,request_key="analysis:"+str(job_id),outcome="charge",now=row.finished_at)
                 db.commit() # Result and charge atomically durable.

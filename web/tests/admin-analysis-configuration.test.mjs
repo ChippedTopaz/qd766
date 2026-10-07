@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import {installAnalysisConfiguration} from '../dist/admin-analysis-configuration.js';
+const nodes=new Map();
+const node=()=>({value:'',disabled:false,textContent:'',innerHTML:'',handlers:{},setAttribute(){},addEventListener(key,fn){this.handlers[key]=fn;}});
+const section={...node(),dataset:{},querySelector(selector){if(!nodes.has(selector))nodes.set(selector,node());return nodes.get(selector);}};
+globalThis.document={createElement:()=>section};
+const root={...node(),append(element){assert.equal(element,section);}};
+let config={version:1,activeVersion:1,guidance:'Hướng dẫn đã duyệt cần phân tích cụ thể.',knowledge:'Kiến thức đã duyệt',defaultGuidance:'Hướng dẫn mặc định đủ dài.',schemaReady:true,rules:['Không thêm <script>'],history:[{version:1,note:'<script> sửa',actor:'Quản trị',at:'2026-10-07T00:00:00Z'}]};
+let calls=[];
+const api=async(path,body)=>{
+  calls.push({path,body});
+  if(body){assert.equal(body.expectedVersion,1);config={...config,version:2,activeVersion:2,guidance:body.guidance,knowledge:body.knowledge};return {version:2,message:'Đã lưu'};}
+  return path.includes('?version=0')?{...config,version:0,guidance:config.defaultGuidance,knowledge:''}:{...config};
+};
+installAnalysisConfiguration(root,api);assert.equal(calls.length,0,'Do not delay initial admin load');
+assert.equal(section.dataset.analysisConfiguration,'true');
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+root.handlers.click({target:{closest:()=>({dataset:{adminSection:'ai-configuration'}})}});await flush();
+assert.equal(calls.length,1);assert.equal(nodes.get('#ai-config-save').disabled,false);
+assert.match(nodes.get('#ai-config-rules').innerHTML,/&lt;script&gt;/);
+assert.doesNotMatch(nodes.get('#ai-config-version').innerHTML,/<script>/);
+nodes.get('#ai-config-default').handlers.click();assert.equal(calls.length,1,'Reset only modifies draft');
+assert.equal(nodes.get('#ai-config-knowledge').value,'');
+nodes.get('#ai-config-version').value='0';nodes.get('#ai-config-load-version').handlers.click();await flush();
+assert.equal(calls.length,2);assert.equal(calls[1].body,undefined,'Previewing old version must be read-only');
+nodes.get('#ai-config-note').value='Khôi phục mặc định';
+const event={preventDefault(){}};nodes.get('#ai-config-form').handlers.submit(event);nodes.get('#ai-config-form').handlers.submit(event);await flush();
+assert.equal(calls.filter(c=>c.body).length,1,'Double submit prevented');
+assert.equal(nodes.get('#ai-config-save').disabled,false);
+assert.match(nodes.get('#ai-config-status').textContent,/phiên bản 2/);
+root.handlers.click({target:{closest:()=>({dataset:{adminSection:'ai-configuration'}})}});await flush();
+assert.equal(calls.length,4,'Re-entering panel does not automatically reload or save');
+console.log('ADMIN_ANALYSIS_CONFIG_UI_OK: lazy GET, safe rendering, draft-only restore, explicit save, double-click guard');
