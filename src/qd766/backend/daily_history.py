@@ -37,7 +37,14 @@ def validate_daily_snapshot(snapshot, summary, report_date, boundary, period, ro
         if len(roots)!=1 or roots[0].api_score is None:raise ValueError('Missing root score')
         children={item.department_id for item in dataset.entities if item.entity_kind=='child'}
         child_sets.append(children)
-    if any(ids!=child_sets[0] for ids in child_sets):raise ValueError('Agency list differs across groups')
+    # Endpoints legitimately expose different agency inventories. Keep every
+    # source row; absence in one endpoint is missing, never zero or a reason to
+    # discard the entire province. Ranking still requires all six real scores.
+    all_children=set.union(*child_sets)
+    complete_children=set.intersection(*child_sets)
+    return {'completeUnits':len(complete_children),'sourceUnits':len(all_children),
+        'missingByGroup':{dataset.group_name:sorted(str(unit) for unit in all_children-children)
+            for dataset,children in zip(snapshot.datasets,child_sets) if children!=all_children}}
 
 def history_payload(db,root_id,unit_id,period,limit=31,include_peers=False):
     query=select(DailyObservation).where(DailyObservation.root_department_id==root_id,

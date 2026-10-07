@@ -13,6 +13,99 @@ from qd766.backend.paid_requests import top_up_credits,settle_paid_requests_for_
 from qd766.province_roots import load_province_roots
 
 class UserCollectionTest(unittest.TestCase):
+    def nationwide_fixture(self,role='admin'):
+        hue=next(r for r in load_province_roots().values() if r.province_name=='Huế')
+        with self.factory.begin() as db:
+            if db.get(Department,hue.root_department_id) is None:
+                db.add(Department(id=hue.root_department_id,name=hue.department_name,attributes={}))
+            account=db.get(UserAccount,self.ids[0]);account.role=role;account.trial_admitted=True
+            account.access_tier='national' if role=='user' else 'province'
+        for item in self.items:
+            item.publishing_agency='Test';item.execution_levels=('province','ward')
+        self.app.state.province_catalog_client=SimpleNamespace(load=lambda code,**k:SimpleNamespace(
+            province=SimpleNamespace(code=code,name='Test'),fields=['Test'],select=lambda **k:self.items))
+        return hue
+
+    def test_admin_and_national_catalog_follow_selected_province(self):
+        for role in ('admin','user'):
+            hue=self.nationwide_fixture(role)
+            response=self.clients[0].get(f'/api/v1/province-catalog/{hue.province_code}/preview?period_type=year&year=2026')
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(response.json()['province']['code'],hue.province_code)
+            if role=='user':self.assertEqual(self.clients[0].get('/api/v1/admin/accounts').status_code,403)
+
+    def test_province_and_agency_cannot_forge_selected_province(self):
+        hue=self.nationwide_fixture()
+        for tier in ('province','agency'):
+            with self.factory.begin() as db:
+                account=db.get(UserAccount,self.ids[0]);account.role='user';account.access_tier=tier
+                if tier=='agency':
+                    child=uuid.uuid4();db.add(Department(id=child,name='Test ward',attributes={}));account.unit_department_id=child
+            own=self.clients[0].get(f'/api/v1/province-catalog/{self.root.province_code}/preview?period_type=year&year=2026')
+            self.assertEqual(own.status_code,200,own.text)
+            self.assertEqual(self.quote(selection={**self.selection,'rootDepartmentId':str(hue.root_department_id)}).status_code,403)
+            for path in ('/api/v1/me/formalities?period_type=year&year=2026&','/api/v1/me/formality-requests?'):
+                self.assertEqual(self.clients[0].get(path+'root_department_id='+str(hue.root_department_id)).status_code,403)
+            self.assertEqual(self.clients[0].get(f'/api/v1/province-catalog/{hue.province_code}/preview?period_type=year&year=2026').status_code,403)
+        with self.factory() as db:
+            self.assertEqual(db.get(UserAccount,self.ids[0]).credit_balance,10)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
+
+    def test_nationwide_ownership_and_credit_are_separate_per_province(self):
+        for role in ('admin','user'):
+            self.nationwide_fixture(role)
+            self.assertEqual(self.quote().status_code,200)
+        self.assertEqual(self.submit().status_code,202);self.settle()
+        hue=self.nationwide_fixture()
+        params={'scope':'formality','period_type':'year','year':2026,'root_department_id':str(self.root.root_department_id),'formality_id':str(self.formality)}
+        self.assertEqual(self.clients[0].get('/api/v1/dashboard/selection',params=params).status_code,200)
+        with self.factory.begin() as db:
+            another=db.get(UserAccount,self.ids[1]);another.access_tier='national';another.trial_admitted=True
+        self.assertEqual(self.clients[1].get('/api/v1/dashboard/selection',params=params).status_code,403)
+        selection={**self.selection,'rootDepartmentId':str(hue.root_department_id)}
+        own=self.quote().json();other=self.quote(selection=selection).json()
+        self.assertEqual(own['totalCredits'],0);self.assertEqual(other['totalCredits'],3)
+        self.assertEqual(self.clients[0].get('/api/v1/me/formalities?period_type=year&year=2026&root_department_id='+str(hue.root_department_id)).json()['items'],[])
+        quote=other['quote'];token=str(uuid.uuid4())
+        response=self.submit(quote=quote,token=token)
+        self.assertEqual(response.status_code,202,response.text)
+        self.assertEqual(response.json()['availableCredits'],4)
+        self.assertEqual(response.json()['items'][0]['rootDepartmentId'],str(hue.root_department_id))
+        self.assertEqual(self.submit(quote=quote,token=token).json()['availableCredits'],4)
+        for root in (self.root,hue):
+            history=self.clients[0].get('/api/v1/me/formality-requests?root_department_id='+str(root.root_department_id)).json()['items']
+            self.assertEqual(len(history),1);self.assertEqual(history[0]['rootDepartmentId'],str(root.root_department_id))
+        denied=self.clients[0].get('/api/v1/dashboard/selection',params={'scope':'formality','period_type':'year','year':2026,'root_department_id':str(hue.root_department_id),'formality_id':str(self.formality)})
+        self.assertEqual(denied.status_code,403)
+        with self.factory() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),2)
+            self.assertEqual(db.get(UserAccount,self.ids[0]).root_department_id,self.root.root_department_id)
+
+    def test_nationwide_quote_denied_after_scope_revoked(self):
+        hue=self.nationwide_fixture()
+        quote=self.quote(selection={**self.selection,'rootDepartmentId':str(hue.root_department_id)}).json()['quote']
+        with self.factory.begin() as db:
+            account=db.get(UserAccount,self.ids[0]);account.role='user';account.access_tier='province'
+        self.assertEqual(self.submit(quote=quote).status_code,403)
+        with self.factory() as db:
+            self.assertEqual(db.get(UserAccount,self.ids[0]).credit_balance,10)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
+
+    def test_nationwide_quote_root_binding_and_unknown_province(self):
+        from qd766.backend.user_collection import encode_quote,decode_quote
+        hue=self.nationwide_fixture()
+        request=SimpleNamespace(app=self.app)
+        quote=self.quote(selection={**self.selection,'rootDepartmentId':str(hue.root_department_id)}).json()['quote']
+        claims=decode_quote(request,quote);claims['root']=str(self.root.root_department_id)
+        self.assertEqual(self.submit(quote=encode_quote(request,claims)).status_code,403)
+        self.assertEqual(self.quote(selection={**self.selection,'rootDepartmentId':str(uuid.uuid4())}).status_code,404)
+        self.assertEqual(self.quote(selection={**self.selection,'rootDepartmentId':'invalid'}).status_code,422)
+        conflict=self.clients[0].get('/api/v1/me/formality-requests',params=[('root_department_id',str(self.root.root_department_id)),('root_department_id',str(hue.root_department_id))])
+        self.assertEqual(conflict.status_code,422)
+        with self.factory() as db:
+            self.assertEqual(db.get(UserAccount,self.ids[0]).credit_balance,10)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
+
     def setUp(self):
         self.app=create_app(Settings(database_url='sqlite+pysqlite://',public_read_only=True,require_login=True,
             google_client_id='test',google_client_secret='test-secret',google_redirect_uri='https://example.test/api/v1/auth/google/callback',

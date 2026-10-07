@@ -309,6 +309,8 @@ def logout(request: Request):
         if session and not csrf_matches(request.headers.get("X-QD766-CSRF", ""), session.csrf_token):
             raise HTTPException(403, "Xác nhận phiên không hợp lệ.")
         if session:
+            presence=getattr(request.app.state,'presence',None)
+            if presence is not None:presence.discard(session.account_id)
             db.delete(session)
     response = RedirectResponse("/", status_code=303)
     response.delete_cookie(SESSION_COOKIE, **cookie_options(request.app.state.settings))

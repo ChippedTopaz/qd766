@@ -32,7 +32,7 @@ globalThis.document={
   querySelector(selector){return selector==="#app"?appRoot:selector==="[data-action=export]"?exportButton:selector.startsWith('#formula-')?{scrollIntoView(options){formulaScrolls.push({selector,options});}}:null;},
   querySelectorAll(selector){return selector==="[data-formula-group]"?formulaButtons:selector==="[data-overview-tab]"?overviewTabs:selector==="[data-group-detail]"?groupButtons:selector==="[data-group-step]"?groupSteps:selector==="[data-nav]"?navs:selector==="[data-trend-toggle]"?trendButtons:selector==="[data-trend-series]"?trendSeries:[];},
 };
-globalThis.window={setTimeout};
+globalThis.window={setTimeout:(fn,delay)=>{const timer=setTimeout(fn,delay);timer.unref();return timer},clearTimeout};
 globalThis.location={search:"",hash:"",pathname:"/"};
 globalThis.history={state:null,replaceState(){}};
 globalThis.scrollTo=()=>{};

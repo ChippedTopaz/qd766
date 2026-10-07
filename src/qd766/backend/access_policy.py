@@ -7,10 +7,11 @@ from .models import PaidDataRequest
 import uuid
 
 AUTH_READ_PATHS = {"/api/v1/auth/google/start", "/api/v1/auth/google/callback", "/api/v1/auth/me"}
-BOOTSTRAP_PATHS = {"/api/v1/access-policy", "/api/v1/health/live", "/api/v1/health/ready"}
+BOOTSTRAP_PATHS = {"/api/v1/access-policy", "/api/v1/health/live", "/api/v1/health/ready", "/api/v1/presence"}
 
 PUBLIC_READ_PATHS = frozenset({
     "/api/v1/access-policy", "/api/v1/health/live", "/api/v1/health/ready",
+    "/api/v1/presence",
     "/api/v1/dashboard", "/api/v1/dashboard/selection", "/api/v1/dashboard/group-export",
     "/api/v1/dashboard/provinces", "/api/v1/dashboard/province-rankings", "/api/v1/dashboard/daily-history",
     "/api/v1/national-summaries", "/api/v1/national-summaries/latest",
@@ -83,6 +84,8 @@ async def enforce_public_read_only(request: Request, call_next):
             return JSONResponse(status_code=401, content={"detail": "Vui lòng đăng nhập Google."})
         if request.app.state.settings.invite_required and not account.trial_admitted:
             return JSONResponse(status_code=403, content={"detail": "Tài khoản chưa được mời dùng thử."})
+        presence=getattr(request.app.state,'presence',None)
+        if account.trial_admitted and presence is not None:presence.count(account.id)
         if account.role == "admin" and account.trial_admitted and not (user_path or catalog_path or private_selection):
             response = await call_next(request)
             response.headers["Cache-Control"] = "no-store"
@@ -96,22 +99,35 @@ async def enforce_public_read_only(request: Request, call_next):
             return response
         if account.root_department_id is None:
             return JSONResponse(status_code=403, content={"detail": "Tài khoản đang chờ quản trị viên gán tỉnh/cơ quan."})
-        root_id = str(account.root_department_id)
-        if any(value != root_id for value in request.query_params.getlist("root_department_id")):
-            return JSONResponse(status_code=403, content={"detail": "Tài khoản không được truy cập chi tiết tỉnh khác."})
+        from .collection_scope import selected_root, nationwide
+        from fastapi import HTTPException
+        try:
+            requested_roots=request.query_params.getlist("root_department_id")
+            if not nationwide(account) and any(value!=str(account.root_department_id) for value in requested_roots):
+                return JSONResponse(status_code=403,content={"detail":"Tài khoản không được truy cập chi tiết tỉnh khác."})
+            if len(set(requested_roots))>1:raise ValueError('Conflicting provinces')
+            authorized_root=selected_root(account,uuid.UUID(requested_roots[0]) if requested_roots else None)
+        except ValueError:
+            return JSONResponse(status_code=422,content={"detail":"Tỉnh được chọn không hợp lệ."})
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code,content={"detail":exc.detail})
         if path.startswith("/api/v1/national-summaries"):
             return JSONResponse(status_code=403, content={"detail": "Sử dụng bảng so sánh điểm tỉnh thay cho dữ liệu tổng hợp thô."})
-        request.state.authorized_root_id = account.root_department_id
+        request.state.authorized_root_id = authorized_root
         request.state.authorized_account_id = account.id
-        if account.access_tier == "agency":
+        if account.access_tier == "agency" and not nationwide(account):
             if account.unit_department_id is None:
                 return JSONResponse(status_code=403, content={"detail": "Tài khoản chưa được gán cơ quan."})
             request.state.authorized_unit_id = account.unit_department_id
         if catalog_path:
             from qd766.province_roots import load_province_roots
-            code=path.split("/")[-2]
-            if not any(root.province_code==code and root.root_department_id==account.root_department_id for root in load_province_roots().values()):
+            code=path.split("/")[-2].strip().zfill(2)
+            catalog_root=next((root for root in load_province_roots().values() if root.province_code==code),None)
+            if catalog_root is None:
+                return JSONResponse(status_code=404,content={"detail":"Chưa có danh mục tỉnh được chọn."})
+            if not nationwide(account) and catalog_root.root_department_id!=account.root_department_id:
                 return JSONResponse(status_code=403,content={"detail":"Danh mục không thuộc tỉnh được gán."})
+            request.state.authorized_root_id=catalog_root.root_department_id
         if private_selection:
             try:
                 from qd766.periods import PeriodSelection
@@ -122,7 +138,7 @@ async def enforce_public_read_only(request: Request, call_next):
             except (KeyError,ValueError):return JSONResponse(status_code=422,content={"detail":"Lựa chọn TTHC không hợp lệ."})
             with request.app.state.session_factory() as db:
                 statement=select(PaidDataRequest.id).where(PaidDataRequest.account_id==account.id,
-                    PaidDataRequest.root_department_id==account.root_department_id,PaidDataRequest.formality_id==formality_id,
+                    PaidDataRequest.root_department_id==authorized_root,PaidDataRequest.formality_id==formality_id,
                     PaidDataRequest.period_type==kind,PaidDataRequest.year==year,PaidDataRequest.state=="ready")
                 statement=statement.where(PaidDataRequest.period_value.is_(None) if value is None else PaidDataRequest.period_value==value)
                 if db.scalar(statement.limit(1)) is None:

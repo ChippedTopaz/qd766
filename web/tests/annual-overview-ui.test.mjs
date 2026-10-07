@@ -13,7 +13,7 @@ globalThis.document={title:'',querySelector:s=>s==='#app'?app:null,querySelector
   if(s==='[data-annual-observation]'){dateControl=control({});dateControl.value='2026-10-07';return [dateControl];}
   return [];
 }};
-globalThis.window={setTimeout};globalThis.location={search:'?period=year-2026',hash:'',pathname:'/'};
+globalThis.window={setTimeout:(fn,delay)=>{const timer=setTimeout(fn,delay);timer.unref();return timer},clearTimeout};globalThis.location={search:'?period=year-2026',hash:'',pathname:'/'};
 globalThis.history={state:null,replaceState(){}};globalThis.scrollTo=()=>{};
 const days=[['2026-10-08',72],['2026-10-07',70],['2026-10-06',71],['2026-10-05',80]].map(([reportDate,totalScore])=>({reportDate,totalScore,rank:null,cohortKey:'same',groups:{}}));
 const calls=[];

@@ -22,6 +22,7 @@ from datetime import datetime,timezone
 from .paid_requests import create_paid_data_request, PaidRequestError, PendingRequestLimit, InsufficientCredits, CollectionUnavailable
 from .wallet_access import enabled as wallet_enabled, credits, active_subscription, subscription_summary
 from .credit_wallet import balance, WalletError, utc
+from .collection_scope import selected_root
 
 router=APIRouter(prefix="/api/v1/me",tags=["user-collection"])
 Db=Annotated[Session,Depends(get_session)]
@@ -32,6 +33,7 @@ class Selection(BaseModel):
     year:int=Field(ge=2000,le=2200)
     periodValue:int|None=None
     formalityIds:list[uuid.UUID]=Field(min_length=1,max_length=50)
+    rootDepartmentId:uuid.UUID|None=None
 
 class Confirmation(BaseModel):
     model_config=ConfigDict(extra="forbid")
@@ -62,14 +64,14 @@ def account_for(request:Request,db:Session,*,require_collect:bool=False):
         raise HTTPException(403,"Xác nhận phiên không hợp lệ.")
     return account
 
-def own_requests(db,account,kind,year,value):
+def own_requests(db,account,kind,year,value,root_id=None):
     statement=select(PaidDataRequest).where(PaidDataRequest.account_id==account.id,
-        PaidDataRequest.root_department_id==account.root_department_id,
+        PaidDataRequest.root_department_id==selected_root(account,root_id),
         PaidDataRequest.period_type==kind,PaidDataRequest.year==year)
     return statement.where(PaidDataRequest.period_value.is_(None) if value is None else PaidDataRequest.period_value==value)
 
-def entitlement(db,account,kind,year,value,formality_id):
-    return db.scalar(own_requests(db,account,kind,year,value).where(
+def entitlement(db,account,kind,year,value,formality_id,root_id=None):
+    return db.scalar(own_requests(db,account,kind,year,value,root_id).where(
         PaidDataRequest.formality_id==formality_id,PaidDataRequest.state.in_(("reserved","waiting","ready"))))
 
 def valid_period(kind,year,value):
@@ -78,8 +80,9 @@ def valid_period(kind,year,value):
 
 def resolve_items(request,account,selection):
     valid_period(selection.periodType,selection.year,selection.periodValue)
-    root=next((r for r in load_province_roots().values() if r.root_department_id==account.root_department_id),None)
-    if root is None:raise HTTPException(409,"Chưa có cấu hình tỉnh cho tài khoản.")
+    root_id=selected_root(account,selection.rootDepartmentId)
+    root=next((r for r in load_province_roots().values() if r.root_department_id==root_id),None)
+    if root is None:raise HTTPException(404,"Chưa có cấu hình tỉnh được chọn.")
     try:
         catalog,_=request.app.state.province_catalog_cache.get_or_load(root.province_code+":internal=true",
             lambda:request.app.state.province_catalog_client.load(root.province_code,include_internal=True))
@@ -170,10 +173,11 @@ def quote(selection:Selection,request:Request,db:Db):
     cost=request.app.state.settings.formality_credit_cost
     rows=[]
     for item in items:
-        owned=entitlement(db,account,selection.periodType,selection.year,selection.periodValue,uuid.UUID(item.id))
+        owned=entitlement(db,account,selection.periodType,selection.year,selection.periodValue,uuid.UUID(item.id),root.root_department_id)
         rows.append({"id":item.id,"code":item.code,"name":item.name,"cost":0 if owned else cost,"owned":owned is not None,
                      "ownedState":owned.state if owned is not None else None})
     total=sum(row["cost"] for row in rows)
+    selection.rootDepartmentId=root.root_department_id
     claims={"account":str(account.id),"root":str(root.root_department_id),"expires":int(time.time())+600,
         "selection":selection.model_dump(mode="json"),"unitCost":cost,"maximumCost":total}
     if total and db.info.get("wallet_requests_paused"):
@@ -191,16 +195,18 @@ def quote(selection:Selection,request:Request,db:Db):
 @router.post("/formality-requests",status_code=202)
 def create_requests(payload:Confirmation,request:Request,db:Db):
     account=account_for(request,db,require_collect=True);claims=decode_quote(request,payload.quote)
-    if claims["account"]!=str(account.id) or claims["root"]!=str(account.root_department_id):raise HTTPException(403,"Xác nhận không thuộc tài khoản này.")
+    if claims["account"]!=str(account.id):raise HTTPException(403,"Xác nhận không thuộc tài khoản này.")
     if claims["unitCost"]!=request.app.state.settings.formality_credit_cost:raise HTTPException(409,"Chi phí đã thay đổi; hãy xác nhận lại.")
     selection=Selection.model_validate(claims["selection"])
     root,items=resolve_items(request,account,selection)
+    if claims["root"]!=str(root.root_department_id):raise HTTPException(403,"Tỉnh trong xác nhận không hợp lệ.")
     # Serialize account mutations, and never charge more than the displayed quote.
     from .paid_requests import _locked_account
     account=_locked_account(db,account.id)
     from .collection_permissions import can_collect
     if not account.active or not can_collect(db,account.id):raise HTTPException(403,"Quyền khai thác đã được thu hồi.")
-    total=sum(0 if entitlement(db,account,selection.periodType,selection.year,selection.periodValue,uuid.UUID(item.id)) else claims["unitCost"] for item in items)
+    selected_root(account,root.root_department_id)
+    total=sum(0 if entitlement(db,account,selection.periodType,selection.year,selection.periodValue,uuid.UUID(item.id),root.root_department_id) else claims["unitCost"] for item in items)
     if total>claims["maximumCost"]:raise HTTPException(409,"Quyền khai thác đã thay đổi; hãy xác nhận chi phí lại.")
     rows=[]
     try:
@@ -238,16 +244,16 @@ def serialize_request(db,paid):
     formality=db.get(Formality,paid.formality_id)
     job=db.get(CollectionJob,paid.collection_job_id) if paid.collection_job_id else None
     progress="running" if paid.state=="waiting" and job is not None and job.state=="running" else paid.state
-    return {"id":str(paid.id),"state":progress,"formalityId":str(paid.formality_id),
+    return {"id":str(paid.id),"state":progress,"formalityId":str(paid.formality_id),"rootDepartmentId":str(paid.root_department_id),
         "code":formality.code,"name":formality.name,"periodType":paid.period_type,"year":paid.year,"periodValue":paid.period_value,
         "creditCost":paid.credit_cost,"createdAt":paid.created_at.isoformat(),"error":
             {"kind":paid.error.get("kind"),"message":"Yêu cầu đã dừng; toàn bộ credit đã được hoàn trả."} if paid.error else None}
 
 @router.get("/formality-requests")
-def history(request:Request,db:Db,limit:int=Query(default=100,ge=1,le=200)):
+def history(request:Request,db:Db,limit:int=Query(default=100,ge=1,le=200),root_department_id:uuid.UUID|None=None):
     account=account_for(request,db)
     rows=db.scalars(select(PaidDataRequest).where(PaidDataRequest.account_id==account.id,
-        PaidDataRequest.root_department_id==account.root_department_id).order_by(PaidDataRequest.created_at.desc()).limit(limit))
+        PaidDataRequest.root_department_id==selected_root(account,root_department_id)).order_by(PaidDataRequest.created_at.desc()).limit(limit))
     unread=db.scalar(select(func.count()).select_from(UserNotification).where(UserNotification.account_id==account.id,UserNotification.read_at.is_(None)))
     pending=db.scalar(select(func.count()).select_from(PaidDataRequest).where(
         PaidDataRequest.account_id==account.id,PaidDataRequest.state.in_(("reserved","waiting")))) or 0
@@ -263,8 +269,8 @@ def read_notifications(payload:NotificationRead,request:Request,db:Db):
     db.commit();return {"state":"read"}
 
 @router.get("/formalities")
-def library(request:Request,db:Db,period_type:str=Query(pattern="^(month|quarter|year)$"),year:int=Query(ge=2000,le=2200),period_value:int|None=None):
+def library(request:Request,db:Db,period_type:str=Query(pattern="^(month|quarter|year)$"),year:int=Query(ge=2000,le=2200),period_value:int|None=None,root_department_id:uuid.UUID|None=None):
     account=account_for(request,db);valid_period(period_type,year,period_value)
-    rows=db.scalars(own_requests(db,account,period_type,year,period_value).where(PaidDataRequest.state=="ready").order_by(PaidDataRequest.created_at.desc()))
+    rows=db.scalars(own_requests(db,account,period_type,year,period_value,root_department_id).where(PaidDataRequest.state=="ready").order_by(PaidDataRequest.created_at.desc()))
     return {"items":[{"id":str(row.formality_id),"code":db.get(Formality,row.formality_id).code,
         "name":db.get(Formality,row.formality_id).name} for row in rows if (snapshot:=db.get(Snapshot,row.snapshot_id)) is not None and snapshot.state=="complete"]}

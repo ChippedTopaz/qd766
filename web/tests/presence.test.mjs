@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+const timers=new Map();let serial=0,visibleHandler,calls=0,fail=false;
+let now=100000;Date.now=()=>now;
+const node={textContent:''};
+globalThis.window={setTimeout:(fn,delay)=>{timers.set(++serial,{fn,delay});return serial},clearTimeout:id=>timers.delete(id)};
+globalThis.document={hidden:true,querySelectorAll:()=>[node],addEventListener:(kind,fn)=>{if(kind==='visibilitychange')visibleHandler=fn}};
+globalThis.fetch=async(url,options)=>{
+  assert.equal(url,'/api/v1/presence');assert.equal(options.cache,'no-store');calls++;
+  if(fail)throw new Error('offline');
+  return {ok:true,json:async()=>({onlineUsers:12})};
+};
+const {startPresence,presenceBadge}=await import('../dist/presence.js');
+assert.match(presenceBadge(),/Đang online/);assert.match(presenceBadge(),/3 phút/);
+startPresence();startPresence();assert.equal(calls,0);assert.equal(timers.size,1);
+document.hidden=false;visibleHandler();await new Promise(setImmediate);
+assert.equal(calls,1);assert.equal(node.textContent,'12');assert.match(presenceBadge(),/>12</);
+assert.equal([...timers.values()][0].delay,60000);
+visibleHandler();await new Promise(setImmediate);assert.equal(calls,1);
+now+=60000;fail=true;visibleHandler();await new Promise(setImmediate);
+assert.equal(node.textContent,'—');assert.equal([...timers.values()][0].delay,120000);
+document.hidden=true;[...timers.values()][0].fn();await new Promise(setImmediate);
+assert.equal(calls,2);
+console.log('PRESENCE_UI_PASS: unique loop, hidden-tab pause, count-only refresh, unavailable dash and backoff');

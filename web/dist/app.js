@@ -21,6 +21,7 @@ import { bindComparisonExports } from "./comparison-export.js";
 import { openGroupExport } from './group-export.js';
 import { mountTrialRegistration } from './trial-registration.js';
 import { pageLoader } from './page-loader.js';
+import { presenceBadge, startPresence } from './presence.js';
 import { agencyComparison, orderAgencies } from './agency-comparison.js';
 import { annualDailyComparison } from './annual-daily-comparison.js';
 import { onlineIndicators } from './online-indicators.js';
@@ -44,6 +45,8 @@ let googleLoginEnabled = false;
 let localSimulation = false;
 let localGoogleTrial = false;
 let signedInUser = null;
+const agencyRestricted = () => signedInUser?.accessTier === "agency" && signedInUser.role !== "admin";
+const canSelectUnit = (id) => (!agencyRestricted() || id === signedInUser?.unitId) && data.units.some(item => item.departmentId === id);
 let data;
 let state;
 let overviewTab = "overview";
@@ -128,8 +131,7 @@ async function loadLibrary() {
     libraryLoading = true;
     try {
         const params = libraryParams();
-        if (!paidRequestsEnabled)
-            params.set("root_department_id", rootId);
+        params.set("root_department_id", rootId);
         const response = await fetch(`/api/v1/${paidRequestsEnabled ? "me/formalities" : "dashboard/formalities"}?${params}`);
         if (!response.ok)
             throw new Error("Chưa đọc được danh sách thủ tục đã khai thác.");
@@ -166,12 +168,15 @@ async function loadMyRequests(markRead = false) {
     window.clearTimeout(historyTimer);
     historyLoading = true;
     historyError = "";
+    const rootId = data.province.id;
     try {
-        const response = await fetch(paidRequestsEnabled ? "/api/v1/me/formality-requests" : "/api/v1/collection-jobs?limit=100");
+        const response = await fetch(paidRequestsEnabled ? `/api/v1/me/formality-requests?root_department_id=${encodeURIComponent(rootId)}` : "/api/v1/collection-jobs?limit=100");
         if (!response.ok)
             throw new Error("Chưa đọc được lịch sử yêu cầu.");
         if (paidRequestsEnabled) {
             const body = await response.json();
+            if (data.province.id !== rootId)
+                return;
             pendingRequestCount = body.pendingRequests ?? null;
             unreadNotifications = body.unreadNotifications ?? 0;
             const previous = new Map(myRequests.map(item => [item.id, item.state]));
@@ -271,7 +276,7 @@ async function prepareCollection() {
         render();
         try {
             const selected = period();
-            const response = await fetch("/api/v1/me/collection-quote", { method: "POST", headers: { "Content-Type": "application/json", "X-QD766-CSRF": signedInUser?.csrfToken ?? "" }, body: JSON.stringify({ periodType: selected.type, year: selected.year, periodValue: selected.value ?? null, formalityIds: ids }) });
+            const response = await fetch("/api/v1/me/collection-quote", { method: "POST", headers: { "Content-Type": "application/json", "X-QD766-CSRF": signedInUser?.csrfToken ?? "" }, body: JSON.stringify({ rootDepartmentId: data.province.id, periodType: selected.type, year: selected.year, periodValue: selected.value ?? null, formalityIds: ids }) });
             const body = await response.json();
             if (!response.ok && !(response.status === 403 && body.blockedReason === "subscription_expired")) {
                 throw new Error(body.detail ?? "Chưa xác định được Credit sử dụng.");
@@ -381,6 +386,10 @@ function normalizeLoadedData(loaded) {
     }
     if (!Array.isArray(loaded.units) || !loaded.units.length)
         loaded.units = [...discovered.values()];
+    if (agencyRestricted()) {
+        loaded.units = loaded.units.filter(item => item.departmentId === signedInUser?.unitId);
+        loaded.defaultUnitId = signedInUser?.unitId ?? "";
+    }
     if (!loaded.defaultUnitId)
         loaded.defaultUnitId = loaded.province.id;
     if (!Array.isArray(loaded.metricCatalog))
@@ -428,10 +437,11 @@ const alphabet = new Intl.Collator("vi", { sensitivity: "base", numeric: true })
 const displayProvinceName = (value) => value.replace(/^UBND\s+(tỉnh|thành phố)\s+/i, "");
 const byName = (left, right) => alphabet.compare(left.departmentName, right.departmentName);
 const unitOptions = () => {
+    const selectable = agencyRestricted() ? data.units.filter(item => item.departmentId === signedInUser?.unitId) : data.units;
     const groups = [
-        { label: "Kết quả chung toàn tỉnh", items: data.units.filter(item => item.departmentId === data.province.id) },
-        { label: "Sở, ban, ngành", items: data.units.filter(item => item.departmentId !== data.province.id && item.departmentLevel === "PROVINCE") },
-        { label: "Xã, phường", items: data.units.filter(item => item.departmentLevel === "COMMUNE") },
+        { label: "Kết quả chung toàn tỉnh", items: selectable.filter(item => item.departmentId === data.province.id) },
+        { label: "Sở, ban, ngành", items: selectable.filter(item => item.departmentId !== data.province.id && item.departmentLevel === "PROVINCE") },
+        { label: "Xã, phường", items: selectable.filter(item => item.departmentLevel === "COMMUNE") },
     ];
     return groups.map(group => `<optgroup label="${group.label}">${group.items.sort(byName).map(item => `<option value="${esc(item.departmentId)}" ${item.departmentId === state.unitId ? "selected" : ""}>${esc(item.departmentName)}</option>`).join("")}</optgroup>`).join("");
 };
@@ -477,7 +487,8 @@ function shell(content) {
     const pageNotes = state.screen === "formulas" || (state.screen === "overview" && state.demo === "normal") ? "" :
         ["time", "peers", "procedure", "quality"].includes(state.screen) ?
             (notices || comparisonHint || qualityHint ? `<details class="comparison-notes"><summary>Lưu ý</summary>${notices + comparisonHint + qualityHint}</details>` : "") : notices;
-    root.innerHTML = `<div class="app-shell enterprise-mode ${["overview", "formulas"].includes(state.screen) ? "bento-mode" : ""}">${nav()}<div class="workspace">${context()}<main class="content">${pageNotes}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : state.modal === "collection" ? collectionConfirmation() : ""}${completionMessage ? `<div class="collection-toast" role="status"><strong>Hoàn tất</strong><span>${esc(completionMessage)}</span><button class="btn small" data-action="dismiss-completion">Đóng</button></div>` : ""}</div>`;
+    const contextMarkup = context().replace('<div class="context-actions">', `<div class="context-actions">${presenceBadge()}`);
+    root.innerHTML = `<div class="app-shell enterprise-mode ${["overview", "formulas"].includes(state.screen) ? "bento-mode" : ""}">${nav()}<div class="workspace">${contextMarkup}<main class="content">${pageNotes}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : state.modal === "collection" ? collectionConfirmation() : ""}${completionMessage ? `<div class="collection-toast" role="status"><strong>Hoàn tất</strong><span>${esc(completionMessage)}</span><button class="btn small" data-action="dismiss-completion">Đóng</button></div>` : ""}</div>`;
     if (localSimulation)
         root.querySelector(".content")?.insertAdjacentHTML("afterbegin", '<div class="period-notice"><strong>THỬ NGHIỆM LOCAL · DỮ LIỆU MÔ PHỎNG</strong><span>Không gọi Cổng DVCQG, không trừ credit thật.</span><a class="btn small" href="/local-trial.html">Đổi tài khoản / thử kết quả job</a></div>');
     if (localGoogleTrial)
@@ -791,7 +802,7 @@ function time() {
 }
 function peers() {
     const selected = data.units.find(item => item.departmentId === state.unitId);
-    const restricted = signedInUser?.accessTier === "agency";
+    const restricted = agencyRestricted();
     const allowed = restricted ? data.units.filter(item => item.departmentId === signedInUser?.unitId) : data.units;
     const previous = previousAvailablePeriod(data, state.periodId, state.scope);
     const prior = previous ? data.snapshots[snapshotKey(previous.id, state.scope, data.formality.id)] ?? null : null;
@@ -1179,7 +1190,7 @@ function bind() {
     document.querySelectorAll("[data-agency-level]").forEach(el => el.addEventListener("click", () => { agencyLevel = el.dataset.agencyLevel; state.search = ""; render(); }));
     document.querySelectorAll("[data-peer-unit]").forEach(el => el.addEventListener("click", () => {
         const id = el.dataset.peerUnit;
-        if (!id || !data.units.some(item => item.departmentId === id) || (signedInUser?.accessTier === "agency" && id !== signedInUser.unitId))
+        if (!id || !canSelectUnit(id))
             return;
         state.unitId = id;
         state.screen = "overview";
@@ -1196,7 +1207,10 @@ function bind() {
     document.querySelector("[data-action=clear-metric-detail]")?.addEventListener("click", () => { state.selectedMetric = null; render(); });
     document.querySelector("[data-action=close-group-detail]")?.addEventListener("click", () => { state.selectedGroup = null; state.selectedMetric = null; render(); document.querySelector("#group-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }); });
     document.querySelector("#province-select")?.addEventListener("change", e => { void switchProvince(e.target.value); });
-    document.querySelector("#unit-select")?.addEventListener("change", e => { state.unitId = e.target.value; state.selectedGroup = null; state.selectedMetric = null; saveSelectionUrl(); render(); });
+    document.querySelector("#unit-select")?.addEventListener("change", e => { const id = e.target.value; if (!canSelectUnit(id)) {
+        render();
+        return;
+    } state.unitId = id; state.selectedGroup = null; state.selectedMetric = null; saveSelectionUrl(); render(); });
     document.querySelector("#period-type")?.addEventListener("change", e => { const type = e.target.value; const currentYear = period().year; const matches = data.periods.filter(item => item.type === type && item.year === currentYear); const fallback = data.periods.filter(item => item.type === type); const match = latestPeriod(matches) ?? latestPeriod(fallback); if (match)
         void selectPeriod(match.id); });
     document.querySelector("#period-value")?.addEventListener("change", e => { void selectPeriod(e.target.value); });
@@ -1280,6 +1294,9 @@ function mergeUnits(snapshot) {
     const known = new Set(data.units.map(item => item.departmentId));
     for (const dataset of snapshot.datasets) {
         for (const entity of [dataset.root, ...dataset.children]) {
+            // Peer scores are comparison evidence, not selectable account scope.
+            if (agencyRestricted() && entity.departmentId !== signedInUser?.unitId)
+                continue;
             if (known.has(entity.departmentId))
                 continue;
             data.units.push({ departmentId: entity.departmentId, departmentName: entity.departmentName, departmentType: entity.departmentType, departmentLevel: entity.departmentLevel });
@@ -1289,6 +1306,9 @@ function mergeUnits(snapshot) {
 }
 async function selectPeriod(periodId) {
     completionMessage = "";
+    creditQuote = null;
+    confirmationToken = "";
+    state.modal = "none";
     state.periodId = periodId;
     state.selectedGroup = null;
     state.selectedMetric = null;
@@ -1559,6 +1579,9 @@ async function openProvince(rootDepartmentId, requestId) {
     if (!initialPeriod)
         throw new Error("Tỉnh/thành phố chưa có kỳ báo cáo hoàn chỉnh");
     data = loaded;
+    creditQuote = null;
+    confirmationToken = "";
+    myRequests = [];
     pendingProvinceId = "";
     document.title = "Hệ thống phân tích Bộ chỉ số 766";
     catalogPreview = { loading: false, error: null, level: "", field: "", query: "", fields: [], selected: 0, available: 0, missing: 0, items: [], selectedId: null, offset: 0, mode: "single" };
@@ -1571,6 +1594,9 @@ async function openProvince(rootDepartmentId, requestId) {
 async function switchProvince(rootDepartmentId) {
     if (rootDepartmentId === data.province.id)
         return;
+    creditQuote = null;
+    confirmationToken = "";
+    state.modal = "none";
     const requestId = ++selectionRequest;
     pendingProvinceId = rootDepartmentId;
     ++catalogPreviewRequest;
@@ -1662,6 +1688,7 @@ async function start() {
                 return;
             }
         }
+        startPresence();
         const remembered = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
         const rememberedProvince = remembered.get("province");
         const dashboardUrl = rememberedProvince ? `/api/v1/dashboard?fast=true&compact=true&root_department_id=${encodeURIComponent(rememberedProvince)}` : "/api/v1/dashboard?fast=true&compact=true";
@@ -1688,7 +1715,7 @@ async function start() {
         if (rememberedPeriod)
             state.periodId = rememberedPeriod.id;
         const rememberedUnit = remembered.get("unit");
-        if (rememberedUnit && data.units.some(item => item.departmentId === rememberedUnit))
+        if (rememberedUnit && canSelectUnit(rememberedUnit))
             state.unitId = rememberedUnit;
         if (data.snapshots[snapshotKey(state.periodId, "all", "")]?.detailsLoaded === false)
             await loadSelection();

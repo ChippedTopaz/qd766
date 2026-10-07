@@ -27,10 +27,19 @@ globalThis.fetch=async(url,options)=>{
   else if(url==='/api/v1/dashboard/provinces')body=[];
   else if(url.includes('/province-rankings'))body=[];
   else if(url.includes('/preview?'))body={counts:{selected:1,available:0,missing:1},fields:['Lĩnh vực thử'],items:[item]};
-  else if(url.startsWith('/api/v1/me/formalities?'))body={items:owned?[item]:[]};
-  else if(url==='/api/v1/me/collection-quote')body={quote:'signed-quote',items:[{...item,cost:3,owned:false}],totalCredits:3,availableCredits:10};
+  else if(url.startsWith('/api/v1/me/formalities?')){
+    assert.equal(new URL(url,'https://example.test').searchParams.get('root_department_id'),data.province.id);
+    body={items:owned?[item]:[]};
+  }
+  else if(url==='/api/v1/me/collection-quote'){
+    assert.equal(JSON.parse(options.body).rootDepartmentId,data.province.id);
+    body={quote:'signed-quote',items:[{...item,cost:3,owned:false}],totalCredits:3,availableCredits:10};
+  }
   else if(url==='/api/v1/me/formality-requests'&&options?.method==='POST')return new Promise(resolve=>{finishConfirmation=()=>{owned=true;rows=[{id:'request-1',state:'ready',formalityId:item.id,code:item.code,name:item.name,periodType:'month',year:2026,periodValue:10,creditCost:3,createdAt:'2026-10-03',error:null}];resolve({ok:true,json:async()=>({items:rows,availableCredits:7})});};});
-  else if(url==='/api/v1/me/formality-requests')body={items:rows,availableCredits:10};
+  else if(url.startsWith('/api/v1/me/formality-requests?')){
+    assert.equal(new URL(url,'https://example.test').searchParams.get('root_department_id'),data.province.id);
+    body={items:rows,availableCredits:10};
+  }
   else if(url.includes('/selection?'))body={snapshot:compactRestore?original:{...original,scope:'formality',formalityId:item.id},metadata:{detailsAvailable:true,capturedAt:'2026-10-03T00:00:00Z'}};
   else throw new Error('Unexpected URL '+url);
   return {ok:true,status:200,json:async()=>structuredClone(body)};
@@ -55,6 +64,7 @@ if(compactRestore){
   controls.get('overview').handlers.click();await settle();
   controls.get('#scope-select').handlers.change({target:{value:'formality'}});await settle();
   assert.match(root.innerHTML,/Thủ tục đã khai thác/);assert.doesNotMatch(root.innerHTML,/catalog-list/);
+  assert.match(root.innerHTML,/Đang online: <strong data-online-count>/);
   assert.match(root.innerHTML,/<div class="context-bottom"><label class="field saved-formality">/);
   controls.get('new').handlers.click();await settle();assert.match(root.innerHTML,/Khai thác dữ liệu TTHC/);
   const query=control('#catalog-query');query.value='đất';document.activeElement=query;

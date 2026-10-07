@@ -16,6 +16,19 @@ from qd766.periods import PeriodSelection
 from test_backend import snapshot_payload,ROOT_ID,CHILD_ID
 
 class DailyHistoryTest(unittest.TestCase):
+    def test_different_source_agencies_retained_without_fabricated_scores(self):
+        stamp=datetime(2026,10,7,4,10,tzinfo=VIETNAM);root=uuid.uuid4();one=uuid.uuid4();two=uuid.uuid4()
+        datasets=[SimpleNamespace(group_name=group,entities=[SimpleNamespace(entity_kind='root',api_score=1),
+            SimpleNamespace(entity_kind='child',department_id=one)]+([SimpleNamespace(entity_kind='child',department_id=two)] if index==0 else []))
+            for index,group in enumerate(NATIONAL_GROUP_CODES)]
+        snapshot=SimpleNamespace(state='complete',scope='all',root_department_id=root,period_type='year',year=2026,period_value=None,created_at=stamp,datasets=datasets)
+        summary=SimpleNamespace(period_type='year',year=2026,period_value=None,captured_at=stamp,group_count=6,province_count=34,completeness_state='complete')
+        coverage=validate_daily_snapshot(snapshot,summary,date(2026,10,6),stamp-timedelta(minutes=10),PeriodSelection('year',2026,None),root)
+        self.assertEqual(coverage['completeUnits'],1);self.assertEqual(coverage['sourceUnits'],2)
+        self.assertEqual(len(coverage['missingByGroup']),5)
+        self.assertEqual(len(datasets[0].entities),3);self.assertEqual(len(datasets[1].entities),2)
+        with self.assertRaises(ValueError):validate_daily_snapshot(snapshot,summary,date(2026,10,6),stamp+timedelta(minutes=1),PeriodSelection('year',2026,None),root)
+
     def test_reporting_day_and_rollovers(self):
         day,boundary,periods=daily_target(datetime(2026,10,6,4,tzinfo=VIETNAM))
         self.assertEqual(day,date(2026,10,5));self.assertEqual(boundary.hour,4)

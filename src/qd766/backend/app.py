@@ -42,6 +42,9 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
                   redoc_url=None if resolved.public_read_only else "/redoc",
                   openapi_url=None if resolved.public_read_only else "/openapi.json")
     app.state.settings = resolved
+    from .presence import PresenceTracker, router as presence_router
+    app.state.presence=PresenceTracker()
+    app.include_router(presence_router)
     if resolved.local_google_trial:
         from starlette.responses import JSONResponse
         @app.middleware("http")

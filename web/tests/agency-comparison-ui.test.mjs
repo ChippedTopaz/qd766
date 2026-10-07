@@ -20,7 +20,7 @@ globalThis.document={title:'',querySelector:s=>s==='#app'?app:null,querySelector
   }
   return [];
 }};
-globalThis.window={setTimeout};globalThis.location={search:'?period=month-2026-09',hash:'',pathname:'/'};
+globalThis.window={setTimeout:(fn,delay)=>{const timer=setTimeout(fn,delay);timer.unref();return timer},clearTimeout};globalThis.location={search:'?period=month-2026-09',hash:'',pathname:'/'};
 let savedUrl='';globalThis.history={state:null,replaceState(_s,_title,url){savedUrl=url}};
 globalThis.scrollTo=()=>{};
 const calls=[];globalThis.fetch=async(url,options)=>{
