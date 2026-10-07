@@ -593,6 +593,8 @@ function progressDetail(entity:Entity):string|null {
 
 interface ComparisonPoint {label:string;score:number;maximum:number|null}
 function metricPoint(entity:Entity,key:string):ComparisonPoint|null{
+  const comparison=entity.comparisonPoints?.[key];
+  if(comparison&&Number.isFinite(comparison.score))return comparison;
   if(key==="progress:on-time"){
     const result=analyzeProgressScore(entity);
     return result?.calculatedScore===null||result?.calculatedScore===undefined?null:{label:"Tỷ lệ hồ sơ giải quyết đúng hạn",score:result.calculatedScore,maximum:result.maxScore};
