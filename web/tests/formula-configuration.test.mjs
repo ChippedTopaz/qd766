@@ -2,7 +2,23 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
-import {defaultFormulaConfiguration,renderFormulaReference} from '../dist/formula-reference.js';
+import {defaultFormulaConfiguration,renderFormulaReference,formulaDisplayCode} from '../dist/formula-reference.js';
+test('payment reference displays 3.5a without mutating saved identifiers or content',()=>{
+ const config=defaultFormulaConfiguration();
+ const payment=config.groups.find(g=>g.id==='formality-online-payment-tree');
+ const item=payment.items.find(f=>f.id==='3.5');
+ item.businessLines=['Nội dung quản trị đã lưu'];
+ const before=JSON.stringify(config);
+ const html=renderFormulaReference(payment.id,config);
+ assert.match(html,/<span class="formula-code">3\.5a<\/span>/);
+ assert.match(html,/<span class="formula-code">3\.5b<\/span>/);
+ assert.match(html,/Nội dung quản trị đã lưu/);
+ assert.equal(JSON.stringify(config),before);
+ assert.equal(formulaDisplayCode('3.5'),'3.5a');
+ assert.equal(formulaDisplayCode('3.5b'),'3.5b');
+ const admin=readFileSync(new URL('../dist/admin-formula-configuration.js',import.meta.url),'utf8');
+ assert.match(admin,/formulaDisplayCode\(f.id\)/);
+});
 test('original content is preserved except the requested proportional-score expressions',async()=>{
  const original=readFileSync(new URL('./fixtures/formula-reference-before-editor.txt',import.meta.url),'utf8');
  const js=ts.transpileModule(original,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText.replace(/from ['"]\.\/([^'"]+)['"]/g,(_,file)=>`from '${new URL('../dist/'+file,import.meta.url).href}'`);

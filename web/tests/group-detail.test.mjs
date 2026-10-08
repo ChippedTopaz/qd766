@@ -23,7 +23,10 @@ assert.match(app,/progressDetail\(entity, state.scope === "formality" && catalog
 assert.match(detail,/Hồ sơ quá hạn giải quyết/);
 assert.doesNotMatch(detail,/Hồ sơ ngoài nhóm|hai chữ số|phần còn lại|progress-formula|<small>hồ sơ/);
 assert.match(detail,/<th>Công thức<\/th>/);
-assert.match(detail,/21.751 \/ 33.699 × 20,00 = 12,91 điểm/);
+assert.match(detail,/Tỷ lệ hồ sơ giải quyết đúng hạn × 20,00/);
+assert.doesNotMatch(detail,/Tổng hồ sơ tiếp nhận − Hồ sơ đúng hạn/);
+assert.match(detail,/<td>Hồ sơ quá hạn \/ Tổng hồ sơ tiếp nhận × 100%<\/td>/);
+assert.match(detail,/12,91 \/ 20,00 điểm/);
 assert.match(detail,/11.948 hồ sơ/);
 assert(detail.indexOf('<td><button class="row-link">Hồ sơ giải quyết đúng hạn')<detail.indexOf('<td>Hồ sơ quá hạn giải quyết'));
 assert(detail.indexOf('<td>Hồ sơ quá hạn giải quyết')<detail.indexOf('<td>Tổng hồ sơ tiếp nhận'));

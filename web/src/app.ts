@@ -19,7 +19,8 @@ import { openPersonalCredits, requestCreditDisplay } from "./personal-credits.js
 import { accountMenu, bindAccountMenu } from "./account-menu.js";
 import { collectionCopy, insufficientCreditMessage } from "./collection-copy.js";
 import { changeTone, rankImprovement } from "./change-tone.js";
-import { overviewTabs, overviewTabItems, adjacentGroup, type OverviewTab } from "./overview-tabs.js";
+import { overviewTabs, overviewTabItems, type OverviewTab } from "./overview-tabs.js";
+import {transitionOverview,transitionDetail,cancelOverviewMotion} from './overview-motion.js';
 import { bindComparisonExports } from "./comparison-export.js";
 import {openGroupExport} from './group-export.js';
 import {mountTrialRegistration} from './trial-registration.js';
@@ -47,7 +48,7 @@ if (!root) throw new Error("Thiếu app root");
 
 const screens: Array<{id: ScreenId; label: string; icon: string}> = [
   {id:"overview",label:"Tổng quan",icon:"⌂"},{id:"time",label:"So sánh theo thời gian",icon:"↗"},
-  {id:"peers",label:"So sánh theo cơ quan",icon:"≋"},{id:"procedure",label:"Theo TTHC",icon:"▦"},
+  {id:"peers",label:"So sánh theo cơ quan",icon:"≋"},{id:"procedure",label:"Tra cứu theo TTHC",icon:"▦"},
   {id:"suggestions",label:"Gợi ý",icon:"◇"},{id:"quality",label:"Chất lượng dữ liệu",icon:"✓"},
   {id:"formulas",label:"Công thức tính",icon:"∑"},
   {id:"operations",label:"Vận hành",icon:"⚙"},
@@ -88,6 +89,18 @@ const benchmarkLoading=new Set<string>();
 interface CatalogItem {id:string;code:string;name:string;field:string;publishingAgency:string;executionLevels:string[];available:boolean}
 interface CatalogPreview {loading:boolean;error:string|null;level:""|"province"|"ward";field:string;query:string;fields:string[];selected:number;available:number;missing:number;items:CatalogItem[];selectedId:string|null;offset:number;mode:"single"|"filtered"}
 let catalogPreview:CatalogPreview={loading:false,error:null,level:"",field:"",query:"",fields:[],selected:0,available:0,missing:0,items:[],selectedId:null,offset:0,mode:"single"};
+let catalogDefaultContext:string|null=null;
+function initializeCatalogLevel():void {
+  const context=[signedInUser?.id,signedInUser?.accessTier,signedInUser?.unitId,data.province.id].join(':');
+  if(catalogDefaultContext===context)return;
+  const assigned=signedInUser?.accessTier==='agency'
+    ?data.units.find(unit=>unit.departmentId===signedInUser?.unitId):null;
+  catalogPreview.level=assigned?.departmentLevel==='COMMUNE'||assigned?.departmentType==='COMMUNE'
+    ?'ward':assigned&&(assigned.departmentType==='PROVINCIAL_DEPARTMENT'||assigned.departmentLevel==='PROVINCE')&&assigned.departmentId!==data.province.id
+    ?'province':'';
+  catalogPreview.selectedId=null;catalogPreview.offset=0;
+  catalogDefaultContext=context;
+}
 let catalogPreviewRequest=0;
 let catalogSearchTimer=0;
 interface LibraryItem {id:string;code:string;name:string}
@@ -210,8 +223,8 @@ function requestPeriod(item:MyRequest):string{return item.periodType==="month"?`
 function acquisitionPage():string{
   if(!canAcquire())return `<section class="panel"><div class="empty-state"><h2>Khai thác dữ liệu theo TTHC</h2><p>Đăng nhập tài khoản được cấp quyền để tạo yêu cầu khai thác.</p></div></section>`;
   const labels:Record<string,string>={ready:"Hoàn thành",succeeded:"Hoàn thành",waiting:"Đang chờ",reserved:"Đang chờ",queued:"Đang chờ",running:"Đang xử lý",refunded:"Thất bại",failed:"Thất bại",halted:"Đã dừng"};
-  const historyView=`<section class="panel"><div class="panel-head"><h2>${paidRequestsEnabled?"Yêu cầu của tôi":"Yêu cầu trên máy cơ quan"}</h2><button class="btn small" data-action="refresh-history">Làm mới</button></div>${historyError?`<p class="collection-error">${esc(historyError)}</p>`:""}<div class="table-wrap"><table><thead><tr><th>Thủ tục hành chính</th><th>Kỳ</th><th>Trạng thái</th><th>Credit</th><th></th></tr></thead><tbody>${myRequests.map(item=>`<tr><td><b>${esc(item.code)}</b><span class="request-name" title="${esc(item.name)}">${esc(item.name)}</span></td><td>${esc(requestPeriod(item))}</td><td><span class="badge ${["ready","succeeded"].includes(item.state)?"good":"neutral"}">${esc(labels[item.state]??item.state)}</span></td><td>${requestCreditDisplay(item.state,item.creditCost)}</td><td>${["ready","succeeded"].includes(item.state)?`<button class="btn small" data-view-request="${esc(item.id)}">Xem dữ liệu</button>`:""}</td></tr>`).join("")||`<tr><td colspan="5">${historyLoading?"Đang đọc lịch sử…":"Chưa có yêu cầu nào."}</td></tr>`}</tbody></table></div></section>`;
-  return `<header class="bento-heading"><h1>Khai thác dữ liệu TTHC</h1>${paidRequestsEnabled?`<span class="badge ${pendingRequestCount!==null&&pendingRequestCount>=2?"warn":"neutral"}">${pendingRequestCount===null?"Tối đa 2 yêu cầu đang chờ / xử lý":`${int(pendingRequestCount)}/2 yêu cầu đang chờ / xử lý`}</span>`:""}<p>${esc(data.province.name)} · ${esc(period().label)}</p></header><div class="collection-tabs"><button class="btn ${collectionTab==="new"?"primary":""}" data-collection-tab="new">Tạo yêu cầu</button><button class="btn ${collectionTab==="history"?"primary":""}" data-collection-tab="history">${paidRequestsEnabled?"Yêu cầu của tôi":"Lịch sử quản trị"}</button></div>${acquisitionMessage?`<p class="collection-feedback" role="status">${esc(acquisitionMessage)}</p>`:""}${collectionTab==="new"?catalogReady():historyView}`;
+  const historyView=`<section class="panel"><div class="panel-head"><h2>${paidRequestsEnabled?"Lịch sử tra cứu":"Yêu cầu trên máy cơ quan"}</h2><button class="btn small" data-action="refresh-history">Làm mới</button></div>${historyError?`<p class="collection-error">${esc(historyError)}</p>`:""}<div class="table-wrap"><table><thead><tr><th>Thủ tục hành chính</th><th>Kỳ</th><th>Trạng thái</th><th>Credit</th><th></th></tr></thead><tbody>${myRequests.map(item=>`<tr><td><b>${esc(item.code)}</b><span class="request-name" title="${esc(item.name)}">${esc(item.name)}</span></td><td>${esc(requestPeriod(item))}</td><td><span class="badge ${["ready","succeeded"].includes(item.state)?"good":"neutral"}">${esc(labels[item.state]??item.state)}</span></td><td>${requestCreditDisplay(item.state,item.creditCost)}</td><td>${["ready","succeeded"].includes(item.state)?`<button class="btn small" data-view-request="${esc(item.id)}">Xem dữ liệu</button>`:""}</td></tr>`).join("")||`<tr><td colspan="5">${historyLoading?"Đang đọc lịch sử…":"Chưa có yêu cầu nào."}</td></tr>`}</tbody></table></div></section>`;
+  return `<header class="bento-heading"><h1>Khai thác dữ liệu TTHC</h1>${paidRequestsEnabled?`<span class="badge ${pendingRequestCount!==null&&pendingRequestCount>=2?"warn":"neutral"}">${pendingRequestCount===null?"Tối đa 2 yêu cầu đang chờ / xử lý":`${int(pendingRequestCount)}/2 yêu cầu đang chờ / xử lý`}</span>`:""}<p>${esc(data.province.name)} · ${esc(period().label)}</p></header><div class="collection-tabs"><button class="btn ${collectionTab==="new"?"primary":""}" data-collection-tab="new">Tạo yêu cầu</button><button class="btn ${collectionTab==="history"?"primary":""}" data-collection-tab="history">${paidRequestsEnabled?"Lịch sử tra cứu":"Lịch sử quản trị"}</button></div>${acquisitionMessage?`<p class="collection-feedback" role="status">${esc(acquisitionMessage)}</p>`:""}${collectionTab==="new"?catalogReady():historyView}`;
 }
 function collectionConfirmation():string{
   const selected=catalogPreview.items.find(item=>item.id===catalogPreview.selectedId);
@@ -371,9 +384,10 @@ const unitOptions = () => {
 function nav(): string {
   const html=baseNav();
   const account=signedInUser?accountMenu(signedInUser).replace(/(<div class="account-zone"[^>]*>)/,'$1'+triviaMarkup()):'';
-  const collection=publicReadOnly&&paidRequestsEnabled&&canAcquire()?`<button type="button" data-nav="procedure" class="${state.screen==="procedure"?"active":""}"><span class="nav-icon" aria-hidden="true">${icon("document")}</span><span>Theo TTHC</span></button>`:"";
+  const collection=publicReadOnly&&paidRequestsEnabled&&canAcquire()?`<button type="button" data-nav="procedure" class="${state.screen==="procedure"?"active":""}"><span class="nav-icon" aria-hidden="true">${icon("document")}</span><span>Tra cứu theo TTHC</span></button>`:"";
 const admin=signedInUser?.role==="admin"?`<button type="button" data-action="open-admin" title="Quản trị hệ thống"><span class="nav-icon" aria-hidden="true">${icon("shield")}</span><span>Quản trị hệ thống</span></button>`:"";
-  return html.replace("</nav>",collection+admin+"</nav>").replace(/<div class="side-meta">[\s\S]*?<\/div><\/div><\/aside>$/,signedInUser?account+"</aside>":'$&');
+  const navigation=collection?html.replace(/(<button data-nav="peers"[^>]*>[\s\S]*?<\/button>)/,(_,button)=>button+collection):html;
+  return navigation.replace("</nav>",admin+"</nav>").replace(/<div class="side-meta">[\s\S]*?<\/div><\/div><\/aside>$/,signedInUser?account+"</aside>":'$&');
 }
 function baseNav(): string {
 return `<aside class="sidebar"><div class="brand"><span class="brand-mark"><img class="cchc-logo" src="/assets/logo-cchc.png" alt="Cải cách hành chính" width="40" height="40"></span><span><strong>Phân tích QĐ766</strong><small>Phục vụ cơ quan hành chính</small></span></div><div class="nav-label">Không gian làm việc</div><nav class="nav" aria-label="Điều hướng chính">${screens.filter(item=>(item.id!=="quality"||signedInUser?.role==="admin")&&(!publicReadOnly||!["procedure","operations","suggestions"].includes(item.id))).map((item)=>`<button data-nav="${item.id}" class="${state.screen===item.id?"active":""}" aria-current="${state.screen===item.id?"page":"false"}"><span class="nav-icon" aria-hidden="true">${icon(({overview:"shield",time:"chart",peers:"monitor",procedure:"document",suggestions:"star",quality:"shield",operations:"clock",formulas:"document"})[item.id])}</span><span>${item.label}</span></button>`).join("")}</nav><div class="side-meta"><div><span class="sync-dot"></span>Dữ liệu đã cập nhật</div><div>Toàn tỉnh · Sở, ngành · Xã, phường</div><div>Kết quả từ hệ thống công bố</div></div></aside>`;
@@ -393,6 +407,7 @@ return `<header class="contextbar"><div class="context-fields"><label class="fie
 }
 
 function shell(content: string): void {
+  cancelOverviewMotion();
   root.setAttribute("aria-busy", "false");
   // Async search refreshes replace the shell; preserve only the active search input.
   // Never reclaim focus if the user has moved to another control in the meantime.
@@ -514,12 +529,12 @@ function overview(): string {
   ${overviewStatus()}</section>
   <div id="overview-tab-panel" role="tabpanel" aria-labelledby="overview-tab-${overviewTab}">
   ${overviewTab==="overview"?`
-  <section class="bento-top" aria-label="Tổng điểm và sáu nhóm chỉ tiêu"><article class="bento-card hero-card"><div class="bento-card-head"><div><h2>Điểm tổng hợp 766</h2><p>Bộ chỉ số phục vụ người dân, doanh nghiệp</p></div><span class="badge ${gaugeLevel(view.totalMaximum===100?view.totalScore:view.ratio).tone}">${gaugeLevel(view.totalMaximum===100?view.totalScore:view.ratio).label}</span></div>${gauge(view.totalScore,view.totalMaximum)}
+  <section class="bento-top" data-overview-layout="overview" aria-label="Tổng điểm và sáu nhóm chỉ tiêu"><article class="bento-card hero-card" data-motion-card="total"><div class="bento-card-head"><div><h2>Điểm tổng hợp 766</h2><p>Bộ chỉ số phục vụ người dân, doanh nghiệp</p></div><span class="badge ${gaugeLevel(view.totalMaximum===100?view.totalScore:view.ratio).tone}">${gaugeLevel(view.totalMaximum===100?view.totalScore:view.ratio).label}</span></div>${gauge(view.totalScore,view.totalMaximum)}
   <div class="hero-comparison"><div><span>Thứ hạng cùng cấp</span><strong>${currentRank?`${currentRank.rank}/${currentRank.total}`:"Chưa xếp hạng"}</strong><small>${currentRank?`Phân vị P${Math.round(currentRank.percentile)}${currentRank.tiedCount>1?" · đồng hạng":""}`:"Cùng kỳ, cùng phạm vi"}</small></div>${period().type==='year'&&state.scope==='all'?annualDailyComparison(dailyHistoryCache.get(dailyContext().key)?.history??null,annualObservationDates.get(dailyContext().key),dailyHistoryCache.get(dailyContext().key)?.loading??true,dailyHistoryCache.get(dailyContext().key)?.error??''):`<div><span>So với kỳ trước</span><strong class="${changeTone(scoreChange)}">${scoreChange===null?"Chưa đủ kỳ":`${scoreChange>=0?"+":""}${n(scoreChange)} điểm`}</strong><small>${previousPeriod?esc(previousPeriod.label):"Cần kỳ liền trước cùng loại"}</small></div>`}</div>
   <div class="hero-footer"><span class="${changeTone(rankChange)}">${rankChange===null?"Chưa đủ dữ liệu biến động thứ hạng":rankChange===0?"Thứ hạng không đổi":`Thứ hạng ${rankChange>0?"tăng":"giảm"} ${Math.abs(rankChange)} bậc`}</span><span>${view.groups.filter(g=>g.score.value!==null).length}/6 nhóm có điểm</span></div></article>
   <div class="bento-pillars">${view.groups.map(groupPanel).join("")}</div></section>
-  <section class="bento-charts"><article class="bento-card trend-card"><div class="bento-card-head"><div><h2>Xu hướng điểm</h2><p>Lịch sử của cơ quan đang chọn · ${period().type==="month"?"Theo tháng":period().type==="quarter"?"Theo quý":"Theo năm"}</p></div><span class="bento-icon">${icon("chart")}</span></div>${trendChart(points,data.groupOrder,hiddenTrendGroups)}</article><article class="bento-card composition-card"><div class="bento-card-head"><div><h2>Cơ cấu điểm 766</h2><p>Đóng góp của sáu nhóm chỉ tiêu</p></div></div>${composition(view)}</article></section>
-  `:overviewTab==="details"?overviewGroupNavigator(view)+overviewGroupDetail(view):`
+  <section class="bento-charts" data-overview-content><article class="bento-card trend-card"><div class="bento-card-head"><div><h2>Xu hướng điểm</h2><p>Lịch sử của cơ quan đang chọn · ${period().type==="month"?"Theo tháng":period().type==="quarter"?"Theo quý":"Theo năm"}</p></div><span class="bento-icon">${icon("chart")}</span></div>${trendChart(points,data.groupOrder,hiddenTrendGroups)}</article><article class="bento-card composition-card"><div class="bento-card-head"><div><h2>Cơ cấu điểm 766</h2><p>Đóng góp của sáu nhóm chỉ tiêu</p></div></div>${composition(view)}</article></section>
+  `:overviewTab==="details"?overviewGroupNavigator(view)+`<div data-overview-content>${overviewGroupDetail(view)}</div>`:`
   ${renderPaidAnalysis(analysisSelection(),Boolean(signedInUser),geminiAnalysisEnabled)}`}</div>`;
 }
 
@@ -528,8 +543,9 @@ function groupTableHeading(label:string,extra=''):string {
 }
 
 function overviewGroupNavigator(view:UnitView):string{
-  const group=view.groups.find(item=>item.id===state.selectedGroup);
-  return `<div class="overview-group-nav" style="--group-accent:${group?groupColors[group.id]:'#4f46e5'}" aria-label="Chuyển nhóm chỉ tiêu"><button class="btn" data-group-step="-1" aria-label="Nhóm chỉ tiêu trước"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5l-7 7 7 7M7 12h13"/></svg></button><div aria-live="polite"><strong>${esc(group?.label??"Tổng hợp 6 nhóm chỉ tiêu")}</strong></div><button class="btn" data-group-step="1" aria-label="Nhóm chỉ tiêu tiếp theo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5l7 7-7 7M4 12h13"/></svg></button></div>`;
+  const total=`<button type="button" class="score-tile score-total" data-motion-card="total" data-score-total aria-pressed="${state.selectedGroup===null}" style="--tile-color:#4f46e5"><span>Điểm tổng hợp</span><strong>${n(view.totalScore)}<small>/ ${n(view.totalMaximum)}</small></strong></button>`;
+  const groups=view.groups.map(group=>`<button type="button" class="score-tile" data-motion-card="${group.id}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup===group.id}" style="--tile-color:${groupColors[group.id]}"><span>${esc(group.label)}</span><strong>${n(scoreValue(group))}<small>/ ${n(group.maximum)}</small></strong></button>`).join('');
+  return `<nav class="overview-score-strip" data-overview-layout="details" aria-label="Chọn điểm tổng hợp hoặc nhóm chỉ tiêu">${total}${groups}</nav>`;
 }
 
 function overviewStatus():string{
@@ -548,7 +564,7 @@ function groupPanel(group: UnitGroupView): string {
   const priorScore=prior?scoreValue(prior):null;
   const delta=score!==null&&priorScore!==null?score-priorScore:null;
   const level=gaugeLevel(ratio);
-  return `<button class="bento-card pillar-card ${state.selectedGroup===group.id?"selected":""}" style="--pillar-color:${groupColors[group.id]}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup===group.id}"><div class="pillar-heading"><h3>${esc(group.label)}</h3><span class="bento-icon">${groupIcon(group.id)}</span></div><div class="pillar-score" data-score-tone="${level.tone}"><strong>${n(score)}</strong><span>/ ${n(maximum)}</span></div><div class="pillar-meta"><span class="${changeTone(delta)}">${delta===null?"Chưa đủ kỳ trước":`${delta>=0?"+":""}${n(delta)} đ`}</span><span>${peer?`Hạng ${peer.rank}/${peer.total}`:"Chưa xếp hạng"}</span></div><div class="pillar-progress" role="img" aria-label="${ratio===null?"Chưa có tỷ lệ điểm":`Đạt ${pct(ratio)} điểm tối đa`}"><i style="width:${Math.max(0,Math.min(ratio??0,100))}%"></i></div><div class="pillar-bottom"><span>${ratio===null?"Chưa có điểm":pct(ratio)+" điểm tối đa"}</span><span>${peer?`Trung vị ${n(peer.median)} đ`:"Xem chi tiết →"}</span></div></button>`;
+  return `<button class="bento-card pillar-card ${state.selectedGroup===group.id?"selected":""}" style="--pillar-color:${groupColors[group.id]}" data-motion-card="${group.id}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup===group.id}"><div class="pillar-heading"><h3>${esc(group.label)}</h3><span class="bento-icon">${groupIcon(group.id)}</span></div><div class="pillar-score" data-score-tone="${level.tone}"><strong>${n(score)}</strong><span>/ ${n(maximum)}</span></div><div class="pillar-meta"><span class="${changeTone(delta)}">${delta===null?"Chưa đủ kỳ trước":`${delta>=0?"+":""}${n(delta)} đ`}</span><span>${peer?`Hạng ${peer.rank}/${peer.total}`:"Chưa xếp hạng"}</span></div><div class="pillar-progress" role="img" aria-label="${ratio===null?"Chưa có tỷ lệ điểm":`Đạt ${pct(ratio)} điểm tối đa`}"><i style="width:${Math.max(0,Math.min(ratio??0,100))}%"></i></div><div class="pillar-bottom"><span>${ratio===null?"Chưa có điểm":pct(ratio)+" điểm tối đa"}</span><span>${peer?`Trung vị ${n(peer.median)} đ`:"Xem chi tiết →"}</span></div></button>`;
 }
 
 function totalPeerComparison(view:UnitView):string{
@@ -583,13 +599,13 @@ function groupComparisonSummary(view:UnitView):string{
   return `<section class="panel group-comparison" id="group-detail"><div class="panel-head"><div><p class="eyebrow">Tổng hợp 6 nhóm chỉ tiêu</p><h2>Điểm số và biến động theo kỳ</h2><p>${esc(view.name)} · ${esc(period().label)}${previousPeriod?` so với ${esc(previousPeriod.label)}`:" · chưa có kỳ trước cùng loại"}</p></div></div><div class="detail-columns"><div class="detail-metrics-card">${groupTableHeading("Điểm 6 nhóm chỉ tiêu")}<div class="table-wrap"><table class="summary-table"><thead><tr><th>Tên nhóm chỉ tiêu</th><th>Điểm số</th><th>Điểm kỳ trước</th><th>Tăng/giảm so với kỳ trước</th><th>Tăng/giảm thứ hạng</th></tr></thead><tbody>${rows}</tbody></table></div></div>${totalPeerComparison(view)}</div></section>`;
 }
 
-function onlineAnalysis(entity:Entity):{rows:string[];notice:string;catalog:string}|null {
+function onlineAnalysis(entity:Entity):{rows:string[];catalog:string}|null {
   // Do not substitute provincial parameters for the selected child agency.
   if(entity.departmentId!==data.province.id)return null;
   const indicators=onlineIndicators(entity.parameters);
   if(!indicators.length)return null;
   const derived=indicators.map(r=>`<tr><td>${esc(r.name)}<small class="online-indicator-formula">${esc(r.formula)}</small></td><td class="num">${int(r.numerator)}</td><td class="num">${int(r.denominator)}</td><td class="num">${pct(r.ratio)}</td><td colspan="3">Chưa có điểm thành phần từ nguồn</td></tr>`);
-  return {rows:derived,catalog:"",notice:'<p class="online-indicator-note">Các tỷ lệ dưới đây tính từ tham số nguồn để đối chiếu dashboard Cổng DVCQG, không phải công thức quy đổi điểm. Điểm nhóm giữ nguyên theo Cổng công bố. Tỷ lệ DVCTT phát sinh hồ sơ là của kỳ đang chọn; biểu đồ tháng cần số liệu riêng từng tháng.</p>'};
+  return {rows:derived,catalog:""};
 }
 
 function progressDetail(entity:Entity,showAverage=false):string|null {
@@ -598,10 +614,10 @@ function progressDetail(entity:Entity,showAverage=false):string|null {
   const progressPercent=(value:number|null)=>value===null?"—":`${n(value)}%`;
   const formula=analysis.onTimeRatio===null||analysis.calculatedScore===null
     ? "Không tính tỷ lệ khi tổng hồ sơ tiếp nhận bằng 0."
-    : `${int(analysis.totalOnTime)} / ${int(analysis.totalReceived)} × ${n(analysis.maxScore)} = ${n(analysis.calculatedScore)} điểm`;
+    : `Tỷ lệ hồ sơ giải quyết đúng hạn × ${n(analysis.maxScore)}`;
   const averageDays=analysis.averageProcessingDays===null?"N/A":`${n(analysis.averageProcessingDays)} ngày`;
   const difference=analysis.matchesApi===false?`<small class="progress-discrepancy">Chênh ${n(Math.abs(analysis.difference??0),3)} điểm so với điểm nguồn</small>`:"";
-  return `<div class="progress-kpis"><article><span>Tổng hồ sơ tiếp nhận</span><strong class="num">${int(analysis.totalReceived)}</strong></article><article><span>Giải quyết đúng hạn</span><strong class="num positive">${int(analysis.totalOnTime)}</strong></article><article><span>Hồ sơ quá hạn giải quyết</span><strong class="num negative">${int(analysis.totalOverdue)}</strong></article>${showAverage?`<article><span>Giải quyết trung bình</span><strong class="num">${averageDays}</strong></article>`:""}</div><div class="table-wrap"><table class="metric-table progress-table"><thead><tr><th>Nội dung</th><th>Số lượng</th><th>Tỷ lệ</th><th>Công thức</th></tr></thead><tbody><tr class="selectable-row ${state.selectedMetric==="progress:on-time"?"selected":""}" data-metric-detail="progress:on-time"><td><button class="row-link">Hồ sơ giải quyết đúng hạn</button></td><td class="num">${int(analysis.totalOnTime)} hồ sơ</td><td class="num positive">${progressPercent(analysis.onTimeRatio)}</td><td>Hồ sơ đúng hạn / Tổng hồ sơ tiếp nhận × 100%</td></tr><tr><td>Hồ sơ quá hạn giải quyết</td><td class="num">${int(analysis.totalOverdue)} hồ sơ</td><td class="num negative">${progressPercent(analysis.overdueRatio)}</td><td>${analysis.overdueDerived?"Tổng hồ sơ tiếp nhận − Hồ sơ đúng hạn; ":""}Hồ sơ quá hạn / Tổng hồ sơ tiếp nhận × 100%</td></tr><tr><td>Tổng hồ sơ tiếp nhận</td><td class="num">${int(analysis.totalReceived)} hồ sơ</td><td class="num">—</td><td>—</td></tr>${showAverage?`<tr><td>Thời gian giải quyết trung bình</td><td class="num">${averageDays}</td><td class="num">—</td><td>Theo số liệu Cổng DVCQG</td></tr>`:""}</tbody><tfoot><tr><td>Điểm tính đối chiếu</td><td colspan="2" class="num">${n(analysis.calculatedScore)} / ${n(analysis.maxScore)} điểm</td><td>${esc(formula)}${difference}</td></tr></tfoot></table></div>`;
+  return `<div class="progress-kpis"><article><span>Tổng hồ sơ tiếp nhận</span><strong class="num">${int(analysis.totalReceived)}</strong></article><article><span>Giải quyết đúng hạn</span><strong class="num positive">${int(analysis.totalOnTime)}</strong></article><article><span>Hồ sơ quá hạn giải quyết</span><strong class="num negative">${int(analysis.totalOverdue)}</strong></article>${showAverage?`<article><span>Giải quyết trung bình</span><strong class="num">${averageDays}</strong></article>`:""}</div><div class="table-wrap"><table class="metric-table progress-table"><thead><tr><th>Nội dung</th><th>Số lượng</th><th>Tỷ lệ</th><th>Công thức</th></tr></thead><tbody><tr class="selectable-row ${state.selectedMetric==="progress:on-time"?"selected":""}" data-metric-detail="progress:on-time"><td><button class="row-link">Hồ sơ giải quyết đúng hạn</button></td><td class="num">${int(analysis.totalOnTime)} hồ sơ</td><td class="num positive">${progressPercent(analysis.onTimeRatio)}</td><td>Hồ sơ đúng hạn / Tổng hồ sơ tiếp nhận × 100%</td></tr><tr><td>Hồ sơ quá hạn giải quyết</td><td class="num">${int(analysis.totalOverdue)} hồ sơ</td><td class="num negative">${progressPercent(analysis.overdueRatio)}</td><td>Hồ sơ quá hạn / Tổng hồ sơ tiếp nhận × 100%</td></tr><tr><td>Tổng hồ sơ tiếp nhận</td><td class="num">${int(analysis.totalReceived)} hồ sơ</td><td class="num">—</td><td>—</td></tr>${showAverage?`<tr><td>Thời gian giải quyết trung bình</td><td class="num">${averageDays}</td><td class="num">—</td><td>Theo số liệu Cổng DVCQG</td></tr>`:""}</tbody><tfoot><tr><td>Điểm tính đối chiếu</td><td colspan="2" class="num">${n(analysis.calculatedScore)} / ${n(analysis.maxScore)} điểm</td><td>${esc(formula)}${difference}</td></tr></tfoot></table></div>`;
 }
 
 interface ComparisonPoint {label:string;score:number;maximum:number|null}
@@ -691,7 +707,7 @@ function overviewGroupDetail(view: UnitView): string {
     :"Nhóm này chưa có số liệu thành phần để hiển thị.";
   const heading=`<div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary"><button class="text-button" data-action="close-group-detail">← Xem lại 6 nhóm</button>${state.selectedMetric?`<button class="text-button" data-action="clear-metric-detail">← So sánh cả nhóm</button>`:""}<strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${detailRank?`Hạng ${detailRank.rank}/${detailRank.total}`:"Chưa xếp hạng"}</span></div></div>`;
   if(progress)return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card progress-detail">${groupTableHeading("Kết quả các chỉ tiêu thành phần")}${referenceNotice(group.id)}${progress}</div>${comparison}</div></section>`;
-  return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card">${groupTableHeading("Kết quả các chỉ tiêu thành phần",provinceButton)}${referenceNotice(group.id)}${provinceNotice}${calculated?.notice??""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length?rows.join(""):`<tr><td colspan="7">${esc(emptyDetailMessage)}</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div>${comparison}</div></section>`;
+  return `<section class="panel group-detail${group.id==='provide-online-tree'?' online-detail-full':''}" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card">${groupTableHeading("Kết quả các chỉ tiêu thành phần",provinceButton)}${referenceNotice(group.id)}${provinceNotice}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length?rows.join(""):`<tr><td colspan="7">${esc(emptyDetailMessage)}</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div>${comparison}</div></section>`;
 }
 
 function miniTicket(item: Suggestion, good: boolean): string { return `<div class="mini-ticket"><i class="ticket-dot ${good?"good":""}"></i><div><strong>${esc(item.finding)}</strong><p>${esc(item.evidence)} ${esc(item.action)}</p></div></div>`; }
@@ -768,7 +784,7 @@ function diagnostic(group:UnitGroupView):string {
   const rows=group.id==='formality-online-payment-tree'?paymentRows(entity.parameters).join(''):calculated?calculated.rows.join(""):entity.metrics.length?entity.metrics.map(m=>`<tr><td>${esc(m.name)}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiScore!==null&&m.apiMaxScore!==null?n(Math.max(0,m.apiMaxScore-m.apiScore)):"N/A"}</td></tr>`).join(""):Object.entries(entity.parameters).map(([key,value])=>`<tr><td>${esc(parameterLabels[key]??"Chỉ số nghiệp vụ")}</td><td colspan="3" class="num">${esc(typeof value==="number"?int(value):value)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`).join("");
   const lost=entity.apiScore!==null&&entity.apiMaxScore!==null?Math.max(0,entity.apiMaxScore-entity.apiScore):null;
   const description=calculated||group.id==='formality-online-payment-tree'?"Ba chỉ tiêu thành phần được tính lại để giải thích điểm; điểm Cổng công bố vẫn là giá trị chính thức.":group.dataset?.schemaKind==="parameters"?"Hiển thị các số liệu nghiệp vụ thành phần; chưa có đủ dữ liệu để phân rã điểm.":"Kết quả chi tiết theo chỉ tiêu thành phần.";
-  return `<section class="panel" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>${description}</p></div><span class="badge ${calculated?"good":"info"}">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div>${referenceNotice(group.id)}${calculated?.notice??""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows||`<tr><td colspan="7">Chưa có số liệu chi tiết.</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></section>`;
+  return `<section class="panel${group.id==='provide-online-tree'?' online-detail-full':''}" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>${description}</p></div><span class="badge ${calculated?"good":"info"}">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div>${referenceNotice(group.id)}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows||`<tr><td colspan="7">Chưa có số liệu chi tiết.</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></section>`;
 }
 
 function suggestions(): string {
@@ -792,6 +808,7 @@ function quality(): string {
 }
 
 function catalogReady():string{
+  initializeCatalogLevel();
   const selected=catalogPreview.items.find(item=>item.id===catalogPreview.selectedId)??null;
   const rows=catalogPreview.items.map(item=>`<label class="catalog-row ${item.id===catalogPreview.selectedId&&catalogPreview.mode==="single"?"selected":""}">${catalogPreview.mode==="single"?`<input type="radio" name="catalog-formality" value="${esc(item.id)}" ${item.id===catalogPreview.selectedId?"checked":""}>`:`<span class="catalog-batch-mark">✓</span>`}<span><strong>${esc(item.code)}</strong><small title="${esc(item.name)}">${esc(item.name)}</small><em>${esc(item.field||"Chưa phân loại")}</em></span></label>`).join("");
   const first=catalogPreview.selected?catalogPreview.offset+1:0;
@@ -942,9 +959,11 @@ function bind(): void {
   }));
   document.querySelectorAll<HTMLElement>('[data-overview-tab]').forEach(button=>{
     const activate=(tab:OverviewTab)=>{
-      overviewTab=tab;
-      if(tab==="details"){state.selectedGroup=null;state.selectedMetric=null;}
-      render();
+      transitionOverview(()=>{
+        overviewTab=tab;
+        if(tab==="details"){state.selectedGroup=null;state.selectedMetric=null;}
+        render();
+      });
       document.querySelector<HTMLElement>(`[data-overview-tab="${tab}"]`)?.focus({preventScroll:true});
     };
     button.addEventListener("click",()=>activate(button.dataset.overviewTab as OverviewTab));
@@ -955,11 +974,17 @@ function bind(): void {
       if(target){event.preventDefault();activate(target.id);}
     });
   });
-  document.querySelectorAll<HTMLElement>('[data-group-step]').forEach(button=>button.addEventListener("click",()=>{
-    state.selectedGroup=adjacentGroup(data.groupOrder,state.selectedGroup,Number(button.dataset.groupStep));
-    state.selectedMetric=null;
-    render();
-    document.querySelector<HTMLElement>(`[data-group-step="${button.dataset.groupStep}"]`)?.focus({preventScroll:true});
+  document.querySelector<HTMLElement>('[data-score-total]')?.addEventListener('click',()=>{
+    transitionDetail(()=>{state.selectedGroup=null;state.selectedMetric=null;render();},'total');
+    document.querySelector<HTMLElement>('[data-score-total]')?.focus({preventScroll:true});
+  });
+  document.querySelectorAll<HTMLElement>('.overview-score-strip button').forEach(button=>button.addEventListener('keydown',event=>{
+    const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;
+    event.preventDefault();
+    const buttons=Array.from(document.querySelectorAll<HTMLElement>('.overview-score-strip button'));
+    const index=buttons.indexOf(button);
+    const target=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowRight'?1:buttons.length-1))%buttons.length;
+    buttons[target]?.focus({preventScroll:true});buttons[target]?.scrollIntoView({behavior:'auto',block:'nearest',inline:'nearest'});
   }));
   document.querySelectorAll<HTMLElement>('[data-action=new-collection]').forEach(el=>el.addEventListener('click',()=>{void openAcquisition()}));
   document.querySelectorAll<HTMLElement>('[data-action=request-history]').forEach(el=>el.addEventListener('click',()=>{void openAcquisition('history')}));
@@ -1028,11 +1053,16 @@ function bind(): void {
     state.peerSortDirection=state.peerDimension===dimension?(state.peerSortDirection==="desc"?"asc":"desc"):"desc";
     state.peerDimension=dimension;render();
   }));
-  document.querySelectorAll<HTMLElement>("[data-group-detail]").forEach(el=>el.addEventListener("click",()=>{state.selectedGroup=el.dataset.groupDetail as GroupId;state.selectedMetric=null;overviewTab="details";render();document.querySelector(".overview-tabs")?.scrollIntoView({behavior:"smooth",block:"start"})}));
+  document.querySelectorAll<HTMLElement>("[data-group-detail]").forEach(el=>el.addEventListener("click",()=>{
+    const id=el.dataset.groupDetail as GroupId;
+    const update=()=>{state.selectedGroup=id;state.selectedMetric=null;overviewTab="details" as const;render();};
+    if(overviewTab==='details')transitionDetail(update,id);else transitionOverview(update);
+    document.querySelector<HTMLElement>(`.overview-score-strip [data-group-detail="${id}"]`)?.focus({preventScroll:true});
+  }));
   document.querySelectorAll<HTMLElement>("[data-metric-detail]").forEach(el=>el.addEventListener("click",()=>{state.selectedMetric=el.dataset.metricDetail??null;render();document.querySelector(".comparison-card")?.scrollIntoView({behavior:"smooth",block:"nearest"})}));
   document.querySelector<HTMLElement>("[data-action=clear-metric-detail]")?.addEventListener("click",()=>{state.selectedMetric=null;render()});
   document.querySelector<HTMLElement>('[data-action=toggle-online-province]')?.addEventListener('click',()=>{provinceOnlineViewKey=provinceOnlineViewKey===onlineProvinceKey()?null:onlineProvinceKey();render();});
-  document.querySelector<HTMLElement>("[data-action=close-group-detail]")?.addEventListener("click",()=>{state.selectedGroup=null;state.selectedMetric=null;render();document.querySelector("#group-detail")?.scrollIntoView({behavior:"smooth",block:"start"})});
+  document.querySelector<HTMLElement>("[data-action=close-group-detail]")?.addEventListener("click",()=>{transitionDetail(()=>{state.selectedGroup=null;state.selectedMetric=null;render();},'total');document.querySelector<HTMLElement>('[data-score-total]')?.focus({preventScroll:true});});
   document.querySelector<HTMLSelectElement>("#province-select")?.addEventListener("change",e=>{void switchProvince((e.target as HTMLSelectElement).value)});
   document.querySelector<HTMLSelectElement>("#unit-select")?.addEventListener("change",e=>{const id=(e.target as HTMLSelectElement).value;if(!canSelectUnit(id)){render();return;}state.unitId=id;state.selectedGroup=null;state.selectedMetric=null;saveSelectionUrl();render()});
   document.querySelector<HTMLSelectElement>("#period-type")?.addEventListener("change",e=>{const type=(e.target as HTMLSelectElement).value;const currentYear=period().year;const matches=data.periods.filter(item=>item.type===type&&item.year===currentYear);const fallback=data.periods.filter(item=>item.type===type);const match=latestPeriod(matches)??latestPeriod(fallback);if(match)void selectPeriod(match.id)});
@@ -1193,6 +1223,7 @@ async function requestFilteredBatch(requestId:number):Promise<void>{
 }
 
 async function loadCatalogPreview():Promise<void>{
+  initializeCatalogLevel();
   const requestId=++catalogPreviewRequest;
   const selected=period();
   catalogPreview.loading=true;
@@ -1267,6 +1298,7 @@ async function openProvince(rootDepartmentId:string,requestId:number):Promise<vo
   creditQuote=null;confirmationToken="";myRequests=[];
   pendingProvinceId="";
   document.title="Hệ thống phân tích Bộ chỉ số 766";
+  catalogDefaultContext=null;
   catalogPreview={loading:false,error:null,level:"",field:"",query:"",fields:[],selected:0,available:0,missing:0,items:[],selectedId:null,offset:0,mode:"single"};
   state={...state,periodId:initialPeriod.id,scope:"all",unitId:data.defaultUnitId,selectedGroup:null,selectedMetric:null,search:"",demo:"normal",modal:"none"};
   saveSelectionUrl();void loadLibrary();

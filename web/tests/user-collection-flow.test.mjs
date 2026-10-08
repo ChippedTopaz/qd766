@@ -78,7 +78,7 @@ if(compactRestore){
   assert.equal(calls.filter(c=>c.url==='/api/v1/me/formality-requests'&&c.method==='POST').length,0);
   controls.get('[data-action=confirm-collection]').handlers.click();controls.get('[data-action=confirm-collection]').handlers.click();await settle();
   assert.equal(calls.filter(c=>c.url==='/api/v1/me/formality-requests'&&c.method==='POST').length,1);
-  finishConfirmation();await settle();assert.match(root.innerHTML,/Yêu cầu của tôi/);assert.match(root.innerHTML,/Xem dữ liệu/);
+  finishConfirmation();await settle();assert.match(root.innerHTML,/Lịch sử tra cứu/);assert.match(root.innerHTML,/Xem dữ liệu/);
   controls.get('#saved-formality').handlers.change({target:{value:item.id}});await settle();
   assert(calls.some(c=>c.url.includes('/selection?')));assert(urls.at(-1).includes('scope=formality'));
   assert.doesNotMatch(root.innerHTML,/class="formality-notice|period-notice success/);

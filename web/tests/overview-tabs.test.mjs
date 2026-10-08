@@ -21,8 +21,11 @@ assert.match(app,/\$\{overviewTabs\(overviewTab\)\}\s*\$\{overviewStatus\(\)\}<\
 assert.match(app,/if\(tab==="details"\)\{state\.selectedGroup=null;state\.selectedMetric=null;\}/);
 const navigator=app.slice(app.indexOf('function overviewGroupNavigator('),app.indexOf('function overviewStatus('));
 assert.doesNotMatch(navigator,/data-group-export|<span>Nhóm chỉ tiêu<\/span>/);
-assert.match(navigator,/--group-accent/);
+assert.match(navigator,/overview-score-strip/);
+assert.match(navigator,/data-score-total/);
+assert.match(navigator,/--tile-color/);
+assert.doesNotMatch(navigator,/data-group-step|overview-group-nav/);
 assert.match(app,/groupTableHeading\("Điểm 6 nhóm chỉ tiêu"\)/);
 assert.match(app,/groupTableHeading\("Kết quả các chỉ tiêu thành phần"\)/);
-assert.match(app,/state\.selectedGroup=el\.dataset\.groupDetail as GroupId;state\.selectedMetric=null;overviewTab="details"/);
+assert.match(app,/if\(overviewTab==='details'\)transitionDetail\(update,id\);else transitionOverview\(update\)/);
 console.log('Group detail UI PASS: summary default, direct group selection, table-header export and colored navigator');

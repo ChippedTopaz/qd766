@@ -96,8 +96,9 @@ def leaderboard(request:Request):
         if not account.trial_admitted:raise HTTPException(403,'Tài khoản chưa được duyệt.')
         if not ready(db):raise HTTPException(503,'Hỏi đáp chưa được kích hoạt.')
         trivia_gate(db)
-        # Correct answers are lifetime surviving attempts, not the resettable round score.
-        counts=select(TriviaAnswer.account_id,func.count().label('correct_count')).where(
+        # Count each surviving question once across all rounds, only if answered
+        # correctly at least once. Replays must not inflate the leaderboard.
+        counts=select(TriviaAnswer.account_id,func.count(func.distinct(TriviaAnswer.question_id)).label('correct_count')).where(
             TriviaAnswer.correct.is_(True)).group_by(TriviaAnswer.account_id).subquery()
         correct_count=func.coalesce(counts.c.correct_count,0)
         rows=db.execute(select(UserAccount.display_name,Department.name,TriviaProfile.best,correct_count)

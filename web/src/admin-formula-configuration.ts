@@ -1,4 +1,4 @@
-import {defaultFormulaConfiguration,displayedFormulas,formulaCard,type Formula,type FormulaConfiguration} from './formula-reference.js';
+import {defaultFormulaConfiguration,displayedFormulas,formulaCard,formulaDisplayCode,type Formula,type FormulaConfiguration} from './formula-reference.js';
 import {groupColors,groupIcon} from './bento.js';
 import {highlightFormulaPreview,businessEditorLines,updateBusinessEditor} from './admin-formula-focus.js';
 type Api=<T>(path:string,body?:unknown)=>Promise<T>;
@@ -39,7 +39,7 @@ export function installFormulaConfiguration(root:HTMLElement,api:Api):void {
  }
  function options(){
   const items=displayedFormulas(group());
-  get<HTMLSelectElement>('[data-formula-item]').innerHTML=items.map(f=>`<option value="${f.id}">${f.id} · ${esc(f.title)}</option>`).join('');get<HTMLSelectElement>('[data-formula-item]').value=itemId;
+  get<HTMLSelectElement>('[data-formula-item]').innerHTML=items.map(f=>`<option value="${f.id}">${formulaDisplayCode(f.id)} · ${esc(f.title)}</option>`).join('');get<HTMLSelectElement>('[data-formula-item]').value=itemId;
  }
  function fill(){
   activeEditor=null;

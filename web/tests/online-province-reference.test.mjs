@@ -21,6 +21,13 @@ assert.match(html,/Xem điểm tỉnh/);assert.match(html,/Dữ liệu DVC trự
 html=render(true);
 assert.match(html,/Chi tiết DVC trực tuyến của Tỉnh mẫu/);assert.match(html,/Về điểm cơ quan/);
 assert.match(html,/TTHC cung cấp DVCTT toàn trình/);assert.doesNotMatch(html,/toàn trình trong tổng TTHC|Tham số nguồn/);
+assert.doesNotMatch(html,/Các tỷ lệ dưới đây tính từ tham số nguồn|online-indicator-note/);
+assert.match(html,/class="panel group-detail online-detail-full"/);
+assert.doesNotMatch(app,/calculated\?\.notice|online-indicator-note/);
+const css=readFileSync(new URL('../bento.css',import.meta.url),'utf8');
+assert.match(css,/#group-detail\.online-detail-full \.table-wrap\{max-height:none;overflow:visible\}/);
+// Other groups keep their existing bounded table scrolling.
+assert.match(css,/\.enterprise-mode \.table-wrap,\.enterprise-mode\.bento-mode #group-detail \.table-wrap\{max-height:65vh;overflow:auto\}/);
 assert.match(html,/<tfoot>[\s\S]*?<td class="num">6<\/td><td class="num">12<\/td><td class="num lost">6<\/td>/);
 assert.equal(entity.apiScore,6);assert.deepEqual(entity.parameters,{});
 delete dataset.provinceOnlineParameters;

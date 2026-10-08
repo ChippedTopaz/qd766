@@ -58,7 +58,7 @@ class TriviaTests(unittest.TestCase):
         self.assertEqual(set(a['question']),{'id','prompt','choices','roundId','expiresAt'})
         self.assertEqual(a['stats']['score'],0)
 
-    def test_leaderboard_top20_lifetime_totals_privacy_and_auth(self):
+    def test_leaderboard_top20_unique_questions_privacy_and_auth(self):
         from qd766.backend.models import Department
         q=self.create()
         province=uuid.uuid4()
@@ -79,7 +79,7 @@ class TriviaTests(unittest.TestCase):
         response=self.client.get('/api/v1/me/trivia/leaderboard')
         self.assertEqual(response.status_code,200,response.text)
         players=response.json()['players'];self.assertEqual(len(players),20)
-        self.assertEqual(players[0],{'rank':1,'name':'Người chơi 00','province':'UBND tỉnh thử nghiệm','best':25,'correctAnswers':2})
+        self.assertEqual(players[0],{'rank':1,'name':'Người chơi 00','province':'UBND tỉnh thử nghiệm','best':25,'correctAnswers':1})
         self.assertEqual(players[-1]['best'],6)
         self.assertNotIn('email',response.text);self.assertNotIn('external_subject',response.text)
         self.assertEqual(response.headers['cache-control'],'no-store')
@@ -87,6 +87,27 @@ class TriviaTests(unittest.TestCase):
         for token in (None,'pending','locked'):
             self.login(token)
             self.assertIn(self.client.get('/api/v1/me/trivia/leaderboard').status_code,(401,403))
+
+    def test_leaderboard_unique_count_and_tie_break_do_not_mutate_profiles(self):
+        first=self.create();second=self.create(prompt='Câu hỏi thứ hai?');third=self.create(prompt='Câu hỏi thứ ba?')
+        with self.app.state.session_factory.begin() as db:
+            for name, account_id in (('A',self.ids['owner']),('B',self.ids['agency'])):
+                db.get(UserAccount,account_id).display_name=name
+                db.add(TriviaProfile(account_id=account_id,best=3,score=7,streak=2))
+                # A has more correct attempts but only one distinct question.
+                answers=[(first,True)]*4+[(second,False)] if name=='A' else [(first,False),(first,True),(second,True),(second,True),(third,False)]
+                for question, correct in answers:
+                    db.add(TriviaAnswer(account_id=account_id,question_id=uuid.UUID(question['id']),round_id=uuid.uuid4(),
+                        correct=correct,timed_out=False,score_after=int(correct),streak_after=int(correct),best_after=3,answered_after=1))
+        self.login('agency')
+        result=self.client.get('/api/v1/me/trivia/leaderboard')
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual([(p['name'],p['correctAnswers'],p['best']) for p in result.json()['players']],[('B',2,3),('A',1,3)])
+        with self.app.state.session_factory() as db:
+            for account_id in (self.ids['owner'],self.ids['agency']):
+                profile=db.get(TriviaProfile,account_id)
+                self.assertEqual((profile.score,profile.streak,profile.best),(7,2,3))
+                self.assertEqual(db.get(UserAccount,account_id).credit_balance,123)
 
     def test_scoring_streak_wrong_and_idempotency_never_change_credit(self):
         first=self.create();second=self.create(prompt='Câu hỏi thứ hai cần được trả lời?');third=self.create(prompt='Câu hỏi thứ ba cần được trả lời?')

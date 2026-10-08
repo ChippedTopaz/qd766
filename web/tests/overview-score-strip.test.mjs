@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {groupColors} from '../dist/bento.js';
+const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+const code=app.slice(app.indexOf('function overviewGroupNavigator('),app.indexOf('function overviewStatus('));
+const view={totalScore:57,totalMaximum:100,groups:Object.keys(groupColors).map((id,i)=>({id,label:i===0?'Công khai <test>':id,score:{value:i===1?null:i},maximum:20}))};
+const state={selectedGroup:null};
+const render=new Function('state','groupColors','n','esc','scoreValue',code+';return overviewGroupNavigator;')(
+ state,groupColors,v=>v==null?'—':String(v),v=>v.replaceAll('<','&lt;').replaceAll('>','&gt;'),g=>g.score.value);
+const before=JSON.stringify(view),html=render(view);
+assert.equal((html.match(/class="score-tile/g)||[]).length,7);
+assert.equal((html.match(/aria-pressed="true"/g)||[]).length,1);
+assert.match(html,/data-motion-card="total" data-score-total aria-pressed="true"/);
+assert.match(html,/Công khai &lt;test&gt;/);
+assert.match(html,/<strong>0<small>\/ 20<\/small>/);
+assert.match(html,/<strong>—<small>\/ 20<\/small>/);
+assert(!html.includes('data-group-step'));
+state.selectedGroup=view.groups[2].id;
+assert.equal((render(view).match(/aria-pressed="true"/g)||[]).length,1);
+assert.equal(JSON.stringify(view),before);
+console.log('OVERVIEW_SCORE_STRIP_PASS: seven cards, summary default, selection, null/zero, source preservation');

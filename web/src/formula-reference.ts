@@ -103,6 +103,11 @@ function accordion(kind:string,label:string,body:string,expanded=false):string {
  return `<details class="formula-accordion formula-accordion-${kind}"${expanded?' open':''}><summary><span class="formula-accordion-icon" aria-hidden="true">${icon(mark)}</span><span>${label}</span><span class="formula-chevron" aria-hidden="true">⌄</span></summary><div class="formula-accordion-body">${body}</div></details>`;
 }
 
+// Keep persisted identifiers stable so historical and authored configurations
+// are unchanged; only the visible reference number is renamed.
+export function formulaDisplayCode(id:string):string {
+ return id==='3.5'?'3.5a':id;
+}
 export function formulaCard(group:GroupId,f:Formula):string {
  const maximum=f.maximum!==undefined?f.maximum:formulaMaximums[group].find(row=>row.formulaId===f.id)?.maximum??null;
  const maximumLabel=f.id==='5.1'?'Chỉ tiêu tham khảo · Không chấm điểm':maximumText(maximum);
@@ -115,7 +120,7 @@ export function formulaCard(group:GroupId,f:Formula):string {
  const symbols=f.symbols??(f.id==='3.3'?'Hệ số đồng bộ = tỷ lệ đồng bộ (%) / 100. Ví dụ: 80% → 0,8.':'');
  const business=`${scoring}<section class="formula-business"><h4>Mô tả nghiệp vụ</h4>${heading?`<p class="formula-business-heading">${esc(heading)}</p>`:''}${versionNote?`<p class="formula-version-note">${esc(versionNote)}</p>`:''}${sourceParagraphs(businessContent(f))}</section>`;
  const notes=sourceParagraphs(f.document.notes)+(clarification?`<div class="formula-clarification"><strong>Cần đối chiếu</strong><p>${esc(clarification)}</p></div>`:'');
- return `<article class="formula-card" data-formula-id="${f.id}"><div class="formula-card-heading"><span class="formula-code">${f.id}</span><h3>${esc(f.title)}</h3><div class="formula-card-meta"><span class="maximum-badge ${maximum===null?'unresolved':''}">${f.id==='5.1'?'':'Điểm tối đa: '}${maximumLabel}</span>${f.id!=='5.1'&&f.target?`<span class="badge good">Ngưỡng đạt: ${f.target}%</span>`:''}</div></div>
+ return `<article class="formula-card" data-formula-id="${f.id}"><div class="formula-card-heading"><span class="formula-code">${formulaDisplayCode(f.id)}</span><h3>${esc(f.title)}</h3><div class="formula-card-meta"><span class="maximum-badge ${maximum===null?'unresolved':''}">${f.id==='5.1'?'':'Điểm tối đa: '}${maximumLabel}</span>${f.id!=='5.1'&&f.target?`<span class="badge good">Ngưỡng đạt: ${f.target}%</span>`:''}</div></div>
  <section class="formula-math-section" aria-label="Công thức toán học">${mathNote?`<p class="formula-version-note">${esc(mathNote)}</p>`:''}<div class="formula-equation"><span>${esc(equationLabel)} =</span>${f.denominator?`<span class="formula-fraction"><span>${esc(f.numerator)}</span><span>${esc(f.denominator)}</span></span>`:`<strong>${esc(f.numerator)}</strong>`}<span>${esc(f.multiplier??'× 100%')}</span></div>${symbols?`<p class="formula-symbols">${esc(symbols)}</p>`:''}${additionalEquations(f)}</section>
  <div class="formula-accordions">${accordion('calculation','Nghiệp vụ và cách tính',business)}${accordion('sources','Nguồn dữ liệu',sourceParagraphs(f.document.dataSources))}${accordion('notes','Lưu ý khi đánh giá',notes)}</div></article>`;
 }

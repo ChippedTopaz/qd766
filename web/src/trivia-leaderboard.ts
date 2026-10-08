@@ -18,6 +18,6 @@ export async function openTriviaLeaderboard():Promise<void>{
     if(!Array.isArray(body.players))throw new Error('Dữ liệu bảng xếp hạng không hợp lệ.');
     if(!dialog.isConnected)return;
     const content=dialog.querySelector<HTMLElement>('[data-leaderboard-content]')!;
-    content.innerHTML=body.players.length?`<div class="trivia-leaderboard-scroll"><table><thead><tr><th>Hạng</th><th>Tên tài khoản Google</th><th>Tỉnh công tác</th><th>Chuỗi cao nhất</th><th>Câu trả lời đúng</th></tr></thead><tbody>${leaderboardRows(body.players)}</tbody></table></div><p class="trivia-leaderboard-note">Tổng số lượt trả lời đúng qua các lần chơi. Đồng chuỗi: ưu tiên người có nhiều lượt đúng hơn.</p>`:'Chưa có người chơi có câu trả lời đúng.';
+    content.innerHTML=body.players.length?`<div class="trivia-leaderboard-scroll"><table><thead><tr><th>Hạng</th><th>Tên tài khoản Google</th><th>Tỉnh công tác</th><th>Chuỗi cao nhất</th><th>Câu trả lời đúng</th></tr></thead><tbody>${leaderboardRows(body.players)}</tbody></table></div><p class="trivia-leaderboard-note">Mỗi câu hỏi trả lời đúng chỉ tính một lần, không tính trả lời lại. Đồng chuỗi: ưu tiên người có nhiều câu đúng khác nhau hơn.</p>`:'Chưa có người chơi có câu trả lời đúng.';
   }catch(error){if(dialog.isConnected)dialog.querySelector<HTMLElement>('[data-leaderboard-content]')!.textContent=(error as Error).name==='TimeoutError'?'Máy chủ phản hồi chậm. Vui lòng thử lại.':(error as Error).message;}
 }
