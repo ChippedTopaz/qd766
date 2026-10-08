@@ -1,3 +1,4 @@
+import {openTriviaLeaderboard} from './trivia-leaderboard.js';
 type Question={id:string;prompt:string;choices:string[];roundId:string;expiresAt:string};
 type Stats={score:number;streak:number;best:number;answered:number};
 type Result={correct:boolean;timedOut?:boolean;correctIndex:number;explanation:string;stats:Stats};
@@ -6,9 +7,14 @@ let question:Question|null=null,stats:Stats={score:0,streak:0,best:0,answered:0}
 let choice:number|null=null,started=false,busy=false,failed=false,message='',available=true,roundId='';
 let deadline=0,nextDeadline=0,retryAt=0,timer:ReturnType<typeof setInterval>|null=null;
 let mobileViewport:MediaQueryList|null=null;
+let compactViewport:MediaQueryList|null=null;
+let displayMode:'normal'|'minimized'|'expanded'='normal';
 const remaining=()=>Math.max(0,Math.ceil((deadline-performance.now())/1000));
 const clockText=()=>result?`Tiếp sau ${Math.max(0,Math.ceil((nextDeadline-performance.now())/1000))} giây`:`Còn ${remaining()} giây`;
+const displayIcon=(kind:'minus'|'plus'|'up'|'down')=>`<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="${kind==='minus'?'M4 8h8':kind==='plus'?'M4 8h8M8 4v8':kind==='up'?'M4 10l4-4 4 4':'M4 6l4 4 4-4'}"/></svg>`;
 export function triviaMarkup():string{
+  const mode=compactViewport?.matches&&displayMode==='normal'?'minimized':displayMode;
+  if(mode==='minimized')return `<section class="trivia-card trivia-minimized" aria-label="Hỏi đáp"><button type="button" class="trivia-minimized-bar" data-trivia-restore aria-label="Mở lại Hỏi đáp" title="Mở lại Hỏi đáp"><span class="trivia-bar-title">HỎI ĐÁP</span>${question?`<span class="trivia-clock" data-trivia-clock aria-live="off">${clockText()}</span>`:''}${displayIcon('up')}</button></section>`;
   const choices=question?.choices.map((text,i)=>`<label class="${result&&i===result.correctIndex?'trivia-correct':''}"><input type="radio" name="trivia-choice" value="${i}" ${choice===i?'checked':''} ${busy||result?'disabled':''}>${esc(text)}</label>`).join('');
   let body='',actions='';
   if(question){
@@ -18,21 +24,31 @@ export function triviaMarkup():string{
       `<button type="button" data-trivia-submit ${busy||choice===null?'disabled':''}>${busy?'Đang gửi…':'Gửi đáp án'}</button>`;
   }else{
     body=`<p>${busy?'Đang tải câu hỏi…':available?'Anh/chị đã trả lời hết Bộ câu hỏi.':'Ngân hàng câu hỏi chưa được mở.'}</p>`;
-    if(available&&roundId)actions+=`<button type="button" data-trivia-restart ${busy?'disabled':''}>Trả lời lại từ đầu</button>`;
+    if(available&&roundId)actions+=`<button type="button" data-trivia-leaderboard>Bảng xếp hạng</button><button type="button" data-trivia-restart ${busy?'disabled':''}>Trả lời lại từ đầu</button>`;
   }
   if(message)body+=`<p role="status">${esc(message)}</p>`;
   if(failed&&!result)actions+='<button type="button" data-trivia-next>Tải lại câu hỏi</button>';
-  return `<section class="trivia-card" aria-label="Hỏi - đáp nhanh"><div class="trivia-header"><h3>HỎI - ĐÁP NHANH</h3>${question?`<span class="trivia-clock" data-trivia-clock aria-live="off">${clockText()}</span>`:''}</div><div class="trivia-stats"><span>Điểm <b>${stats.score}</b></span><span>Chuỗi đúng <b>${stats.streak}</b></span><span title="Chuỗi đúng dài nhất">Kỷ lục <b>${stats.best}</b></span></div><div class="trivia-body"><div class="trivia-body-content">${body}</div></div><div class="trivia-actions">${actions}</div></section>`;
+  const controls=`<div class="trivia-display-controls"><button type="button" data-trivia-minimize aria-label="Ẩn câu hỏi" title="Ẩn câu hỏi">${displayIcon('minus')}</button><button type="button" data-trivia-expand title="${mode==='expanded'?'Thu về bình thường':'Mở rộng câu hỏi'}" aria-label="${mode==='expanded'?'Thu về bình thường':'Mở rộng câu hỏi'}" aria-pressed="${mode==='expanded'}">${displayIcon(mode==='expanded'?'down':'up')}</button></div>`;
+  return `<section class="trivia-card trivia-${mode}" aria-label="Hỏi đáp"><div class="trivia-header"><h3>HỎI ĐÁP</h3>${question?`<span class="trivia-clock" data-trivia-clock aria-live="off">${clockText()}</span>`:''}${controls}</div><div class="trivia-stats"><span>Điểm <b>${stats.score}</b></span><span>Chuỗi đúng <b>${stats.streak}</b></span><span title="Chuỗi đúng dài nhất">Kỷ lục <b>${stats.best}</b></span></div><div class="trivia-body"><div class="trivia-body-content">${body}</div></div><div class="trivia-actions">${actions}</div></section>`;
 }
 function paint(){document.querySelectorAll<HTMLElement>('.trivia-card').forEach(node=>{node.outerHTML=triviaMarkup()});}
 export function bindTrivia(csrf:string):void{
-  const card=document.querySelector<HTMLElement>('.trivia-card');if(!card)return;
+  let card=document.querySelector<HTMLElement>('.trivia-card');if(!card)return;
   if(!mobileViewport){
     mobileViewport=window.matchMedia('(max-width:760px)');
     mobileViewport.addEventListener('change',()=>bindTrivia(csrf));
   }
   if(mobileViewport.matches){if(timer){clearInterval(timer);timer=null}return;}
+  if(!compactViewport){
+    compactViewport=window.matchMedia('(min-width:761px) and (max-width:1100px)');
+    compactViewport.addEventListener('change',()=>{paint();bindTrivia(csrf)});
+    if(compactViewport.matches){paint();card=document.querySelector<HTMLElement>('.trivia-card');if(!card)return;}
+  }
   const render=()=>{paint();bindTrivia(csrf)};
+  card.querySelector('[data-trivia-restore]')?.addEventListener('click',()=>{displayMode=compactViewport?.matches?'expanded':'normal';render()});
+  card.querySelector('[data-trivia-leaderboard]')?.addEventListener('click',()=>void openTriviaLeaderboard());
+  card.querySelector('[data-trivia-minimize]')?.addEventListener('click',()=>{displayMode=displayMode==='minimized'?'normal':'minimized';render()});
+  card.querySelector('[data-trivia-expand]')?.addEventListener('click',()=>{displayMode=displayMode==='expanded'?'normal':'expanded';render()});
   const load=async(restart=false)=>{
     if(busy||mobileViewport?.matches)return;busy=true;failed=false;message='';render();const requestedAt=performance.now();
     try{

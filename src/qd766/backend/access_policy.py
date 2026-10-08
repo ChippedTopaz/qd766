@@ -11,7 +11,7 @@ BOOTSTRAP_PATHS = {"/api/v1/access-policy", "/api/v1/health/live", "/api/v1/heal
 
 PUBLIC_READ_PATHS = frozenset({
     "/api/v1/access-policy", "/api/v1/health/live", "/api/v1/health/ready",
-    "/api/v1/presence",
+    "/api/v1/presence", "/api/v1/formula-reference",
     "/api/v1/dashboard", "/api/v1/dashboard/selection", "/api/v1/dashboard/group-export",
     "/api/v1/dashboard/provinces", "/api/v1/dashboard/province-rankings", "/api/v1/dashboard/daily-history",
     "/api/v1/national-summaries", "/api/v1/national-summaries/latest",
@@ -55,8 +55,8 @@ async def enforce_public_read_only(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
-    if path in {'/api/v1/me/trivia','/api/v1/me/trivia/answer','/api/v1/me/trivia/restart'}:
-        expected='GET' if path=='/api/v1/me/trivia' else 'POST'
+    if path in {'/api/v1/me/trivia','/api/v1/me/trivia/leaderboard','/api/v1/me/trivia/answer','/api/v1/me/trivia/restart'}:
+        expected='GET' if path in {'/api/v1/me/trivia','/api/v1/me/trivia/leaderboard'} else 'POST'
         if request.method!=expected:return JSONResponse(status_code=405,content={'detail':'Method not allowed'})
         # Trivia handlers authenticate admitted accounts and validate CSRF for answers.
         # This capability is independent of paid collection and province selection.
@@ -81,7 +81,7 @@ async def enforce_public_read_only(request: Request, call_next):
             allowed=(request.method in {"GET","HEAD"} and path not in {"/api/v1/me/collection-quote","/api/v1/me/analysis"}) or (
                 request.method=="POST" and path in {"/api/v1/me/analysis","/api/v1/me/analysis/cancel","/api/v1/me/subscription/redemption","/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/notifications/read"})
     else:
-        allowed = allowed and (path in {"/", "/index.html", "/admin.html", "/admin.css", "/styles.css", "/bento.css", "/collection.css", "/assets/logo-cchc.png"}
+        allowed = allowed and (path in {"/", "/index.html", "/admin.html", "/admin.css", "/formula-admin.css", "/styles.css", "/bento.css", "/collection.css", "/assets/logo-cchc.png"}
             or path.startswith("/dist/") and path.endswith(".js")
             or path.startswith("/vendor/") and path.endswith((".js", ".css")))
     if not allowed:

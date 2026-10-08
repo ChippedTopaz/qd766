@@ -4,9 +4,13 @@ import {formulaMaximums,maximumText} from './formula-maximums.js';
 import {formulaDocument, type FormulaDocumentRow} from './formula-document.js';
 
 export const formulaSource = { name: formulaDocument.name, sha256:formulaDocument.sha256, version: 'Đối chiếu ngày 07/10/2026' };
-interface FormulaEquation { id:string; numerator:string; denominator:string; multiplier?:string; target?:number; caution?:string }
-interface Formula extends FormulaEquation { title:string; rules:string[]; document:FormulaDocumentRow }
-interface FormulaGroup { id:GroupId; name:string; maximum:number; items:Formula[] }
+export interface FormulaEquation { id:string; numerator:string; denominator:string; multiplier?:string; target?:number|null; caution?:string }
+export interface FormulaExtra {label:string;numerator:string;denominator:string;operator?:'add'|'subtract'|'multiply'|'divide';multiplier?:string}
+export interface Formula extends FormulaEquation { title:string; rules:string[]; document:FormulaDocumentRow; maximum?:number|null; equationLabel?:string; clarification?:string; businessLines?:string[]; businessHeading?:string; versionNote?:string; mathNote?:string; symbols?:string; extras?:FormulaExtra[] }
+export interface FormulaGroup { id:GroupId; name:string; maximum:number; items:Formula[] }
+export interface FormulaConfiguration {source:typeof formulaSource;groups:FormulaGroup[];guide:string[]}
+let activeConfiguration:FormulaConfiguration|null=null;
+export function setFormulaConfiguration(value:FormulaConfiguration):void {activeConfiguration=value;}
 const formulaDefinitions: {id:GroupId; name:string; maximum:number; items:FormulaEquation[]}[] = [
  {id:'transparency',name:'Công khai, minh bạch',maximum:18,items:[
   {id:'1.1',numerator:'TTHC công bố đúng hạn',denominator:'TTHC đã công bố trong kỳ'},
@@ -24,8 +28,9 @@ const formulaDefinitions: {id:GroupId; name:string; maximum:number; items:Formul
   {id:'3.3',numerator:'Hồ sơ trực tuyến đáp ứng điều kiện kết quả điện tử',denominator:'Tổng hồ sơ tiếp nhận trong kỳ',multiplier:'× hệ số đồng bộ × 100%',target:50,caution:'Không đủ căn cứ để dùng channelOnlineSum đơn độc khi chưa biết đã lọc kết quả điện tử và đã áp dụng hệ số đồng bộ hay chưa.'},
  ]},
  {id:'formality-online-payment-tree',name:'Thanh toán trực tuyến',maximum:10,items:[
-  {id:'3.5',numerator:'TTHC có hồ sơ đồng bộ phí, lệ phí khác 0/null',denominator:'TTHC có thông tin phí, lệ phí khác 0/null trong CSDL',target:80,caution:'Tài liệu có dòng “Bỏ thống kê” rồi tiếp tục bổ sung công thức; chưa rõ phần nào bị bỏ. Chưa tự gán trường API hoặc điểm tối đa riêng.'},
-  {id:'3.6',numerator:'Hồ sơ thanh toán trực tuyến trên DVCQG hoặc cổng bộ/ngành/địa phương',denominator:'Hồ sơ thuộc TTHC có phí, lệ phí − hồ sơ có toàn bộ phí đồng bộ bằng 0',caution:'Công thức đầu dùng số hồ sơ làm mẫu số, nhưng đoạn tình huống lại dùng số TTHC; đây là mâu thuẫn đơn vị cần xác nhận. Chưa tự tính điểm từ tham số hiện có.'},
+  {id:'3.5',numerator:'TTHC có yêu cầu nghĩa vụ tài chính được cung cấp trên Cổng DVCQG',denominator:'Tổng TTHC có yêu cầu nghĩa vụ tài chính',target:80},
+  {id:'3.5b',numerator:'TTHC có giao dịch thanh toán trực tuyến',denominator:'Tổng TTHC có yêu cầu nghĩa vụ tài chính (không trùng lặp)',target:80},
+  {id:'3.6',numerator:'Hồ sơ thanh toán trực tuyến thành công',denominator:'Hồ sơ có nghĩa vụ tài chính'},
  ]},
  {id:'dossier-digitized',name:'Số hóa hồ sơ',maximum:22,items:[
   {id:'4.1',numerator:'Hồ sơ có đường dẫn tệp kết quả điện tử hợp lệ',denominator:'Hồ sơ thuộc TTHC yêu cầu trả kết quả bằng văn bản, giấy tờ'},
@@ -47,9 +52,11 @@ const formulaDefinitions: {id:GroupId; name:string; maximum:number; items:Formul
 // remain independently sourced from captured API/METRICS, never inferred here.
 export const formulaGroups:FormulaGroup[]=formulaDefinitions.map(group=>({
  ...group, items:group.items.map(formula=>{
-  const document=formulaDocument.records.find(row=>row.id===formula.id.replace(/[ab]$/,''));
+  const document=formula.id==='3.5b'?{id:'3.5b',title:'Tỷ lệ TTHC có giao dịch thanh toán trực tuyến',group:'Thanh toán trực tuyến',business:['Số TTHC có giao dịch thanh toán trực tuyến / Tổng TTHC có yêu cầu nghĩa vụ tài chính (không trùng lặp) × 100%.','Tử số: totalDossierOnlineFormalityPaymentSuccess. Mẫu số: totalFeeDossierFormalityDistinct.','Tỷ lệ đạt từ 80% được 2 điểm; dưới 80% tính tỷ lệ / 80% × 2 điểm.'],notes:['Công thức đối chiếu từ API và biểu đồ Cổng DVCQG, được quản trị viên chấp thuận ngày 08/10/2026. Điểm tổng giữ theo nguồn.','Không tự quy đổi điểm khi thiếu dữ liệu hoặc mẫu số bằng 0.'],dataSources:['API formality-online-payment-tree và biểu đồ Thanh toán trực tuyến của Cổng DVCQG.']}:formulaDocument.records.find(row=>row.id===formula.id.replace(/[ab]$/,''));
   if(!document)throw new Error(`Missing formula document row: ${formula.id}`);
   let title=document.title;
+  if(formula.id==='3.5')title='Tỷ lệ TTHC có yêu cầu nghĩa vụ tài chính được cung cấp trên Cổng DVCQG';
+  if(formula.id==='3.6')title='Tỷ lệ hồ sơ thanh toán trực tuyến';
   if(formula.id==='4.5a')title=document.business.find(line=>line.startsWith('Tỷ lệ TTHC triển khai'))!.split(' = ')[0]!;
   if(formula.id==='4.5b')title=document.business.find(line=>line.startsWith('Tỷ lệ hồ sơ TTHC sử dụng'))!.split(' = ')[0]!;
   return {...formula,document,title,rules:document.business};
@@ -58,7 +65,7 @@ export const formulaGroups:FormulaGroup[]=formulaDefinitions.map(group=>({
 
 const esc=(v:string)=>v.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export function referenceNotice(id:GroupId):string {
- const group=formulaGroups.find(g=>g.id===id)!;
+ const group=(activeConfiguration?.groups??formulaGroups).find(g=>g.id===id)!;
  return `<button type="button" class="formula-inline formula-link" data-formula-group="${id}">∑ Công thức và điều kiện nghiệp vụ · ${esc(group.name)} <span aria-hidden="true">→</span></button>`;
 }
 function sourceParagraphs(lines:string[]):string {
@@ -72,6 +79,7 @@ function sourceParagraphs(lines:string[]):string {
 }
 
 function businessContent(f:Formula):string[] {
+ if(f.businessLines)return f.businessLines;
  const business=f.document!.business;
  // 4.5 contains two independently scored ratios. Keep each scope with its own
  // card; the account/data flags in the first half also define the second ratio.
@@ -82,7 +90,9 @@ function businessContent(f:Formula):string[] {
 }
 
 function additionalEquations(f:Formula):string {
- const fraction=(label:string,numerator:string,denominator:string)=>`<div class="formula-equation"><span>${esc(label)} =</span><span class="formula-fraction"><span>${esc(numerator)}</span><span>${esc(denominator)}</span></span><span>× 100%</span></div>`;
+ const fraction=(label:string,numerator:string,denominator:string)=>extra({label,numerator,denominator});
+ const extra=(e:FormulaExtra)=>{const op=e.operator??'divide',multiplier=e.multiplier??'× 100%';const expression=op==='divide'?`<span class="formula-fraction"><span>${esc(e.numerator)}</span><span>${esc(e.denominator)}</span></span>`:`<span class="formula-extra-expression">${multiplier?'(' : ''}<span>${esc(e.numerator)}</span><b>${({add:'+',subtract:'−',multiply:'×'} as const)[op]}</b><span>${esc(e.denominator)}</span>${multiplier?')' : ''}</span>`;return `<div class="formula-extra"><span class="formula-extra-label">Công thức phụ</span><div class="formula-equation"><span>${esc(e.label)} =</span>${expression}${multiplier?`<span>${esc(multiplier)}</span>`:''}</div></div>`;};
+ if(f.extras)return f.extras.map(extra).join('');
  if(f.id==='3.1')return fraction('Tỷ lệ toàn trình','TTHC cung cấp DVCTT toàn trình','TTHC đủ điều kiện thực hiện DVCTT toàn trình')+fraction('Tỷ lệ một phần','TTHC cung cấp DVCTT một phần','TTHC thuộc thẩm quyền giải quyết');
  if(f.id==='3.3')return fraction('Tỷ lệ trực tiếp','Hồ sơ tiếp nhận trong kỳ có kênh 1 hoặc thiếu kênh','Tổng hồ sơ tiếp nhận trong kỳ')+fraction('Tỷ lệ bưu chính','Hồ sơ tiếp nhận trong kỳ có kênh 3','Tổng hồ sơ tiếp nhận trong kỳ');
  return '';
@@ -93,30 +103,42 @@ function accordion(kind:string,label:string,body:string,expanded=false):string {
  return `<details class="formula-accordion formula-accordion-${kind}"${expanded?' open':''}><summary><span class="formula-accordion-icon" aria-hidden="true">${icon(mark)}</span><span>${label}</span><span class="formula-chevron" aria-hidden="true">⌄</span></summary><div class="formula-accordion-body">${body}</div></details>`;
 }
 
-function components(f:Formula):string {
- const terms=f.denominator?[['Tử số',f.numerator],['Mẫu số',f.denominator]]:[['Thành phần',f.numerator]];
- return `<dl class="formula-components">${terms.map(([label,value])=>`<div><dt>${label}:</dt> <dd>${esc(value!)}</dd></div>`).join('')}</dl>`;
-}
-
-function formulaCard(group:GroupId,f:Formula):string {
- const maximum=formulaMaximums[group].find(row=>row.formulaId===f.id)?.maximum??null;
- const maximumLabel=f.id==='5.1'?'Chỉ theo dõi · Không chấm điểm riêng':maximumText(maximum);
- const equationLabel=f.id==='2.2'?'Thời gian trung bình':f.id==='3.3'?'Tỷ lệ trực tuyến':'Tỷ lệ';
- const clarification=f.id==='2.1'?'Tài liệu mô tả cách xác định tỷ lệ đúng hạn; chưa nêu phép quy đổi điểm riêng. Điểm tối đa 20 được giữ theo dữ liệu đã xác định, không suy ra công thức chấm điểm từ mức điểm tối đa.':f.id==='3.5'||f.id==='4.4'?undefined:f.caution;
- const scoring=f.target?`<div class="formula-score-equation" aria-label="Công thức quy đổi điểm"><span>Điểm =</span><span class="formula-score-cases"><span><i>P</i><sub>max</sub><small>nếu <i>R</i> ≥ ${f.target}%</small></span><span><span class="formula-fraction"><span><i>R</i> × <i>P</i><sub>max</sub></span><span>${f.target}%</span></span><small>nếu <i>R</i> &lt; ${f.target}%</small></span></span></div><p class="formula-symbols"><i>R</i>: tỷ lệ của chỉ tiêu; <i>P</i><sub>max</sub>: điểm tối đa riêng.${maximum===null?' Điểm tối đa riêng: Chưa xác định.':''}</p>`:'';
- const business=`${additionalEquations(f)}${scoring}<section class="formula-business"><h4>Mô tả nghiệp vụ</h4>${f.id.startsWith('4.5')?`<p class="formula-business-heading">Mục 4.5: ${esc(f.document.title)}</p>`:''}${f.id==='3.2'?'<p class="formula-version-note">Biểu thức trên theo phần Update; mô tả trước cập nhật được giữ bên dưới để đối chiếu.</p>':''}${sourceParagraphs(businessContent(f))}</section>`;
+export function formulaCard(group:GroupId,f:Formula):string {
+ const maximum=f.maximum!==undefined?f.maximum:formulaMaximums[group].find(row=>row.formulaId===f.id)?.maximum??null;
+ const maximumLabel=f.id==='5.1'?'Chỉ tiêu tham khảo · Không chấm điểm':maximumText(maximum);
+ const equationLabel=f.equationLabel??(f.id==='2.2'?'Thời gian trung bình':f.id==='3.3'?'Tỷ lệ trực tuyến':'Tỷ lệ');
+ const clarification=f.clarification??(f.id==='2.1'?'Tài liệu mô tả cách xác định tỷ lệ đúng hạn; chưa nêu phép quy đổi điểm riêng. Điểm tối đa 20 được giữ theo dữ liệu đã xác định, không suy ra công thức chấm điểm từ mức điểm tối đa.':f.id==='3.5'||f.id==='4.4'?undefined:f.caution);
+ const scoring=f.id==='5.1'?'':f.target?`<div class="formula-score-equation" aria-label="Công thức quy đổi điểm"><span>Điểm =</span><span class="formula-score-cases"><span><i>P</i><sub>max</sub><small>nếu <i>R</i> ≥ ${f.target}%</small></span><span><span class="formula-fraction"><span><i>R</i> × <i>P</i><sub>max</sub></span><span>${f.target}%</span></span><small>nếu <i>R</i> &lt; ${f.target}%</small></span></span></div><p class="formula-symbols"><i>R</i>: tỷ lệ của chỉ tiêu; <i>P</i><sub>max</sub>: điểm tối đa riêng.${maximum===null?' Điểm tối đa riêng: Chưa xác định.':''}</p>`:maximum!==null&&maximum>0?`<div class="formula-score-equation" data-score-mode="linear" aria-label="Công thức quy đổi điểm"><span>Điểm =</span><span class="formula-fraction"><span><i>R</i> × <i>P</i><sub>max</sub></span><span>100%</span></span></div><p class="formula-symbols"><i>R</i>: tỷ lệ (%) của chỉ tiêu; <i>P</i><sub>max</sub>: điểm tối đa riêng. Không áp dụng ngưỡng đạt điểm.</p>`:'';
+ const heading=f.businessHeading??(f.id.startsWith('4.5')?'Mục 4.5: '+f.document.title:'');
+ const versionNote=f.versionNote??(f.id==='3.2'?'Biểu thức trên theo phần Update; mô tả trước cập nhật được giữ bên dưới để đối chiếu.':'');
+ const mathNote=f.mathNote??(f.id==='5.2'?'Dòng công thức trong tài liệu bị lỗi văn bản. Biểu thức dưới đây diễn giải từ quy tắc nghiệp vụ; chưa xác nhận phép quy đổi điểm.':'');
+ const symbols=f.symbols??(f.id==='3.3'?'Hệ số đồng bộ = tỷ lệ đồng bộ (%) / 100. Ví dụ: 80% → 0,8.':'');
+ const business=`${scoring}<section class="formula-business"><h4>Mô tả nghiệp vụ</h4>${heading?`<p class="formula-business-heading">${esc(heading)}</p>`:''}${versionNote?`<p class="formula-version-note">${esc(versionNote)}</p>`:''}${sourceParagraphs(businessContent(f))}</section>`;
  const notes=sourceParagraphs(f.document.notes)+(clarification?`<div class="formula-clarification"><strong>Cần đối chiếu</strong><p>${esc(clarification)}</p></div>`:'');
- return `<article class="formula-card" data-formula-id="${f.id}"><div class="formula-card-heading"><span class="formula-code">${f.id}</span><h3>${esc(f.title)}</h3><div class="formula-card-meta"><span class="maximum-badge ${maximum===null?'unresolved':''}">Điểm tối đa: ${maximumLabel}</span>${f.target?`<span class="badge good">Ngưỡng đạt: ${f.target}%</span>`:''}</div></div>
- <section class="formula-math-section" aria-label="Công thức toán học">${f.id==='5.2'?'<p class="formula-version-note">Dòng công thức trong tài liệu bị lỗi văn bản. Biểu thức dưới đây diễn giải từ quy tắc nghiệp vụ; chưa xác nhận phép quy đổi điểm.</p>':''}<div class="formula-equation"><span>${equationLabel} =</span>${f.denominator?`<span class="formula-fraction"><span>${esc(f.numerator)}</span><span>${esc(f.denominator)}</span></span>`:`<strong>${esc(f.numerator)}</strong>`}<span>${esc(f.multiplier??'× 100%')}</span></div>${f.id==='3.3'?'<p class="formula-symbols">Hệ số đồng bộ = tỷ lệ đồng bộ (%) / 100. Ví dụ: 80% → 0,8.</p>':''}</section>
- <div class="formula-accordions">${accordion('components','Giải thích thành phần',components(f),true)}${accordion('calculation','Cách tính và nghiệp vụ',business)}${accordion('sources','Nguồn dữ liệu',sourceParagraphs(f.document.dataSources))}${accordion('notes','Lưu ý khi đánh giá',notes)}</div></article>`;
+ return `<article class="formula-card" data-formula-id="${f.id}"><div class="formula-card-heading"><span class="formula-code">${f.id}</span><h3>${esc(f.title)}</h3><div class="formula-card-meta"><span class="maximum-badge ${maximum===null?'unresolved':''}">${f.id==='5.1'?'':'Điểm tối đa: '}${maximumLabel}</span>${f.id!=='5.1'&&f.target?`<span class="badge good">Ngưỡng đạt: ${f.target}%</span>`:''}</div></div>
+ <section class="formula-math-section" aria-label="Công thức toán học">${mathNote?`<p class="formula-version-note">${esc(mathNote)}</p>`:''}<div class="formula-equation"><span>${esc(equationLabel)} =</span>${f.denominator?`<span class="formula-fraction"><span>${esc(f.numerator)}</span><span>${esc(f.denominator)}</span></span>`:`<strong>${esc(f.numerator)}</strong>`}<span>${esc(f.multiplier??'× 100%')}</span></div>${symbols?`<p class="formula-symbols">${esc(symbols)}</p>`:''}${additionalEquations(f)}</section>
+ <div class="formula-accordions">${accordion('calculation','Nghiệp vụ và cách tính',business)}${accordion('sources','Nguồn dữ liệu',sourceParagraphs(f.document.dataSources))}${accordion('notes','Lưu ý khi đánh giá',notes)}</div></article>`;
 }
 export function displayedFormulas(group:FormulaGroup):Formula[]{
- // Exclude the classification-only PAKN row; unknown point allocations remain visible.
- return group.items.filter(item=>item.id!=='5.1');
+ // Classification is displayed for reference only, never used to score the group.
+ return group.items;
 }
-export function renderFormulaReference(selected:GroupId='transparency'):string {
- return `<section class="formula-page"><header class="bento-heading"><h1>Công thức tính Bộ chỉ số 766</h1><p>${formulaSource.version}</p></header>
- <nav class="formula-index" aria-label="Danh mục nhóm công thức">${formulaGroups.map(g=>`<button type="button" data-formula-group="${g.id}" aria-label="${g.name}, tối đa ${g.maximum} điểm" aria-pressed="${g.id===selected}" style="--formula-color:${groupColors[g.id]}">${groupIcon(g.id)}<span class="formula-group-name">${g.name}</span><strong class="formula-group-maximum" aria-hidden="true">${g.maximum}</strong></button>`).join('')}</nav>
- <details class="formula-guide"><summary>Sổ tay nghiệp vụ · Nguyên tắc đọc kết quả</summary><div><p>Nguồn: ${esc(formulaSource.name)} và bảng METRICS trong Công thức 766.xlsx do quản trị viên cung cấp.</p><ul><li><strong>Tỷ lệ:</strong> tử số / mẫu số × 100%; riêng 3.3 nhân thêm hệ số đồng bộ.</li><li><strong>Quy đổi điểm:</strong> chỉ áp dụng ngưỡng và điểm tối đa khi đã xác định. Mức điểm tối đa không đồng nghĩa công thức quy đổi đã được xác nhận.</li><li><strong>Thiếu dữ liệu:</strong> không phải số 0. Mức điểm chưa rõ ghi “Chưa xác định”; điểm nguồn được giữ nguyên.</li></ul></div></details>
- ${formulaGroups.filter(g=>g.id===selected).map(g=>`<section class="formula-group" id="formula-${g.id}" style="--formula-color:${groupColors[g.id]}"><header><span class="bento-icon">${groupIcon(g.id)}</span><h2>${g.name}</h2></header>${displayedFormulas(g).map(f=>formulaCard(g.id,f)).join('')}</section>`).join('')}</section>`;
+export function defaultFormulaConfiguration():FormulaConfiguration {
+ return {source:{...formulaSource},guide:['Nguồn: '+formulaSource.name+' và bảng METRICS trong Công thức 766.xlsx do quản trị viên cung cấp.','Tỷ lệ: tử số / mẫu số × 100%; riêng 3.3 nhân thêm hệ số đồng bộ.','Quy đổi điểm: chỉ áp dụng ngưỡng và điểm tối đa khi đã xác định. Mức điểm tối đa không đồng nghĩa công thức quy đổi đã được xác nhận.','Thiếu dữ liệu: không phải số 0. Mức điểm chưa rõ ghi “Chưa xác định”; điểm nguồn được giữ nguyên.'],groups:formulaGroups.map(g=>({...g,items:g.items.map(f=>({...f,
+ target:f.target??null,multiplier:f.multiplier??'× 100%',caution:f.caution??'',
+ maximum:formulaMaximums[g.id].find(row=>row.formulaId===f.id)?.maximum??null,
+ equationLabel:f.id==='2.2'?'Thời gian trung bình':f.id==='3.3'?'Tỷ lệ trực tuyến':'Tỷ lệ',
+ businessLines:businessContent(f),businessHeading:f.id.startsWith('4.5')?'Mục 4.5: '+f.document.title:'',
+ versionNote:f.id==='3.2'?'Biểu thức trên theo phần Update; mô tả trước cập nhật được giữ bên dưới để đối chiếu.':'',
+ mathNote:f.id==='5.2'?'Dòng công thức trong tài liệu bị lỗi văn bản. Biểu thức dưới đây diễn giải từ quy tắc nghiệp vụ; chưa xác nhận phép quy đổi điểm.':'',
+ symbols:f.id==='3.3'?'Hệ số đồng bộ = tỷ lệ đồng bộ (%) / 100. Ví dụ: 80% → 0,8.':'',
+ clarification:f.id==='2.1'?'Tài liệu mô tả cách xác định tỷ lệ đúng hạn; chưa nêu phép quy đổi điểm riêng. Điểm tối đa 20 được giữ theo dữ liệu đã xác định, không suy ra công thức chấm điểm từ mức điểm tối đa.':f.id==='3.5'||f.id==='4.4'?'':f.caution??'',
+ extras:f.id==='3.1'?[{label:'Tỷ lệ toàn trình',numerator:'TTHC cung cấp DVCTT toàn trình',denominator:'TTHC đủ điều kiện thực hiện DVCTT toàn trình'},{label:'Tỷ lệ một phần',numerator:'TTHC cung cấp DVCTT một phần',denominator:'TTHC thuộc thẩm quyền giải quyết'}]:f.id==='3.3'?[{label:'Tỷ lệ trực tiếp',numerator:'Hồ sơ tiếp nhận trong kỳ có kênh 1 hoặc thiếu kênh',denominator:'Tổng hồ sơ tiếp nhận trong kỳ'},{label:'Tỷ lệ bưu chính',numerator:'Hồ sơ tiếp nhận trong kỳ có kênh 3',denominator:'Tổng hồ sơ tiếp nhận trong kỳ'}]:[]
+ }))}))};
+}
+export function renderFormulaReference(selected:GroupId='transparency',configuration:FormulaConfiguration|null=activeConfiguration):string {
+ const formulaGroups=configuration?.groups??defaultFormulaConfiguration().groups;
+ return `<section class="formula-page"><header class="bento-heading"><h1>Công thức tính Bộ chỉ số 766</h1></header>
+ <nav class="formula-index" aria-label="Danh mục nhóm công thức">${formulaGroups.map(g=>`<button type="button" data-formula-group="${g.id}" aria-label="${esc(g.name)}, tối đa ${g.maximum} điểm" aria-pressed="${g.id===selected}" style="--formula-color:${groupColors[g.id]}">${groupIcon(g.id)}<span class="formula-group-name">${esc(g.name)}</span><strong class="formula-group-maximum" aria-hidden="true">${g.maximum}</strong></button>`).join('')}</nav>
+ ${formulaGroups.filter(g=>g.id===selected).map(g=>`<section class="formula-group" id="formula-${g.id}" style="--formula-color:${groupColors[g.id]}"><header><span class="bento-icon">${groupIcon(g.id)}</span><h2>${esc(g.name)}</h2></header>${displayedFormulas(g).map(f=>formulaCard(g.id,f)).join('')}</section>`).join('')}</section>`;
 }

@@ -11,7 +11,7 @@ export function onlineIndicators(parameters:Record<string,unknown>):OnlineIndica
   ratio:numerator!==null&&denominator!==null&&denominator>0&&numerator>=0&&numerator<=denominator?numerator/denominator*100:null});
  return [
   row('TTHC cung cấp DVCTT một phần','Một phần / TTHC thuộc phạm vi × 100%',partial,authority),
-  row('TTHC cung cấp DVCTT toàn trình trong tổng TTHC thuộc phạm vi','Toàn trình / TTHC thuộc phạm vi × 100%',full,authority),
+  row('TTHC cung cấp DVCTT toàn trình','Toàn trình / TTHC thuộc phạm vi × 100%',full,authority),
   row('TTHC còn lại','(TTHC thuộc phạm vi − một phần − toàn trình) / TTHC thuộc phạm vi × 100%',remaining,authority),
   row('Hồ sơ nộp trực tuyến','Hồ sơ nộp trực tuyến / tổng hồ sơ theo hình thức nộp × 100%',get('channelOnlineSum'),total),
   row('Hồ sơ nộp trực tiếp và bưu chính','(Hồ sơ trực tiếp + bưu chính) / tổng hồ sơ theo hình thức nộp × 100%',sum(direct,postal),total),

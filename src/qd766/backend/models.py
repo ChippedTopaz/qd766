@@ -839,6 +839,22 @@ class GeminiAnalysis(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class FormulaConfigRevision(Base):
+    __tablename__ = 'formula_config_revisions'
+    version: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    content: Mapped[dict] = mapped_column(JSON)
+    note: Mapped[str] = mapped_column(String(500))
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('user_accounts.id', ondelete='RESTRICT'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class FormulaConfigHead(Base):
+    __tablename__ = 'formula_config_head'
+    __table_args__ = (CheckConstraint('id = 1', name='ck_formula_config_singleton'),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    version: Mapped[int] = mapped_column(ForeignKey('formula_config_revisions.version', ondelete='RESTRICT'))
+
+
 class AnalysisConfigRevision(Base):
     __tablename__ = 'analysis_config_revisions'
     __table_args__ = (CheckConstraint('version > 0',name='ck_analysis_config_version'),)

@@ -1,6 +1,7 @@
 // Render smoke test, not visual/browser acceptance. No source/network calls.
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
+import {defaultFormulaConfiguration} from '../dist/formula-reference.js';
 const data=JSON.parse(readFileSync(new URL("../data/snapshots.json",import.meta.url)));
 const original=Object.values(data.snapshots).find(s=>s.scope==="all");
 const rootId=data.province.id;
@@ -45,6 +46,7 @@ globalThis.fetch=async(url,options)=>{
   else if(url==="/api/v1/me/trivia")body={available:false,question:null};
   else if(url==="/api/v1/dashboard?fast=true&compact=true")body=data;
   else if(url==="/api/v1/dashboard/provinces")body=[];
+  else if(url==='/api/v1/formula-reference')body={version:0,configuration:defaultFormulaConfiguration()};
   else if(url.startsWith("/api/v1/dashboard/province-rankings"))body=Array.from({length:34},(_,i)=>({
     rootDepartmentId:i===0?rootId:"province-"+i,provinceName:"Tỉnh "+i,
     totalScore:60+i/10,totalMaximum:100,capturedAt:"2026-10-02T16:00:00Z",
@@ -90,7 +92,7 @@ assert.match(appRoot.innerHTML,/Chuỗi điểm cùng loại kỳ/);
 assert.match(appRoot.innerHTML,/Tháng 9\/2026/);
 assert.match(appRoot.innerHTML,/Tháng 10\/2026/);
 assert.doesNotMatch(appRoot.innerHTML,/Hiện có một kỳ tháng/);
-assert.match(appRoot.innerHTML,/<details class="comparison-notes"><summary>Lưu ý<\/summary>/);
+assert.doesNotMatch(appRoot.innerHTML,/<details class="comparison-notes"><summary>Lưu ý<\/summary>/);
 assert.doesNotMatch(appRoot.innerHTML,/<details class="comparison-notes" open/);
 navs.find(n=>n.dataset.nav==='peers').handlers.click();
 assert.match(appRoot.innerHTML,/So sánh theo cơ quan/);
@@ -120,6 +122,7 @@ assert.deepEqual(formulaScrolls,[{selector:'#formula-provide-online-tree',option
 assert.match(appRoot.innerHTML,/id="formula-provide-online-tree"/);
 assert.doesNotMatch(appRoot.innerHTML,/id="formula-transparency"/);
 assert.equal((appRoot.innerHTML.match(/class="formula-card"/g)||[]).length,3);
-assert.equal(calls.length,callsBeforeFormulas);
+assert.equal(calls.length,callsBeforeFormulas+1);
+assert.match(calls.at(-1).url,/\/api\/v1\/formula-reference/);
 assert(calls.every(call=>call.method==="GET"&&!call.url.includes("requests")&&!call.url.includes("jobs")));
 console.log("SUMMARY_ONLY_UI_OK: actual renderer, history table, detail export disabled, GET-only");

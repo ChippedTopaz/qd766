@@ -46,7 +46,7 @@ def verify_real_wallet_schema(factory, *, shared_registration=False):
             if not set(Base.metadata.tables[name].columns.keys()) <= actual:
                 raise ValueError("Wallet schema is incomplete")
         revisions = list(db.execute(text("SELECT version_num FROM public.alembic_version")).scalars())
-        reviewed_revisions = {"20261004_0015", "20261005_0016", "20261005_0017", "20261006_0018", "20261007_0019", "20261007_0020", "20261007_0021", "20261007_0022", "20261007_0023"}
+        reviewed_revisions = {"20261004_0015", "20261005_0016", "20261005_0017", "20261006_0018", "20261007_0019", "20261007_0020", "20261007_0021", "20261007_0022", "20261007_0023", "20261008_0024"}
         if len(revisions) != 1 or revisions[0] not in reviewed_revisions:
             raise ValueError("Wallet schema version has not been reviewed")
         if shared_registration and revisions[0] == '20261004_0015':
@@ -58,18 +58,20 @@ def verify_real_wallet_schema(factory, *, shared_registration=False):
             extra += ["shared_trial_links", "shared_trial_logins", "trial_registrations"]
         if revisions[0] in reviewed_revisions-{"20261004_0015","20261005_0016"}:
             extra += ["daily_observations"]
-        if revisions[0] in {"20261006_0018", "20261007_0019", "20261007_0020", "20261007_0021", "20261007_0022", "20261007_0023"}:
+        if revisions[0] in {"20261006_0018", "20261007_0019", "20261007_0020", "20261007_0021", "20261007_0022", "20261007_0023", "20261008_0024"}:
             extra += ["gemini_analyses"]
-        if revisions[0] in {"20261007_0019", "20261007_0020", "20261007_0021", "20261007_0022", "20261007_0023"}:
+        if revisions[0] in {"20261007_0019", "20261007_0020", "20261007_0021", "20261007_0022", "20261007_0023", "20261008_0024"}:
             extra += ["analysis_queue_entries"]
-        if revisions[0] in {"20261007_0020", "20261007_0021", "20261007_0022", "20261007_0023"}:
+        if revisions[0] in {"20261007_0020", "20261007_0021", "20261007_0022", "20261007_0023", "20261008_0024"}:
             extra += ['analysis_config_revisions','analysis_config_head']
-        if revisions[0] in {"20261007_0021", "20261007_0022", "20261007_0023"}:
+        if revisions[0] in {"20261007_0021", "20261007_0022", "20261007_0023", "20261008_0024"}:
             extra += ['analysis_group_config_revisions']
-        if revisions[0] in {"20261007_0022", "20261007_0023"}:
+        if revisions[0] in {"20261007_0022", "20261007_0023", "20261008_0024"}:
             extra += ['analysis_feature_control']
-        if revisions[0] == "20261007_0023":
+        if revisions[0] in {"20261007_0023", "20261008_0024"}:
             extra += ['trivia_questions','trivia_profiles','trivia_answers']
+        if revisions[0] == "20261008_0024":
+            extra += ['formula_config_revisions','formula_config_head']
         for name in extra:
             actual = {column["name"] for column in inspector.get_columns(name, schema="public")}
             if not set(Base.metadata.tables[name].columns.keys()) <= actual:

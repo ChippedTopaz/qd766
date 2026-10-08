@@ -44,6 +44,15 @@ def restrict_agency(payload: dict, unit_id) -> dict:
         for dataset in item.get("datasets", []):
             dataset["raw"] = {"path": "", "sha256": ""}
             root = dataset.get("root", {})
+            # Explicit same-province online reference only; never expose other groups,
+            # other agencies' details, raw records, or purchased procedure datasets.
+            if item.get('scope') == 'all' and dataset.get('group') == 'provide-online-tree':
+                allowed = {'authorityCount','partialCount','fullCount','channelDirectSum',
+                    'channelPostalSum','channelTotalSum','channelOnlineSum','onlineOnTimeSum',
+                    'onlineOverdueSum','onlineDossierCount','onlineServiceTotal'}
+                dataset['provinceOnlineParameters'] = {key: value for key, value in
+                    root.get('parameters', {}).items() if key in allowed and
+                    isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value)}
             score_only(root)
             for key in ("apiScore", "apiMaxScore", "apiRatio"):
                 root[key] = None

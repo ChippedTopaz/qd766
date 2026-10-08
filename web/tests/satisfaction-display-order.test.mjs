@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {orderSatisfactionRows} from '../dist/satisfaction-display-order.js';
+const keys=['PETITION_CLASSIFICATION_TTHC','DOSSIER_RECEIVING_SATISFACTION','PETITION_PROCESSING_ON_TIME','PETITION_HANDLING_SATISFACTION','PETITION_CLASSIFICATION_STAFF','totalPetitions','classifiedPetitions','totalDossiers','extra'];
+const rows=keys.map((key,index)=>({key,html:`row-${index}`,score:index}));
+const before=structuredClone(rows);
+const ordered=orderSatisfactionRows('handling-satisfaction',rows);
+assert.deepEqual(ordered.map(row=>row.key),['PETITION_PROCESSING_ON_TIME','PETITION_HANDLING_SATISFACTION','DOSSIER_RECEIVING_SATISFACTION','totalDossiers','totalPetitions','classifiedPetitions','PETITION_CLASSIFICATION_STAFF','PETITION_CLASSIFICATION_TTHC','extra']);
+assert.deepEqual(rows,before);
+assert.equal(ordered.length,rows.length);
+for(const row of ordered)assert.equal(row,rows.find(original=>original.key===row.key));
+assert.deepEqual(orderSatisfactionRows('transparency',rows),rows);
+assert.deepEqual(orderSatisfactionRows('handling-satisfaction',[rows[0],rows[8]]),[rows[0],rows[8]]);
+console.log('SATISFACTION_DISPLAY_ORDER_OK: requested order, original values/rows intact, other groups unchanged');

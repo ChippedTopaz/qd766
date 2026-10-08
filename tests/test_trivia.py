@@ -58,6 +58,36 @@ class TriviaTests(unittest.TestCase):
         self.assertEqual(set(a['question']),{'id','prompt','choices','roundId','expiresAt'})
         self.assertEqual(a['stats']['score'],0)
 
+    def test_leaderboard_top20_lifetime_totals_privacy_and_auth(self):
+        from qd766.backend.models import Department
+        q=self.create()
+        province=uuid.uuid4()
+        with self.app.state.session_factory.begin() as db:
+            db.add(Department(id=province,name='UBND tỉnh thử nghiệm'))
+            db.flush()
+            for index in range(25):
+                account=UserAccount(external_subject=f'ranked-{index}',display_name=f'Người chơi {index:02}',
+                    email=f'private-{index}@example.invalid',trial_admitted=True,root_department_id=province)
+                db.add(account);db.flush()
+                db.add(TriviaProfile(account_id=account.id,best=25-index,score=0))
+                for attempt in range(2):
+                    db.add(TriviaAnswer(account_id=account.id,question_id=uuid.UUID(q['id']),round_id=uuid.uuid4(),
+                        correct=True,timed_out=False,score_after=1,streak_after=1,best_after=25-index,answered_after=1))
+            db.add(TriviaProfile(account_id=self.ids['locked'],best=100))
+            db.add(TriviaProfile(account_id=self.ids['pending'],best=99))
+        self.login('agency')
+        response=self.client.get('/api/v1/me/trivia/leaderboard')
+        self.assertEqual(response.status_code,200,response.text)
+        players=response.json()['players'];self.assertEqual(len(players),20)
+        self.assertEqual(players[0],{'rank':1,'name':'Người chơi 00','province':'UBND tỉnh thử nghiệm','best':25,'correctAnswers':2})
+        self.assertEqual(players[-1]['best'],6)
+        self.assertNotIn('email',response.text);self.assertNotIn('external_subject',response.text)
+        self.assertEqual(response.headers['cache-control'],'no-store')
+        self.assertEqual(self.client.post('/api/v1/me/trivia/leaderboard').status_code,405)
+        for token in (None,'pending','locked'):
+            self.login(token)
+            self.assertIn(self.client.get('/api/v1/me/trivia/leaderboard').status_code,(401,403))
+
     def test_scoring_streak_wrong_and_idempotency_never_change_credit(self):
         first=self.create();second=self.create(prompt='Câu hỏi thứ hai cần được trả lời?');third=self.create(prompt='Câu hỏi thứ ba cần được trả lời?')
         self.login('agency')

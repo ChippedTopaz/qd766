@@ -16,6 +16,8 @@ for(const id of ["overview","details","analysis"]){
 }
 console.log("Overview tabs PASS: accessible tabs, six-group navigation and wraparound");
 const app=readFileSync(new URL('../src/app.ts',import.meta.url),'utf8');
+assert.match(app,/class="overview-intro" aria-label="Cơ quan và kỳ báo cáo"/);
+assert.match(app,/\$\{overviewTabs\(overviewTab\)\}\s*\$\{overviewStatus\(\)\}<\/section>/);
 assert.match(app,/if\(tab==="details"\)\{state\.selectedGroup=null;state\.selectedMetric=null;\}/);
 const navigator=app.slice(app.indexOf('function overviewGroupNavigator('),app.indexOf('function overviewStatus('));
 assert.doesNotMatch(navigator,/data-group-export|<span>Nhóm chỉ tiêu<\/span>/);

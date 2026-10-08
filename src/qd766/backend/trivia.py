@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator, field_valida
 from sqlalchemy import select, inspect, func, text
 from .auth import current_session, SESSION_COOKIE, csrf_matches
 from .admin import administrator, audit
-from .models import UserAccount, TriviaQuestion, TriviaProfile, TriviaAnswer
+from .models import UserAccount, TriviaQuestion, TriviaProfile, TriviaAnswer, Department
 router=APIRouter()
 
 def trivia_gate(db,exclusive=False):
@@ -87,6 +87,28 @@ def current(request:Request):
         if not ready(db):return {'available':False,'question':None}
         profile=profile_for(db,account)
         return current_body(db,account,profile)
+
+@router.get('/api/v1/me/trivia/leaderboard')
+def leaderboard(request:Request):
+    with request.app.state.session_factory.begin() as db:
+        session,account=current_session(db,request.cookies.get(SESSION_COOKIE))
+        if account is None:raise HTTPException(401,'Vui lòng đăng nhập.')
+        if not account.trial_admitted:raise HTTPException(403,'Tài khoản chưa được duyệt.')
+        if not ready(db):raise HTTPException(503,'Hỏi đáp chưa được kích hoạt.')
+        trivia_gate(db)
+        # Correct answers are lifetime surviving attempts, not the resettable round score.
+        counts=select(TriviaAnswer.account_id,func.count().label('correct_count')).where(
+            TriviaAnswer.correct.is_(True)).group_by(TriviaAnswer.account_id).subquery()
+        correct_count=func.coalesce(counts.c.correct_count,0)
+        rows=db.execute(select(UserAccount.display_name,Department.name,TriviaProfile.best,correct_count)
+            .join(TriviaProfile,TriviaProfile.account_id==UserAccount.id)
+            .outerjoin(Department,Department.id==UserAccount.root_department_id)
+            .outerjoin(counts,counts.c.account_id==UserAccount.id)
+            .where(UserAccount.active.is_(True),UserAccount.trial_admitted.is_(True),TriviaProfile.best>0)
+            .order_by(TriviaProfile.best.desc(),correct_count.desc(),UserAccount.display_name,UserAccount.id).limit(20))
+        return {'players':[{'rank':index,'name':name,'province':province or 'Chưa cập nhật',
+                            'best':best,'correctAnswers':correct}
+                           for index,(name,province,best,correct) in enumerate(rows,1)]}
 
 class RestartInput(BaseModel):
     model_config=ConfigDict(extra='forbid')

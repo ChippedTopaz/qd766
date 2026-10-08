@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {collectionCopy} from '../dist/collection-copy.js';
+const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+const body=app.slice(app.indexOf('function collectionConfirmation('),app.indexOf('async function prepareCollection('));
+const data={province:{id:'root',name:'UBND tỉnh mẫu'},units:[{departmentId:'root',departmentName:'UBND tỉnh mẫu'},{departmentId:'ward',departmentName:'UBND xã mẫu'},{departmentId:'department',departmentName:'Sở mẫu <test>'}]};
+const state={unitId:'ward'};
+const catalog={selectedId:'f',items:[{id:'f',code:'1.001',name:'TTHC mẫu'}]};
+const esc=v=>String(v).replaceAll('<','&lt;').replaceAll('>','&gt;');
+const render=new Function('data','state','catalogPreview','creditQuote','collectionCopy','period','esc','int','acquisitionMessage','submittingCollection',body+';return collectionConfirmation;')(data,state,catalog,null,collectionCopy,()=>({label:'Tháng 10/2026'}),esc,String,'',false);
+assert.match(render(),/<h2>Tháng 10\/2026 · UBND xã mẫu<\/h2>/);
+state.unitId='department';assert.match(render(),/Sở mẫu &lt;test&gt;/);
+state.unitId='root';assert.match(render(),/<h2>Tháng 10\/2026 · UBND tỉnh mẫu<\/h2>/);
+state.unitId='unknown';assert.match(render(),/UBND tỉnh mẫu/);
+assert.match(render(),/1.001/);assert.match(render(),/TTHC mẫu/);
+console.log('COLLECTION_DIALOG_UNIT_OK: selected ward/department/province labels, escaped names, request flow unchanged');

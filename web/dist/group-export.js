@@ -1,5 +1,7 @@
 import { parameterLabels } from './parameter-labels.js';
 import { analysisExcelFilename } from './excel-export.js';
+import { detailExportEntries } from './detail-export.js';
+import { orderSatisfactionRows } from './satisfaction-display-order.js';
 const sheetNames = { transparency: 'Công khai minh bạch', 'dvc-progress-tree': 'Tiến độ giải quyết', 'provide-online-tree': 'Dịch vụ công trực tuyến', 'dossier-digitized': 'Số hóa hồ sơ', 'handling-satisfaction': 'Mức độ hài lòng', 'formality-online-payment-tree': 'Thanh toán trực tuyến' };
 const metricKey = (metric) => JSON.stringify([metric.code, metric.name]);
 const stamp = (value) => value ? new Date(value).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : 'Chưa có';
@@ -9,28 +11,31 @@ export function buildGroupWorkbook(WorkbookClass, data, context) {
     workbook.creator = 'Phân tích QĐ766';
     for (const group of data.groups) {
         const sheet = workbook.addWorksheet(sheetNames[group.id]);
-        const metrics = new Map();
-        const parameters = new Set();
+        const descriptors = new Map();
+        const projected = new Map();
         for (const entity of group.entities) {
-            for (const metric of entity.metrics ?? [])
-                if (metric.code !== 'scoreDelta')
-                    metrics.set(metricKey(metric), metric);
-            for (const key of Object.keys(entity.parameters ?? {}))
-                if (key !== 'scoreDelta' && parameterLabels[key])
-                    parameters.add(key);
+            const reference = group.id === 'provide-online-tree' && context.snapshot.scope === 'all' && entity.departmentId === context.provinceOnlineReference?.unitId ? context.provinceOnlineReference : null;
+            const entries = detailExportEntries(group.id, reference ? { ...entity, parameters: reference.parameters } : entity, context.snapshot.scope ?? 'all');
+            projected.set(entity.departmentId, entries);
+            for (const entry of entries)
+                descriptors.set(entry.kind + ':' + entry.key, entry);
         }
-        const metricList = Array.from(metrics.values());
-        const parameterList = Array.from(parameters).sort();
+        const entries = orderSatisfactionRows(group.id, Array.from(descriptors.values()));
         const labels = ['STT', 'Cơ quan, đơn vị', 'Cấp cơ quan', 'Điểm ghi nhận', 'Điểm tối đa', 'Tỷ lệ đạt'];
         const top = [...labels];
         const bottom = [...labels];
-        for (const metric of metricList) {
-            top.push(metric.name, '', '', '', '');
-            bottom.push('Số lượng đạt', 'Tổng số', 'Tỷ lệ', 'Điểm ghi nhận', 'Điểm tối đa');
-        }
-        for (const key of parameterList) {
-            top.push(parameterLabels[key]);
-            bottom.push(parameterLabels[key]);
+        const formats = ['#,##0', 'General', 'General', '#,##0.00', '#,##0.00', '0.00%'];
+        for (const entry of entries) {
+            if (entry.kind === 'metric') {
+                top.push(entry.metric.name, '', '', '', '', '');
+                bottom.push('Số lượng đạt', 'Tổng số', 'Tỷ lệ', 'Điểm ghi nhận', 'Điểm tối đa', 'Điểm chưa đạt');
+                formats.push('#,##0', '#,##0', '0.00%', '#,##0.00', '#,##0.00', '#,##0.00');
+            }
+            else {
+                top.push(entry.name);
+                bottom.push(entry.name);
+                formats.push(entry.key === 'averageScore' || entry.key === 'avgProcessingDays' ? '#,##0.00' : '#,##0');
+            }
         }
         top.push('Trạng thái dữ liệu');
         bottom.push('Trạng thái dữ liệu');
@@ -38,27 +43,40 @@ export function buildGroupWorkbook(WorkbookClass, data, context) {
         sheet.addRow([context.name, context.period, context.scope]);
         sheet.addRow([`Điểm tỉnh: ${stamp(data.delivery?.capturedAt)} · Chi tiết nhóm: ${stamp(group.capturedAt)} (giờ Việt Nam)`]);
         sheet.addRow([`Phạm vi: ${data.accessScope === 'agency' ? 'Cơ quan được phân quyền' : 'Các cơ quan trong tỉnh'}${data.delivery?.stale ? ' · Dữ liệu quá hạn cập nhật' : ''}${data.delivery?.provisional ? ' · Kỳ chưa kết thúc' : ''}`]);
+        if (group.id === 'provide-online-tree' && context.provinceOnlineReference && context.snapshot.scope === 'all')
+            sheet.getCell('A4').value += ` · Chi tiết tham khảo của ${context.provinceOnlineReference.provinceName}; điểm nhóm giữ theo cơ quan ở từng dòng.`;
         sheet.addRow(top);
         sheet.addRow(bottom);
         // Merge only presentation labels, never metadata or data cells.
         for (let c = 1; c <= 6; c++)
             sheet.mergeCells(5, c, 6, c);
-        for (let i = 0; i < metricList.length; i++)
-            sheet.mergeCells(5, 7 + i * 5, 5, 11 + i * 5);
-        for (let c = 7 + metricList.length * 5; c <= bottom.length; c++)
-            sheet.mergeCells(5, c, 6, c);
+        let column = 7;
+        for (const entry of entries) {
+            if (entry.kind === 'metric') {
+                sheet.mergeCells(5, column, 5, column + 5);
+                column += 6;
+            }
+            else {
+                sheet.mergeCells(5, column, 6, column);
+                column++;
+            }
+        }
+        sheet.mergeCells(5, column, 6, column);
         const entities = new Map(group.entities.map(entity => [entity.departmentId, entity]));
         data.units.forEach((unit, index) => {
             const entity = entities.get(unit.departmentId);
             const row = [index + 1, unit.departmentName, level(unit.departmentLevel), entity?.apiScore ?? null, entity?.apiMaxScore ?? null, entity?.apiRatio == null ? null : entity.apiRatio / 100];
-            const actual = new Map((entity?.metrics ?? []).map(metric => [metricKey(metric), metric]));
-            for (const descriptor of metricList) {
-                const metric = actual.get(metricKey(descriptor));
-                row.push(metric?.numerator ?? null, metric?.denominator ?? null, metric?.ratio == null ? null : metric.ratio / 100, metric?.apiScore ?? null, metric?.apiMaxScore ?? null);
-            }
-            for (const key of parameterList) {
-                const value = entity?.parameters?.[key];
-                row.push(typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean' ? value : null);
+            const actual = new Map((projected.get(unit.departmentId) ?? []).map(entry => [entry.kind + ':' + entry.key, entry]));
+            for (const descriptor of entries) {
+                const entry = actual.get(descriptor.kind + ':' + descriptor.key);
+                if (descriptor.kind === 'metric') {
+                    const m = entry?.kind === 'metric' ? entry.metric : null;
+                    row.push(m?.numerator ?? null, m?.denominator ?? null, m?.ratio == null ? null : m.ratio / 100, m?.apiScore ?? null, m?.apiMaxScore ?? null, m?.apiScore != null && m.apiMaxScore != null ? Math.round(Math.max(0, m.apiMaxScore - m.apiScore) * 100) / 100 : null);
+                }
+                else {
+                    const v = entry?.kind === 'parameter' ? entry.value : null;
+                    row.push(typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean' ? v : null);
+                }
             }
             const detail = Boolean(entity?.metrics?.length || Object.keys(entity?.parameters ?? {}).some(key => Boolean(parameterLabels[key])));
             row.push(!entity ? 'Chưa có dữ liệu nhóm' : entity.apiScore == null ? 'Chưa có điểm nhóm' : !detail ? 'Nguồn chưa cung cấp số liệu thành phần' : 'Có dữ liệu');
@@ -78,11 +96,7 @@ export function buildGroupWorkbook(WorkbookClass, data, context) {
                 else if (index > 6 && index % 2 === 0)
                     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F7FE' } };
                 if (index > 6 && typeof cell.value === 'number') {
-                    const offset = column - 7;
-                    const metricPart = offset >= 0 && offset < metricList.length * 5 ? offset % 5 : null;
-                    const parameter = parameterList[column - (7 + metricList.length * 5)];
-                    const decimalParameter = parameter === 'averageScore' || parameter === 'avgProcessingDays';
-                    cell.numFmt = column === 6 || metricPart === 2 ? '0.00%' : column === 1 || metricPart === 0 || metricPart === 1 ? '#,##0' : column >= 7 + metricList.length * 5 && !decimalParameter && Number.isInteger(cell.value) ? '#,##0' : '#,##0.00';
+                    cell.numFmt = formats[column - 1] ?? '#,##0.00';
                 }
             });
         });

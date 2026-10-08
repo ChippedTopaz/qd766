@@ -4,6 +4,7 @@ export function accountMenu(user) {
     const initials = user.name.trim().split(/\s+/).filter(Boolean).slice(-2).map(word => Array.from(word)[0]).join("").toUpperCase() || "TK";
     return `<style>
   .sidebar .account-zone{margin-top:auto;padding-top:16px;border-top:1px solid #edf0f8;position:relative;width:100%}
+  .account-controls{position:relative;flex:0 0 auto;width:100%;min-width:0}
   .account-switch{width:100%;display:flex;gap:10px;align-items:center;text-align:left;border:0;border-radius:14px;background:#f5f6ff;padding:11px;cursor:pointer;color:#172554;font:inherit}
   .account-avatar{width:38px;height:38px;flex:0 0 38px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#6366f1,#9333ea);color:white;font-weight:700;font-size:13px}
   .account-copy{min-width:0;flex:1}.account-copy strong,.account-copy small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.account-copy strong{font-size:12px}.account-copy small{color:#64748b;font-size:11px;margin-top:3px;font-variant-numeric:tabular-nums}
@@ -12,7 +13,7 @@ export function accountMenu(user) {
   .account-switch:focus-visible,.account-popover button:focus-visible{outline:2px solid #6366f1;outline-offset:2px}
   @media(min-width:761px) and (max-width:1100px){.account-switch{padding:4px;justify-content:center}.account-copy,.account-switch>span:last-child{display:none}.account-popover{right:auto;left:0;width:240px}}
   @media(max-width:760px){.account-zone.account-mobile{position:relative;display:flex;justify-content:flex-end;background:#fff;padding:10px 14px;border-bottom:1px solid #edf0f8}.account-mobile .account-switch{width:min(100%,320px);padding:8px 10px}.account-avatar{width:32px;height:32px;flex-basis:32px;font-size:11px}.account-copy small{margin-top:0}.account-mobile .account-popover{bottom:auto;top:calc(100% + 4px);right:14px;width:min(320px,calc(100vw - 28px))}}
-  </style><div class="account-zone"><button class="account-switch" data-account-toggle aria-expanded="false" aria-controls="account-popover"><span class="account-avatar" aria-hidden="true">${esc(initials)}</span><span class="account-copy"><strong>${esc(user.name)}</strong><small>${new Intl.NumberFormat("vi-VN").format(user.credits)} credit khả dụng</small></span><span aria-hidden="true">⌃</span></button><div id="account-popover" class="account-popover" hidden><button data-action="account-info">Thông tin tài khoản</button><button data-action="open-credits">Usage (credits)</button><button data-action="logout">Đăng xuất</button></div></div>`;
+  </style><div class="account-zone"><div class="account-controls"><button class="account-switch" data-account-toggle aria-expanded="false" aria-controls="account-popover"><span class="account-avatar" aria-hidden="true">${esc(initials)}</span><span class="account-copy"><strong>${esc(user.name)}</strong><small>${new Intl.NumberFormat("vi-VN").format(user.credits)} credit khả dụng</small></span><span aria-hidden="true">⌃</span></button><div id="account-popover" class="account-popover" hidden><button data-action="account-info">Thông tin tài khoản</button><button data-action="open-credits">Usage (credits)</button><button data-action="logout">Đăng xuất</button></div></div></div>`;
 }
 export function bindAccountMenu(user) {
     menuEvents?.abort();

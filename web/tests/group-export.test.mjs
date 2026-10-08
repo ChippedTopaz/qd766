@@ -21,7 +21,8 @@ assert.equal(first.getCell('I7').value,0);
 assert.equal(first.getCell('I7').numFmt,'0.00%');
 assert.equal(first.getCell('B8').value,'=1+1');
 assert.equal(first.views[0].xSplit,3);assert.equal(first.views[0].ySplit,6);
-assert.equal(first.getCell('L6').value,'Tổng hồ sơ tiếp nhận');
+assert.equal(first.getCell('L6').value,'Điểm chưa đạt');
+assert.equal(first.getCell('M6').value,'Tổng hồ sơ tiếp nhận');
 for(const sheet of loaded.worksheets){
   const text=JSON.stringify(sheet.getSheetValues());assert.doesNotMatch(text,/scoreDelta|unknownTechnicalField|numerator/);
   assert(sheet.model.merges.every(range=>Number(range.match(/\d+$/)[0])<=6));

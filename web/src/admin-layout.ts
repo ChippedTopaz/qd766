@@ -7,6 +7,8 @@ export function installAdminLayout(root:HTMLElement):{edit:()=>void;invite:()=>v
   const registration=sections.find(s=>s.dataset.registrationReview==="true"),sharedLinks=sections.find(s=>s.dataset.sharedLinks==="true");
   const aiConfiguration=sections.find(s=>s.dataset.analysisConfiguration==='true');
   if(aiConfiguration)items.splice(3,0,['ai-configuration','Cấu hình phân tích AI']);
+  const formulas=sections.find(s=>s.dataset.formulaConfiguration==='true');
+  if(formulas)items.push(['formulas','Công thức tính']);
   const trivia=sections.find(s=>s.dataset.triviaBank==='true');
   if(trivia)items.push(['trivia','Hỏi đáp nhanh']);
   if(registration)items.splice(3,0,["registrations","Đăng ký chờ duyệt"]);
@@ -18,6 +20,7 @@ export function installAdminLayout(root:HTMLElement):{edit:()=>void;invite:()=>v
   if(registration)panels.registrations!.append(registration);
   if(collection)panels.collection!.append(collection);
   if(aiConfiguration)panels['ai-configuration']!.append(aiConfiguration);
+  if(formulas)panels.formulas!.append(formulas);
   if(trivia)panels.trivia!.append(trivia);
   const inviteHeading=document.createElement("div");
   inviteHeading.className="actions";

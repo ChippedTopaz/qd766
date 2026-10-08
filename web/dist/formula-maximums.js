@@ -34,7 +34,10 @@ export const formulaMaximums = {
         { name: 'Hài lòng trong tiếp nhận, giải quyết TTHC', maximum: 6, metricCode: 'DOSSIER_RECEIVING_SATISFACTION', formulaId: '5.4', sourceRow: 24 },
     ],
     'formality-online-payment-tree': [
-        { name: 'Hồ sơ thanh toán trực tuyến', maximum: 10, formulaId: '3.6', sourceRow: 25 },
+        // Three components reconciled with API and DVCQG charts; approved 08/10/2026.
+        { name: 'TTHC có nghĩa vụ tài chính được cung cấp trên Cổng DVCQG', maximum: 2, formulaId: '3.5', sourceRow: 25 },
+        { name: 'TTHC có giao dịch thanh toán trực tuyến', maximum: 2, formulaId: '3.5b', sourceRow: 25 },
+        { name: 'Hồ sơ thanh toán trực tuyến', maximum: 6, formulaId: '3.6', sourceRow: 25 },
     ],
 };
 export function maximumText(maximum) {

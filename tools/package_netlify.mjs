@@ -34,6 +34,7 @@ await copyFile(join(root,"web/bento.css"),join(output,"bento.css"));
 await copyFile(join(root,"web/collection.css"),join(output,"collection.css"));
 await copyFile(join(root,"web/admin.html"),join(output,"admin.html"));
 await copyFile(join(root,"web/admin.css"),join(output,"admin.css"));
+await copyFile(join(root,"web/formula-admin.css"),join(output,"formula-admin.css"));
 await mkdir(join(output,"assets"),{recursive:true});
 await copyFile(join(root,"web/assets/logo-cchc.png"),join(output,"assets/logo-cchc.png"));
 await copyFile(join(root,"web/assets/trivia-question-template.xlsx"),join(output,"assets/trivia-question-template.xlsx"));

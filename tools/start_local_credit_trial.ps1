@@ -4,7 +4,7 @@ $trialRepository = Split-Path -Parent $PSScriptRoot
 $trialSite = Join-Path $trialRepository '.tmp-credit-trial\site'
 New-Item -ItemType Directory -Path $trialSite -Force | Out-Null
 # Only UI assets; no .env, production data, Task Scheduler or Netlify calls.
-foreach ($trialAsset in @('index.html','styles.css','bento.css','collection.css','admin.html','admin.css','local-trial.html','login-preview.html','vendor')) {
+foreach ($trialAsset in @('index.html','styles.css','bento.css','collection.css','admin.html','admin.css','formula-admin.css','local-trial.html','login-preview.html','vendor')) {
     Copy-Item -LiteralPath (Join-Path $trialRepository "web\$trialAsset") -Destination $trialSite -Recurse -Force
 }
 Push-Location $trialRepository

@@ -28,5 +28,8 @@ qd766-api = "qd766.backend.main:run"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"qd766.backend" = ["formula_seed.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

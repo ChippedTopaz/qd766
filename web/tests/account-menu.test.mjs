@@ -9,4 +9,8 @@ assert.match(html,/data-action="logout"/);
 assert.match(html,/aria-expanded="false"/);
 assert.match(html,/94 credit khả dụng/);
 assert.match(html,/account-avatar/);
+// Anchor to the account button wrapper, not the zone containing the entire Trivia card.
+assert.match(html,/<div class="account-zone"><div class="account-controls"><button/);
+assert.match(html,/\.account-controls\{position:relative;flex:0 0 auto;width:100%;min-width:0\}/);
+assert.match(html,/\.account-popover\{position:absolute;bottom:calc\(100% \+ 8px\)/);
 console.log("Account menu presentation PASS");

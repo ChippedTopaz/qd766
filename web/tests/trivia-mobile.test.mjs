@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 let changed, tick, cleared=0, requests=0;
 const viewport={matches:true,addEventListener(event,callback){assert.equal(event,'change');changed=callback}};
-globalThis.window={matchMedia(query){assert.equal(query,'(max-width:760px)');return viewport}};
+globalThis.window={matchMedia(query){return query==='(max-width:760px)'?viewport:{matches:false,addEventListener(){}}}};
 const card={querySelectorAll(){return []},querySelector(){return null}};
 globalThis.document={hidden:false,querySelector(){return card},querySelectorAll(){return []},addEventListener(){}};
 globalThis.setInterval=callback=>{tick=callback;return 1};

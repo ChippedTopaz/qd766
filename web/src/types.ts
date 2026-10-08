@@ -51,6 +51,7 @@ export interface CaptureInfo {
 }
 
 export interface Dataset {
+  provinceOnlineParameters?:Record<string,unknown>;
   group: GroupId;
   label: string;
   schemaKind: "metrics" | "parameters";

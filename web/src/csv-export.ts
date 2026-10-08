@@ -1,6 +1,7 @@
 import type { PeriodOption, Snapshot, UnitView } from "./types.js";
 import { snapshotForUnit } from "./analytics.js";
 import { parameterLabels } from "./parameter-labels.js";
+import {detailExportEntries} from './detail-export.js';
 
 type Cell = string | number | boolean | null | undefined;
 
@@ -41,8 +42,8 @@ export function buildAnalysisRows(
     return rows;
   }
   const rows: Cell[][] = [[...headers, "Nhóm chỉ tiêu", "Loại số liệu",
-    "Tên chỉ tiêu", "Số lượng đạt", "Tổng số", "Tỷ lệ (%)", "Điểm nguồn",
-    "Điểm tối đa nguồn", "Giá trị tham số", "Ghi chú"]];
+    "Tên chỉ tiêu", "Số lượng đạt", "Tổng số", "Tỷ lệ (%)", "Điểm ghi nhận/đối chiếu",
+    "Điểm tối đa", "Giá trị tham số", "Ghi chú", "Điểm chưa đạt"]];
   for (const group of view.groups) {
     const entity = group.entity;
     const visibleParameters = entity ? Object.entries(entity.parameters).filter(([key])=>key!=="scoreDelta"&&Boolean(parameterLabels[key])) : [];
@@ -52,21 +53,14 @@ export function buildAnalysisRows(
           "Nguồn không hỗ trợ" : "Nguồn chưa cung cấp số liệu thành phần"]);
       continue;
     }
-    for (const metric of entity.metrics) {
-      if (metric.code === "scoreDelta") continue;
-      rows.push([...context, group.label, "Chỉ tiêu", metric.name,
-        metric.numerator, metric.denominator, metric.ratio, metric.apiScore,
-        metric.apiMaxScore, "", "Số liệu nguồn; ô trống không đồng nghĩa bằng 0"]);
-    }
-    for (const [key, value] of visibleParameters) {
-      if(key === "scoreDelta") continue;
-      const label = parameterLabels[key];
-      // Only expose known business fields; never leak a new technical key.
-      if(!label) continue;
-      const scalar = value === null || typeof value === "number" ||
-        typeof value === "string" || typeof value === "boolean" ? value : JSON.stringify(value);
-      rows.push([...context, group.label, "Số liệu nghiệp vụ", label, null, null,
-        null, null, null, scalar, "Tham số gốc; chưa quy đổi thành điểm"]);
+    for(const entry of detailExportEntries(group.id,entity,snapshot.scope)){
+      if(entry.kind==='metric'){
+        const m=entry.metric;
+        rows.push([...context,group.label,'Chỉ tiêu',m.name,m.numerator,m.denominator,m.ratio,m.apiScore,m.apiMaxScore,'',entry.derived?'Điểm thành phần đối chiếu; điểm tổng giữ theo Cổng DVCQG':'Số liệu nguồn; ô trống không đồng nghĩa bằng 0',m.apiScore!==null&&m.apiMaxScore!==null?Math.round(Math.max(0,m.apiMaxScore-m.apiScore)*100)/100:null]);
+      }else{
+        const value=entry.value,scalar=value===null||typeof value==='number'||typeof value==='string'||typeof value==='boolean'?value:JSON.stringify(value);
+        rows.push([...context,group.label,'Số liệu nghiệp vụ',entry.name,null,null,null,null,null,scalar,'Tham số gốc; chưa quy đổi thành điểm']);
+      }
     }
   }
   return rows;

@@ -4,8 +4,11 @@ import { analyzeProgressScore } from "./progress-scoring.js";
 import { analysisExcelFilename, buildAnalysisWorkbook } from "./excel-export.js";
 import { buildLeadershipReport, buildLeadershipWorkbook, leadershipColors, leadershipUpdatedLabel } from "./leadership-report.js";
 import { parameterLabels } from "./parameter-labels.js";
+import { paymentRows } from './payment-indicators.js';
+import { orderSatisfactionRows, detailMetricName } from './satisfaction-display-order.js';
 import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
+import { loadFormulaConfiguration } from './formula-loader.js';
 import { renderPeerList } from './peer-list.js';
 import { renderPaidAnalysis, bindPaidAnalysis, clearPaidAnalysis, stopPaidAnalysisPolling } from './paid-analysis.js';
 import { latestPeriod } from './period-choice.js';
@@ -248,9 +251,10 @@ function collectionConfirmation() {
     const rows = creditQuote?.items ?? (selected ? [selected] : []);
     const copy = creditQuote ? collectionCopy(creditQuote.items) : { title: "Tra cứu dữ liệu", notice: "", button: "Tra cứu dữ liệu", mode: "new" };
     const expired = creditQuote?.blockedReason === "subscription_expired";
+    const selectedUnitName = data.units.find(item => item.departmentId === state.unitId)?.departmentName ?? data.province.name;
     return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="${esc(copy.title)}"><div class="modal collection-confirm">
     <div class="modal-top"><strong>${esc(copy.title)}</strong><button class="btn small" data-action="close-modal">Đóng</button></div>
-    <div class="brief"><h2>${esc(period().label)} · ${esc(data.province.name)}</h2><ul>${rows.map(item => `<li><b>${esc(item.code)}</b> ${esc(item.name)}</li>`).join("")}</ul>
+    <div class="brief"><h2>${esc(period().label)} · ${esc(selectedUnitName)}</h2><ul>${rows.map(item => `<li><b>${esc(item.code)}</b> ${esc(item.name)}</li>`).join("")}</ul>
     ${creditQuote ? `<div class="credit-summary"><span>Credit sử dụng</span><strong>${int(creditQuote.totalCredits)} Credit</strong><span>Số dư: ${int(creditQuote.availableCredits)} Credit</span></div>
       ${expired ? '<div role="alert" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:16px;margin:16px 0"><strong>Subscription đã hết hạn</strong><p>Gia hạn để tiếp tục khai thác. Yêu cầu chưa được gửi và không giữ Credit.</p></div>' : `<p role="status">${esc(copy.notice)}</p>`}` :
         `<p>Môi trường quản trị máy cơ quan: không thu credit. Phân quyền theo tài khoản chỉ được kiểm chứng khi bật đăng nhập.</p>`}
@@ -451,7 +455,7 @@ function nav() {
     const html = baseNav();
     const account = signedInUser ? accountMenu(signedInUser).replace(/(<div class="account-zone"[^>]*>)/, '$1' + triviaMarkup()) : '';
     const collection = publicReadOnly && paidRequestsEnabled && canAcquire() ? `<button type="button" data-nav="procedure" class="${state.screen === "procedure" ? "active" : ""}"><span class="nav-icon" aria-hidden="true">${icon("document")}</span><span>Theo TTHC</span></button>` : "";
-    const admin = signedInUser?.role === "admin" ? `<button type="button" data-action="open-admin" title="Quản trị dùng thử"><span class="nav-icon" aria-hidden="true">${icon("shield")}</span><span>Quản trị dùng thử</span></button>` : "";
+    const admin = signedInUser?.role === "admin" ? `<button type="button" data-action="open-admin" title="Quản trị hệ thống"><span class="nav-icon" aria-hidden="true">${icon("shield")}</span><span>Quản trị hệ thống</span></button>` : "";
     return html.replace("</nav>", collection + admin + "</nav>").replace(/<div class="side-meta">[\s\S]*?<\/div><\/div><\/aside>$/, signedInUser ? account + "</aside>" : '$&');
 }
 function baseNav() {
@@ -560,8 +564,19 @@ function render() {
     stopPaidAnalysisPolling();
     if (state.screen === "procedure")
         return shell(acquisitionPage());
-    if (state.screen === "formulas")
+    if (state.screen === "formulas") {
+        void loadFormulaConfiguration().then(changed => { if (changed && state.screen === 'formulas')
+            render(); }).catch(() => {
+            if (state.screen === 'formulas' && !document.querySelector('[data-formula-load-error]')) {
+                const notice = document.createElement('p');
+                notice.dataset.formulaLoadError = 'true';
+                notice.setAttribute('role', 'status');
+                notice.textContent = 'Chưa tải được bản công thức mới nhất. Đang hiển thị bản đã có; mở lại mục này để thử lại.';
+                document.querySelector('.formula-page')?.prepend(notice);
+            }
+        });
         return shell(renderFormulaReference(selectedFormulaGroup));
+    }
     if (state.screen === "operations")
         return shell(operations());
     if (state.demo !== "normal")
@@ -593,9 +608,9 @@ function overview() {
     const rankChange = rankImprovement(previousRank?.rank, currentRank?.rank);
     const points = data.periods.filter(p => p.type === period().type && periodOrder(p) <= periodOrder(period()) && Boolean(data.snapshots[snapshotKey(p.id, state.scope, data.formality.id)]))
         .sort((a, b) => periodOrder(a) - periodOrder(b)).slice(-12).map(p => ({ label: p.label, order: periodOrder(p), view: buildUnitView(data, p.id, state.scope, state.unitId) }));
-    return `<header class="bento-heading"><h1>${esc(view.name)}</h1><p>${esc(period().label)} <span>·</span> ${state.scope === "all" ? "Tất cả thủ tục hành chính" : esc(data.formality.code + " · " + data.formality.name)}</p></header>
-  ${overviewStatus()}
+    return `<section class="overview-intro" aria-label="Cơ quan và kỳ báo cáo"><header class="bento-heading overview-heading"><h1>${esc(view.name)}</h1><p>${esc(period().label)} <span>·</span> ${state.scope === "all" ? "Tất cả thủ tục hành chính" : esc(data.formality.code + " · " + data.formality.name)}</p></header>
   ${overviewTabs(overviewTab)}
+  ${overviewStatus()}</section>
   <div id="overview-tab-panel" role="tabpanel" aria-labelledby="overview-tab-${overviewTab}">
   ${overviewTab === "overview" ? `
   <section class="bento-top" aria-label="Tổng điểm và sáu nhóm chỉ tiêu"><article class="bento-card hero-card"><div class="bento-card-head"><div><h2>Điểm tổng hợp 766</h2><p>Bộ chỉ số phục vụ người dân, doanh nghiệp</p></div><span class="badge ${gaugeLevel(view.totalMaximum === 100 ? view.totalScore : view.ratio).tone}">${gaugeLevel(view.totalMaximum === 100 ? view.totalScore : view.ratio).label}</span></div>${gauge(view.totalScore, view.totalMaximum)}
@@ -606,8 +621,8 @@ function overview() {
   ` : overviewTab === "details" ? overviewGroupNavigator(view) + overviewGroupDetail(view) : `
   ${renderPaidAnalysis(analysisSelection(), Boolean(signedInUser), geminiAnalysisEnabled)}`}</div>`;
 }
-function groupTableHeading(label) {
-    return `<div class="group-table-heading"><h3>${esc(label)}</h3><button type="button" class="btn group-export-button" data-group-export>Tải biểu Excel</button></div>`;
+function groupTableHeading(label, extra = '') {
+    return `<div class="group-table-heading"><h3>${esc(label)}</h3><div class="group-table-actions">${extra}<button type="button" class="btn group-export-button" data-group-export>Tải biểu Excel</button></div></div>`;
 }
 function overviewGroupNavigator(view) {
     const group = view.groups.find(item => item.id === state.selectedGroup);
@@ -669,10 +684,9 @@ function onlineAnalysis(entity) {
     if (!indicators.length)
         return null;
     const derived = indicators.map(r => `<tr><td>${esc(r.name)}<small class="online-indicator-formula">${esc(r.formula)}</small></td><td class="num">${int(r.numerator)}</td><td class="num">${int(r.denominator)}</td><td class="num">${pct(r.ratio)}</td><td colspan="3">Chưa có điểm thành phần từ nguồn</td></tr>`);
-    const raw = Object.entries(entity.parameters).filter(([, value]) => value !== null).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Số liệu nghiệp vụ thành phần")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td colspan="3">Tham số nguồn</td></tr>`);
-    return { rows: [...derived, ...raw], catalog: "", notice: '<p class="online-indicator-note">Các tỷ lệ dưới đây tính từ tham số nguồn để đối chiếu dashboard Cổng DVCQG, không phải công thức quy đổi điểm. Điểm nhóm giữ nguyên theo Cổng công bố. Tỷ lệ DVCTT phát sinh hồ sơ là của kỳ đang chọn; biểu đồ tháng cần số liệu riêng từng tháng.</p>' };
+    return { rows: derived, catalog: "", notice: '<p class="online-indicator-note">Các tỷ lệ dưới đây tính từ tham số nguồn để đối chiếu dashboard Cổng DVCQG, không phải công thức quy đổi điểm. Điểm nhóm giữ nguyên theo Cổng công bố. Tỷ lệ DVCTT phát sinh hồ sơ là của kỳ đang chọn; biểu đồ tháng cần số liệu riêng từng tháng.</p>' };
 }
-function progressDetail(entity) {
+function progressDetail(entity, showAverage = false) {
     const analysis = analyzeProgressScore(entity);
     if (!analysis)
         return null;
@@ -682,7 +696,7 @@ function progressDetail(entity) {
         : `${int(analysis.totalOnTime)} / ${int(analysis.totalReceived)} × ${n(analysis.maxScore)} = ${n(analysis.calculatedScore)} điểm`;
     const averageDays = analysis.averageProcessingDays === null ? "N/A" : `${n(analysis.averageProcessingDays)} ngày`;
     const difference = analysis.matchesApi === false ? `<small class="progress-discrepancy">Chênh ${n(Math.abs(analysis.difference ?? 0), 3)} điểm so với điểm nguồn</small>` : "";
-    return `<div class="progress-kpis"><article><span>Tổng hồ sơ tiếp nhận</span><strong class="num">${int(analysis.totalReceived)}</strong></article><article><span>Giải quyết đúng hạn</span><strong class="num positive">${int(analysis.totalOnTime)}</strong></article><article><span>Hồ sơ quá hạn giải quyết</span><strong class="num negative">${int(analysis.totalOverdue)}</strong></article><article><span>Giải quyết trung bình</span><strong class="num">${averageDays}</strong></article></div><div class="table-wrap"><table class="metric-table progress-table"><thead><tr><th>Nội dung</th><th>Số lượng</th><th>Tỷ lệ</th><th>Công thức</th></tr></thead><tbody><tr><td>Tổng hồ sơ tiếp nhận</td><td class="num">${int(analysis.totalReceived)} hồ sơ</td><td class="num">—</td><td>—</td></tr><tr class="selectable-row ${state.selectedMetric === "progress:on-time" ? "selected" : ""}" data-metric-detail="progress:on-time"><td><button class="row-link">Hồ sơ giải quyết đúng hạn</button></td><td class="num">${int(analysis.totalOnTime)} hồ sơ</td><td class="num positive">${progressPercent(analysis.onTimeRatio)}</td><td>Hồ sơ đúng hạn / Tổng hồ sơ tiếp nhận × 100%</td></tr><tr><td>Hồ sơ quá hạn giải quyết</td><td class="num">${int(analysis.totalOverdue)} hồ sơ</td><td class="num negative">${progressPercent(analysis.overdueRatio)}</td><td>${analysis.overdueDerived ? "Tổng hồ sơ tiếp nhận − Hồ sơ đúng hạn; " : ""}Hồ sơ quá hạn / Tổng hồ sơ tiếp nhận × 100%</td></tr><tr><td>Thời gian giải quyết trung bình</td><td class="num">${averageDays}</td><td class="num">—</td><td>Theo số liệu Cổng DVCQG</td></tr></tbody><tfoot><tr><td>Điểm tính đối chiếu</td><td colspan="2" class="num">${n(analysis.calculatedScore)} / ${n(analysis.maxScore)} điểm</td><td>${esc(formula)}${difference}</td></tr></tfoot></table></div>`;
+    return `<div class="progress-kpis"><article><span>Tổng hồ sơ tiếp nhận</span><strong class="num">${int(analysis.totalReceived)}</strong></article><article><span>Giải quyết đúng hạn</span><strong class="num positive">${int(analysis.totalOnTime)}</strong></article><article><span>Hồ sơ quá hạn giải quyết</span><strong class="num negative">${int(analysis.totalOverdue)}</strong></article>${showAverage ? `<article><span>Giải quyết trung bình</span><strong class="num">${averageDays}</strong></article>` : ""}</div><div class="table-wrap"><table class="metric-table progress-table"><thead><tr><th>Nội dung</th><th>Số lượng</th><th>Tỷ lệ</th><th>Công thức</th></tr></thead><tbody><tr class="selectable-row ${state.selectedMetric === "progress:on-time" ? "selected" : ""}" data-metric-detail="progress:on-time"><td><button class="row-link">Hồ sơ giải quyết đúng hạn</button></td><td class="num">${int(analysis.totalOnTime)} hồ sơ</td><td class="num positive">${progressPercent(analysis.onTimeRatio)}</td><td>Hồ sơ đúng hạn / Tổng hồ sơ tiếp nhận × 100%</td></tr><tr><td>Hồ sơ quá hạn giải quyết</td><td class="num">${int(analysis.totalOverdue)} hồ sơ</td><td class="num negative">${progressPercent(analysis.overdueRatio)}</td><td>${analysis.overdueDerived ? "Tổng hồ sơ tiếp nhận − Hồ sơ đúng hạn; " : ""}Hồ sơ quá hạn / Tổng hồ sơ tiếp nhận × 100%</td></tr><tr><td>Tổng hồ sơ tiếp nhận</td><td class="num">${int(analysis.totalReceived)} hồ sơ</td><td class="num">—</td><td>—</td></tr>${showAverage ? `<tr><td>Thời gian giải quyết trung bình</td><td class="num">${averageDays}</td><td class="num">—</td><td>Theo số liệu Cổng DVCQG</td></tr>` : ""}</tbody><tfoot><tr><td>Điểm tính đối chiếu</td><td colspan="2" class="num">${n(analysis.calculatedScore)} / ${n(analysis.maxScore)} điểm</td><td>${esc(formula)}${difference}</td></tr></tfoot></table></div>`;
 }
 function metricPoint(entity, key) {
     const comparison = entity.comparisonPoints?.[key];
@@ -743,6 +757,8 @@ function groupPeerComparison(group) {
     const comparable = (group.dataset?.children ?? []).filter(item => item.departmentLevel === selected?.departmentLevel && item.apiScore !== null).sort((a, b) => (b.apiScore ?? 0) - (a.apiScore ?? 0));
     return `<aside class="comparison-card"><h3>So với đơn vị cùng cấp</h3>${group.peer ? `<div class="comparison-kpi"><span>Trung vị</span><strong class="num">${n(group.peer.median)}</strong></div><div class="comparison-kpi"><span>Chênh lệch</span><strong class="num ${(group.peer.gapToMedian) >= 0 ? "positive" : "negative"}">${group.peer.gapToMedian >= 0 ? "+" : ""}${n(group.peer.gapToMedian)}</strong></div>${renderPeerList(comparable.map(item => ({ id: item.departmentId, name: item.departmentName, score: item.apiScore })), state.unitId)}` : `<div class="empty-state"><h2>Chưa đủ đơn vị cùng cấp</h2></div>`}</aside>`;
 }
+let provinceOnlineViewKey = null;
+const onlineProvinceKey = () => [data.province.id, state.periodId, state.scope, state.unitId].join(':');
 function overviewGroupDetail(view) {
     if (state.selectedGroup === null)
         return groupComparisonSummary(view);
@@ -752,21 +768,28 @@ function overviewGroupDetail(view) {
     const entity = group.entity;
     if (!entity)
         return `<section class="panel group-detail"><div class="panel-head"><div><h2>Chi tiết ${esc(group.label)}</h2><p>Chưa có số liệu chi tiết cho lựa chọn hiện tại.</p></div></div></section>`;
-    const calculated = group.id === "provide-online-tree" ? onlineAnalysis(entity) : null;
-    const progress = group.id === "dvc-progress-tree" ? progressDetail(entity) : null;
-    const metricRows = entity.metrics.map(m => m.apiScore === null ? `<tr><td>${esc(m.name)}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">N/A</td></tr>` : `<tr class="selectable-row ${state.selectedMetric === `raw:${m.code}` ? "selected" : ""}" data-metric-detail="raw:${esc(m.code)}"><td><button class="row-link">${esc(m.name)}</button></td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiMaxScore !== null ? n(Math.max(0, m.apiMaxScore - m.apiScore)) : "N/A"}</td></tr>`);
-    const valueRows = calculated ? calculated.rows : Object.entries(entity.parameters).filter(([, value]) => value !== null).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Số liệu nghiệp vụ thành phần")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td colspan="3">Được sử dụng để theo dõi và phân tích kết quả</td></tr>`);
-    const rows = [...metricRows, ...valueRows];
+    const onlineChild = group.id === 'provide-online-tree' && state.scope === 'all' && entity.departmentId !== data.province.id;
+    const provinceMode = onlineChild && provinceOnlineViewKey === onlineProvinceKey();
+    const provinceParameters = group.dataset?.provinceOnlineParameters ?? group.dataset?.root.parameters ?? {};
+    const onlineEntity = provinceMode ? { ...entity, departmentId: data.province.id, parameters: provinceParameters } : entity;
+    const calculated = group.id === "provide-online-tree" ? onlineAnalysis(onlineEntity) : null;
+    const provinceButton = onlineChild ? `<button type="button" class="btn group-export-button" data-action="toggle-online-province" aria-pressed="${provinceMode}">${provinceMode ? 'Về điểm cơ quan' : 'Xem điểm tỉnh'}</button>` : '';
+    const provinceNotice = provinceMode ? `<p class="online-province-context">Chi tiết DVC trực tuyến của ${esc(data.province.name)} · ${esc(period().label)}. Tổng điểm bên dưới vẫn là của ${esc(view.name)}.</p>` : '';
+    const progress = group.id === "dvc-progress-tree" ? progressDetail(entity, state.scope === "formality" && catalogPreview.mode === "single") : null;
+    const metricRows = entity.metrics.map(m => m.apiScore === null ? `<tr><td>${esc(detailMetricName(group.id, m))}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">N/A</td></tr>` : `<tr class="selectable-row ${state.selectedMetric === `raw:${m.code}` ? "selected" : ""}" data-metric-detail="raw:${esc(m.code)}"><td><button class="row-link">${esc(detailMetricName(group.id, m))}</button></td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiMaxScore !== null ? n(Math.max(0, m.apiMaxScore - m.apiScore)) : "N/A"}</td></tr>`);
+    const valueRows = group.id === 'formality-online-payment-tree' ? paymentRows(entity.parameters) : calculated ? calculated.rows : group.id === 'provide-online-tree' ? [] : Object.entries(entity.parameters).filter(([, value]) => value !== null).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Số liệu nghiệp vụ thành phần")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td colspan="3">Được sử dụng để theo dõi và phân tích kết quả</td></tr>`);
+    const parameterKeys = Object.entries(entity.parameters).filter(([, value]) => value !== null).map(([key]) => key);
+    const rows = orderSatisfactionRows(group.id, [...metricRows.map((html, index) => ({ key: entity.metrics[index].code, html })), ...valueRows.map((html, index) => ({ key: parameterKeys[index] ?? '', html }))]).map(row => row.html);
     const lost = entity.apiScore !== null && entity.apiMaxScore !== null ? Math.max(0, entity.apiMaxScore - entity.apiScore) : null;
     const comparison = groupPeerComparison(group);
     const detailRank = rankFor(group, state.periodId, group.id);
     const emptyDetailMessage = group.id === "provide-online-tree" && data.units.find(item => item.departmentId === state.unitId)?.departmentLevel !== "PROVINCE_TOTAL"
-        ? "Nguồn hiện chỉ công bố điểm và tỷ lệ của cơ quan trực thuộc; số liệu thành phần Dịch vụ công trực tuyến mới có ở cấp tỉnh."
+        ? provinceMode ? "Chưa có dữ liệu chi tiết DVC trực tuyến của tỉnh trong kỳ đã chọn." : "Dữ liệu DVC trực tuyến hiện nay chỉ có dữ liệu chi tiết của tỉnh, chưa có dữ liệu chi tiết của cơ quan bạn."
         : "Nhóm này chưa có số liệu thành phần để hiển thị.";
     const heading = `<div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary"><button class="text-button" data-action="close-group-detail">← Xem lại 6 nhóm</button>${state.selectedMetric ? `<button class="text-button" data-action="clear-metric-detail">← So sánh cả nhóm</button>` : ""}<strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${detailRank ? `Hạng ${detailRank.rank}/${detailRank.total}` : "Chưa xếp hạng"}</span></div></div>`;
     if (progress)
         return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card progress-detail">${groupTableHeading("Kết quả các chỉ tiêu thành phần")}${referenceNotice(group.id)}${progress}</div>${comparison}</div></section>`;
-    return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card">${groupTableHeading("Kết quả các chỉ tiêu thành phần")}${referenceNotice(group.id)}${calculated?.notice ?? ""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="7">${esc(emptyDetailMessage)}</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div>${comparison}</div></section>`;
+    return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card">${groupTableHeading("Kết quả các chỉ tiêu thành phần", provinceButton)}${referenceNotice(group.id)}${provinceNotice}${calculated?.notice ?? ""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="7">${esc(emptyDetailMessage)}</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div>${comparison}</div></section>`;
 }
 function miniTicket(item, good) { return `<div class="mini-ticket"><i class="ticket-dot ${good ? "good" : ""}"></i><div><strong>${esc(item.finding)}</strong><p>${esc(item.evidence)} ${esc(item.action)}</p></div></div>`; }
 function dailyContext() {
@@ -805,7 +828,7 @@ function time() {
         const rank = rankFor(v, p.id, null);
         return `<tr><td>${esc(p.label)}${p.provisional ? ' <span class="badge warn">Tạm thời</span>' : ""}</td><td class="num">${n(v.totalScore)}</td><td class="num">${n(prior?.totalScore)}</td><td class="num ${changeTone(delta)}">${delta === null ? "—" : (delta >= 0 ? "+" : "") + n(delta)}</td><td class="num ${changeTone(rankImprovement(previous ? rankFor(prior, previous.id, null)?.rank : null, rank?.rank))}">${rank ? rank.rank + "/" + rank.total : "—"}</td>${v.groups.map(group => `<td class="num">${n(group.score.value)}</td>`).join("")}</tr>`;
     }).join("");
-    return `${title("So sánh theo thời gian", "Điểm các kỳ cùng loại và biến động so với kỳ liền trước.", "Kỳ đang diễn ra được đánh dấu tạm thời; không ghép tháng, quý và năm.")}<section class="panel"><div class="panel-head"><div><h2>Chuỗi điểm cùng loại kỳ</h2><p>Thiếu kỳ liền trước thì không tính biến động. Thứ hạng chỉ hiển thị khi đã đọc dữ liệu so sánh của kỳ đó.</p></div></div><div class="table-wrap"><table><thead><tr><th>Kỳ</th><th>Tổng điểm</th><th>Điểm kỳ trước</th><th>Tăng/giảm điểm</th><th>Thứ hạng</th>${data.groupOrder.map(group => `<th>${esc(data.groupLabels[group])}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></section>`;
+    return `${title("So sánh theo thời gian", "Điểm các kỳ cùng loại và biến động so với kỳ liền trước.", period().provisional ? "Đây là dữ liệu tạm thời do chưa kết thúc kỳ báo cáo." : "")}<section class="panel"><div class="panel-head"><div><h2>Chuỗi điểm cùng loại kỳ</h2><p>Thiếu kỳ liền trước thì không tính biến động. Thứ hạng chỉ hiển thị khi đã đọc dữ liệu so sánh của kỳ đó.</p></div></div><div class="table-wrap"><table><thead><tr><th>Kỳ</th><th>Tổng điểm</th><th>Điểm kỳ trước</th><th>Tăng/giảm điểm</th><th>Thứ hạng</th>${data.groupOrder.map(group => `<th>${esc(data.groupLabels[group])}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></section>`;
 }
 function peers() {
     const selected = data.units.find(item => item.departmentId === state.unitId);
@@ -846,13 +869,13 @@ function diagnostic(group) {
     const entity = group.entity;
     if (!entity)
         return `<div class="empty-state"><h2>${esc(group.label)}</h2><p>Nguồn không trả dữ liệu cho TTHC này.</p></div>`;
-    const progress = group.id === "dvc-progress-tree" ? progressDetail(entity) : null;
+    const progress = group.id === "dvc-progress-tree" ? progressDetail(entity, state.scope === "formality" && catalogPreview.mode === "single") : null;
     if (progress)
         return `<section class="panel" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>Tính điểm từ tỷ lệ hồ sơ giải quyết đúng hạn; tỷ lệ quá hạn và thời gian xử lý được hiển thị để phân tích.</p></div><span class="badge good">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div><div class="panel-body progress-detail"><h3>Kết quả và công thức tính điểm</h3>${referenceNotice(group.id)}${progress}</div></section>`;
     const calculated = group.id === "provide-online-tree" ? onlineAnalysis(entity) : null;
-    const rows = calculated ? calculated.rows.join("") : entity.metrics.length ? entity.metrics.map(m => `<tr><td>${esc(m.name)}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiScore !== null && m.apiMaxScore !== null ? n(Math.max(0, m.apiMaxScore - m.apiScore)) : "N/A"}</td></tr>`).join("") : Object.entries(entity.parameters).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Chỉ số nghiệp vụ")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`).join("");
+    const rows = group.id === 'formality-online-payment-tree' ? paymentRows(entity.parameters).join('') : calculated ? calculated.rows.join("") : entity.metrics.length ? entity.metrics.map(m => `<tr><td>${esc(m.name)}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiScore !== null && m.apiMaxScore !== null ? n(Math.max(0, m.apiMaxScore - m.apiScore)) : "N/A"}</td></tr>`).join("") : Object.entries(entity.parameters).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Chỉ số nghiệp vụ")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`).join("");
     const lost = entity.apiScore !== null && entity.apiMaxScore !== null ? Math.max(0, entity.apiMaxScore - entity.apiScore) : null;
-    const description = calculated ? "Ba chỉ tiêu thành phần được tính lại để giải thích điểm; điểm Cổng công bố vẫn là giá trị chính thức." : group.dataset?.schemaKind === "parameters" ? "Hiển thị các số liệu nghiệp vụ thành phần; chưa có đủ dữ liệu để phân rã điểm." : "Kết quả chi tiết theo chỉ tiêu thành phần.";
+    const description = calculated || group.id === 'formality-online-payment-tree' ? "Ba chỉ tiêu thành phần được tính lại để giải thích điểm; điểm Cổng công bố vẫn là giá trị chính thức." : group.dataset?.schemaKind === "parameters" ? "Hiển thị các số liệu nghiệp vụ thành phần; chưa có đủ dữ liệu để phân rã điểm." : "Kết quả chi tiết theo chỉ tiêu thành phần.";
     return `<section class="panel" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>${description}</p></div><span class="badge ${calculated ? "good" : "info"}">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div>${referenceNotice(group.id)}${calculated?.notice ?? ""}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows || `<tr><td colspan="7">Chưa có số liệu chi tiết.</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></section>`;
 }
 function suggestions() {
@@ -1049,7 +1072,7 @@ function bind() {
         if (state.scope === 'formality')
             query.set('formality_id', data.formality.id);
         openGroupExport({ group, groupLabel: data.groupLabels[group], defaultAll: state.selectedGroup === null, agency: signedInUser?.accessTier === 'agency', query, WorkbookClass: ExcelJS.Workbook,
-            context: { name: signedInUser?.accessTier === 'agency' ? unit().name : data.province.name, period: current.label, scope: state.scope === 'all' ? 'Tất cả thủ tục hành chính' : data.formality.code + ' · ' + data.formality.name, snapshot: snapshot() } });
+            context: { name: signedInUser?.accessTier === 'agency' ? unit().name : data.province.name, period: current.label, scope: state.scope === 'all' ? 'Tất cả thủ tục hành chính' : data.formality.code + ' · ' + data.formality.name, snapshot: snapshot(), ...(group === 'provide-online-tree' && state.scope === 'all' && provinceOnlineViewKey === onlineProvinceKey() ? { provinceOnlineReference: { unitId: state.unitId, provinceName: data.province.name, parameters: unit().groups.find(g => g.id === group)?.dataset?.provinceOnlineParameters ?? unit().groups.find(g => g.id === group)?.dataset?.root.parameters ?? {} } } : {}) } });
     }));
     if (typeof data !== "undefined" && state?.demo === "normal" && ["overview", "time", "peers"].includes(state.screen)) {
         const snap = snapshot();
@@ -1220,6 +1243,7 @@ function bind() {
     document.querySelectorAll("[data-group-detail]").forEach(el => el.addEventListener("click", () => { state.selectedGroup = el.dataset.groupDetail; state.selectedMetric = null; overviewTab = "details"; render(); document.querySelector(".overview-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }); }));
     document.querySelectorAll("[data-metric-detail]").forEach(el => el.addEventListener("click", () => { state.selectedMetric = el.dataset.metricDetail ?? null; render(); document.querySelector(".comparison-card")?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }));
     document.querySelector("[data-action=clear-metric-detail]")?.addEventListener("click", () => { state.selectedMetric = null; render(); });
+    document.querySelector('[data-action=toggle-online-province]')?.addEventListener('click', () => { provinceOnlineViewKey = provinceOnlineViewKey === onlineProvinceKey() ? null : onlineProvinceKey(); render(); });
     document.querySelector("[data-action=close-group-detail]")?.addEventListener("click", () => { state.selectedGroup = null; state.selectedMetric = null; render(); document.querySelector("#group-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }); });
     document.querySelector("#province-select")?.addEventListener("change", e => { void switchProvince(e.target.value); });
     document.querySelector("#unit-select")?.addEventListener("change", e => { const id = e.target.value; if (!canSelectUnit(id)) {
