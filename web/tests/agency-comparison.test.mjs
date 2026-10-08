@@ -15,6 +15,9 @@ assert.equal(c.total,null);assert.equal(c.rank,null);assert.equal(c.scores['dvc-
 assert.equal(c.scores['provide-online-tree'],undefined,'null not zero');
 assert.deepEqual(orderAgencies(rows,'total','cong thuong').map(row=>row.id),['a']);
 assert.equal(orderAgencies(rows,'total','').at(-1).id,'c');
+assert.deepEqual(orderAgencies(rows,'total','','asc').map(row=>row.id),['b','a','ward','c'],'Ascending totals, missing last');
+assert.deepEqual(orderAgencies(rows,'dvc-progress-tree','','asc').map(row=>row.id),['c','b','a','ward'],'Zero before positive scores');
+assert.deepEqual(orderAgencies(rows,'total','cong thuong','asc').map(row=>row.id),['a'],'Search preserved in ascending order');
 assert.equal(agencyComparison(current,null,groups,allowed)[0].scoreChange,null);
 const mismatch={...previous,scope:'formality',formalityId:'different'};
 assert(agencyComparison(current,mismatch,groups,allowed).every(row=>row.scoreChange===null));

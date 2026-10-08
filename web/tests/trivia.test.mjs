@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 let handlers={},html='',calls=[],clock=0,tick,visibility,round='r1',finished=false,timeout=false,correct=true,failNext=false;
 globalThis.performance={now:()=>clock};
+globalThis.window={matchMedia:()=>({matches:false,addEventListener(){}})};
 globalThis.setInterval=callback=>{tick=callback;return 1};globalThis.clearInterval=()=>{tick=null};
 const control=key=>({value:key.split(':')[1],addEventListener:(_event,fn)=>handlers[key]=fn});
 const card={set outerHTML(value){html=value;handlers={}},querySelectorAll:()=>[control('choice:0'),control('choice:1')],querySelector:selector=>control(selector)};

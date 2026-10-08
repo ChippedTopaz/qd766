@@ -1,4 +1,19 @@
 const finite = (value) => typeof value === 'number' && Number.isFinite(value);
+/** Public score inventory in the authorized province, not a detail-selection allowlist. */
+export function agencyComparisonUnits(snapshot) {
+    const units = new Map();
+    for (const dataset of snapshot.datasets)
+        for (const entity of dataset.children) {
+            if (entity.departmentLevel !== 'PROVINCE' && entity.departmentLevel !== 'COMMUNE')
+                continue;
+            if (!units.has(entity.departmentId))
+                units.set(entity.departmentId, {
+                    departmentId: entity.departmentId, departmentName: entity.departmentName,
+                    departmentType: entity.departmentType, departmentLevel: entity.departmentLevel,
+                });
+        }
+    return [...units.values()];
+}
 /** Union all source groups; missing scores are not zero. The allowlist is mandatory. */
 export function agencyComparison(snapshot, previous, groups, allowed) {
     const inventory = (source) => {
@@ -51,13 +66,14 @@ export function agencyComparison(snapshot, previous, groups, allowed) {
     }
     return rows;
 }
-export function orderAgencies(rows, dimension, query) {
+export function orderAgencies(rows, dimension, query, direction = 'desc') {
     const plain = (value) => value.toLocaleLowerCase('vi').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
     const needle = plain(query.trim());
     return rows.filter(row => plain(row.name).includes(needle)).sort((a, b) => {
         const left = dimension === 'total' ? a.total : a.scores[dimension] ?? null;
         const right = dimension === 'total' ? b.total : b.scores[dimension] ?? null;
-        return left === null ? (right === null ? a.name.localeCompare(b.name, 'vi') : 1) : right === null ? -1 : right - left || a.name.localeCompare(b.name, 'vi');
+        return left === null ? (right === null ? a.name.localeCompare(b.name, 'vi') : 1) : right === null ? -1 :
+            (direction === 'asc' ? left - right : right - left) || a.name.localeCompare(b.name, 'vi');
     });
 }
 //# sourceMappingURL=agency-comparison.js.map

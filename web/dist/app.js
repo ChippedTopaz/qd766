@@ -23,7 +23,7 @@ import { mountTrialRegistration } from './trial-registration.js';
 import { pageLoader } from './page-loader.js';
 import { presenceBadge, startPresence } from './presence.js';
 import { triviaMarkup, bindTrivia } from './trivia.js';
-import { agencyComparison, orderAgencies } from './agency-comparison.js';
+import { agencyComparison, agencyComparisonUnits, orderAgencies } from './agency-comparison.js';
 import { annualDailyComparison } from './annual-daily-comparison.js';
 import { onlineIndicators } from './online-indicators.js';
 import { RecentDashboard } from './recent-dashboard.js';
@@ -485,11 +485,10 @@ function shell(content) {
     searchableSelects = [];
     const timingNotice = loaded?.delivery?.detailsAvailable === false ? `<div class="period-notice" role="status"><strong>Chỉ có điểm tổng hợp tỉnh</strong><span>Kỳ này có đủ điểm 6 nhóm để so sánh tỉnh; chưa có chỉ tiêu thành phần hoặc điểm sở/ngành, xã/phường. Chọn kỳ không tạo yêu cầu thu thập.</span></div>` : state.demo === "normal" && loaded?.delivery?.result === "national-summary" && loaded.delivery.capturedAt !== loaded.delivery.detailsCapturedAt ? `<div class="period-notice" role="status"><strong>Hai thời điểm cập nhật</strong><span>Điểm tỉnh: ${esc(dateTime(loaded.delivery.capturedAt))}. Chi tiết chỉ tiêu và điểm cơ quan trực thuộc: ${esc(dateTime(loaded.delivery.detailsCapturedAt))}. Số liệu thành phần có thể chưa khớp điểm tỉnh mới nhất.</span></div>` : "";
     const notices = staleNotice + periodNotice + timingNotice;
-    const comparisonHint = ["time", "peers"].includes(state.screen) ? '<p>Chỉ so sánh cùng loại kỳ, cùng phạm vi. Ô trống không được tính là 0; thứ hạng chỉ tính trên các đơn vị có đủ điểm. Biến động hạng cần cùng tập đơn vị giữa hai kỳ.</p>' : "";
     const qualityHint = state.screen === "quality" ? '<p>Thiếu dữ liệu không được tính là 0. Với số lượng hồ sơ nhỏ, tỷ lệ có thể biến động mạnh. Mức chi tiết phụ thuộc dữ liệu nguồn.</p>' : "";
-    const pageNotes = state.screen === "formulas" || (state.screen === "overview" && state.demo === "normal") ? "" :
-        ["time", "peers", "procedure", "quality"].includes(state.screen) ?
-            (notices || comparisonHint || qualityHint ? `<details class="comparison-notes"><summary>Lưu ý</summary>${notices + comparisonHint + qualityHint}</details>` : "") : notices;
+    const pageNotes = ["formulas", "time", "peers"].includes(state.screen) || (state.screen === "overview" && state.demo === "normal") ? "" :
+        ["procedure", "quality"].includes(state.screen) ?
+            (notices || qualityHint ? `<details class="comparison-notes"><summary>Lưu ý</summary>${notices + qualityHint}</details>` : "") : notices;
     const contextMarkup = context().replace('<div class="context-actions">', `<div class="context-actions">${presenceBadge()}`);
     root.innerHTML = `<div class="app-shell enterprise-mode ${["overview", "formulas"].includes(state.screen) ? "bento-mode" : ""}">${nav()}<div class="workspace">${contextMarkup}<main class="content">${pageNotes}${content}</main></div>${state.modal === "brief" ? briefModal() : state.modal === "export" ? exportModal() : state.modal === "collection" ? collectionConfirmation() : ""}${completionMessage ? `<div class="collection-toast" role="status"><strong>Hoàn tất</strong><span>${esc(completionMessage)}</span><button class="btn small" data-action="dismiss-completion">Đóng</button></div>` : ""}</div>`;
     if (localSimulation)
@@ -619,7 +618,7 @@ function overviewStatus() {
     const captures = snapshot().datasets.map(d => d.capture.capturedAt).filter(Boolean).sort();
     const scoreAt = state.unitId === data.province.id ? delivery?.capturedAt ?? captures.at(-1) : delivery?.detailsCapturedAt ?? captures.at(-1);
     const detailsAt = delivery?.detailsAvailable === false ? null : delivery?.detailsCapturedAt ?? captures.at(-1);
-    return `<details class="bento-status"><summary><span class="status-toggle">ⓘ Thông tin dữ liệu</span></summary><div class="status-explanation"><p>Điểm: ${esc(dateTime(scoreAt))} · Chi tiết: ${esc(dateTime(detailsAt))}</p>${delivery?.detailsAvailable === false ? '<p>Chỉ có điểm tổng hợp tỉnh; chưa có dữ liệu chi tiết trong kỳ này.</p>' : ''}${delivery?.stale ? '<p>Đang sử dụng bản dữ liệu hoàn chỉnh gần nhất; chưa có bản cập nhật theo lịch 04:00.</p>' : ''}${period().provisional ? '<p>Kỳ báo cáo chưa kết thúc; kết quả có thể thay đổi khi nguồn cập nhật.</p>' : ''}</div></details>`;
+    return `<details class="bento-status"><summary><span class="status-toggle">ⓘ Thông tin dữ liệu</span></summary><div class="status-explanation"><p>Điểm: ${esc(dateTime(scoreAt))} · Chi tiết: ${esc(dateTime(detailsAt))}</p>${delivery?.detailsAvailable === false ? '<p>Chỉ có điểm tổng hợp tỉnh; chưa có dữ liệu chi tiết trong kỳ này.</p>' : ''}${delivery?.stale ? '<p>Đang sử dụng bản dữ liệu hoàn chỉnh gần nhất; chưa có bản cập nhật theo lịch 05:00.</p>' : ''}${period().provisional ? '<p>Kỳ báo cáo chưa kết thúc; kết quả có thể thay đổi khi nguồn cập nhật.</p>' : ''}</div></details>`;
 }
 function groupPanel(group) {
     const score = scoreValue(group), maximum = group.maximum, ratio = score !== null && maximum ? score / maximum * 100 : null;
@@ -798,7 +797,7 @@ function loadDailyHistory() {
 }
 function time() {
     const samples = data.periods.filter(p => p.type === period().type && Boolean(data.snapshots[snapshotKey(p.id, state.scope, data.formality.id)]))
-        .sort((a, b) => periodOrder(a) - periodOrder(b)).map(p => ({ p, v: buildUnitView(data, p.id, state.scope, state.unitId) }));
+        .sort((a, b) => periodOrder(b) - periodOrder(a)).map(p => ({ p, v: buildUnitView(data, p.id, state.scope, state.unitId) }));
     const rows = samples.map(({ p, v }) => {
         const previous = previousAvailablePeriod(data, p.id, state.scope);
         const prior = previous ? buildUnitView(data, previous.id, state.scope, state.unitId) : null;
@@ -810,8 +809,9 @@ function time() {
 }
 function peers() {
     const selected = data.units.find(item => item.departmentId === state.unitId);
-    const restricted = agencyRestricted();
-    const allowed = restricted ? data.units.filter(item => item.departmentId === signedInUser?.unitId) : data.units;
+    const restricted = agencyRestricted() && state.scope !== "all";
+    const allowed = restricted ? data.units.filter(item => item.departmentId === signedInUser?.unitId) :
+        agencyRestricted() ? agencyComparisonUnits(snapshot()) : data.units;
     const previous = previousAvailablePeriod(data, state.periodId, state.scope);
     const prior = previous ? data.snapshots[snapshotKey(previous.id, state.scope, data.formality.id)] ?? null : null;
     const rows = agencyComparison(snapshot(), prior, data.groupOrder, allowed);
@@ -823,16 +823,17 @@ function peers() {
         }
     const ownLevel = selected?.departmentLevel === "COMMUNE" ? "COMMUNE" : "PROVINCE";
     const level = restricted ? ownLevel : agencyLevel ?? ownLevel;
-    const visible = orderAgencies(rows.filter(row => row.level === level), state.peerDimension, state.search);
+    const visible = orderAgencies(rows.filter(row => row.level === level), state.peerDimension, state.search, state.peerSortDirection);
     const delta = (value) => value === null ? "—" : (value > 0 ? "+" : "") + n(Math.abs(value) < .005 ? 0 : value);
-    const heading = (key, label) => `<th><button class="agency-sort ${state.peerDimension === key ? "active" : ""}" data-dimension="${key}" aria-label="Sắp xếp giảm dần theo ${esc(label)}">${esc(label)}</button></th>`;
+    const heading = (key, label) => `<th aria-sort="${state.peerDimension === key ? (state.peerSortDirection === "asc" ? "ascending" : "descending") : "none"}"><button class="agency-sort ${state.peerDimension === key ? "active" : ""}" data-dimension="${key}" data-sort-direction="${state.peerDimension === key ? state.peerSortDirection : "desc"}" aria-label="Sắp xếp ${state.peerDimension === key && state.peerSortDirection === "asc" ? "tăng" : "giảm"} dần theo ${esc(label)}">${esc(label)}</button></th>`;
+    const unitCell = (id, label, group, name = label) => canSelectUnit(id) ? `<button class="agency-link" data-peer-unit="${esc(id)}"${group ? ` data-peer-group="${group}" aria-label="${esc(data.groupLabels[group])} · ${esc(name)}"` : ""}>${esc(label)}</button>` : `<span>${esc(label)}</span>`;
     const tabs = ["PROVINCE", "COMMUNE"].filter(item => !restricted || item === ownLevel).map(item => `<button type="button" data-agency-level="${item}" class="${item === level ? "active" : ""}" aria-pressed="${item === level}"><i aria-hidden="true">${icon(item === 'PROVINCE' ? 'chart' : 'shield')}</i>${item === "PROVINCE" ? "Sở, ngành" : "Xã, phường"}</button>`).join("");
     return `${title("So sánh theo cơ quan", data.province.name + " · " + period().label, "")}
   <section class="panel agency-ranking"><div class="panel-head"><div><h2>Bảng xếp hạng</h2><p>${visible.length} cơ quan, đơn vị · ${previous ? "So với " + esc(previous.label) : "Chưa có kỳ liền trước"}</p></div>
   <input id="peer-search" type="search" aria-label="Tìm cơ quan, đơn vị" value="${esc(state.search)}" placeholder="Tìm cơ quan, đơn vị…"></div>
   <div class="table-toolbar"><div class="agency-levels" role="group" aria-label="Cấp cơ quan">${tabs}</div></div>
   <div class="table-wrap agency-ranking-scroll"><table><thead><tr><th>Hạng</th><th>Cơ quan, đơn vị</th>${heading("total", "Tổng điểm")}<th>Tăng/giảm điểm</th><th>Tăng/giảm hạng</th>${data.groupOrder.map(group => heading(group, data.groupLabels[group])).join("")}</tr></thead><tbody>
-  ${visible.map(row => `<tr class="${row.id === state.unitId ? "mine" : ""}"><td class="num">${row.rank ?? "—"}</td><td><button class="agency-link" data-peer-unit="${esc(row.id)}">${esc(row.name)}</button></td><td class="num"><strong>${n(row.total)}</strong></td><td class="num ${changeTone(row.scoreChange)}">${delta(row.scoreChange)}</td><td class="num ${changeTone(row.rankChange)}">${row.rankChange === null ? "—" : (row.rankChange > 0 ? "+" : "") + row.rankChange}</td>${data.groupOrder.map(group => `<td class="num"><button class="agency-link" data-peer-unit="${esc(row.id)}" data-peer-group="${group}" aria-label="${esc(data.groupLabels[group])} · ${esc(row.name)}">${n(row.scores[group] ?? null)}</button></td>`).join("")}</tr>`).join("") || `<tr><td colspan="${5 + data.groupOrder.length}">Không có cơ quan, đơn vị phù hợp trong phạm vi được phép xem.</td></tr>`}
+  ${visible.map(row => `<tr class="${row.id === state.unitId ? "mine" : ""}"><td class="num">${row.rank ?? "—"}</td><td>${unitCell(row.id, row.name)}</td><td class="num"><strong>${n(row.total)}</strong></td><td class="num ${changeTone(row.scoreChange)}">${delta(row.scoreChange)}</td><td class="num ${changeTone(row.rankChange)}">${row.rankChange === null ? "—" : (row.rankChange > 0 ? "+" : "") + row.rankChange}</td>${data.groupOrder.map(group => `<td class="num">${unitCell(row.id, n(row.scores[group] ?? null), group, row.name)}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${5 + data.groupOrder.length}">Không có cơ quan, đơn vị phù hợp trong phạm vi được phép xem.</td></tr>`}
   </tbody></table></div></section>`;
 }
 function procedure() {
@@ -1210,7 +1211,12 @@ function bind() {
         render();
         scrollTo(0, 0);
     }));
-    document.querySelectorAll("[data-dimension]").forEach(el => el.addEventListener("click", () => { state.peerDimension = el.dataset.dimension; render(); }));
+    document.querySelectorAll("[data-dimension]").forEach(el => el.addEventListener("click", () => {
+        const dimension = el.dataset.dimension;
+        state.peerSortDirection = state.peerDimension === dimension ? (state.peerSortDirection === "desc" ? "asc" : "desc") : "desc";
+        state.peerDimension = dimension;
+        render();
+    }));
     document.querySelectorAll("[data-group-detail]").forEach(el => el.addEventListener("click", () => { state.selectedGroup = el.dataset.groupDetail; state.selectedMetric = null; overviewTab = "details"; render(); document.querySelector(".overview-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }); }));
     document.querySelectorAll("[data-metric-detail]").forEach(el => el.addEventListener("click", () => { state.selectedMetric = el.dataset.metricDetail ?? null; render(); document.querySelector(".comparison-card")?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }));
     document.querySelector("[data-action=clear-metric-detail]")?.addEventListener("click", () => { state.selectedMetric = null; render(); });
@@ -1727,7 +1733,7 @@ async function start() {
         recentDashboards.set(data.province.id, data);
         if (!initialPeriod)
             throw new Error("Chưa có kỳ báo cáo ban đầu hoàn chỉnh");
-        state = { screen: "overview", periodId: initialPeriod.id, scope: "all", unitId: data.defaultUnitId, peerDimension: "total", selectedGroup: null, selectedMetric: null, search: "", demo: "normal", modal: "none" };
+        state = { screen: "overview", periodId: initialPeriod.id, scope: "all", unitId: data.defaultUnitId, peerDimension: "total", peerSortDirection: "desc", selectedGroup: null, selectedMetric: null, search: "", demo: "normal", modal: "none" };
         const rememberedPeriod = data.periods.find(item => item.id === remembered.get("period"));
         if (rememberedPeriod)
             state.periodId = rememberedPeriod.id;

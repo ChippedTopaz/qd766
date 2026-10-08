@@ -12,9 +12,14 @@ original.delivery={stale:true,message:'Dữ liệu cần cập nhật',detailsAv
 const app={innerHTML:'',setAttribute(){}};
 const control=dataset=>({dataset,handlers:{},addEventListener(kind,callback){this.handlers[kind]=callback}});
 const nav=control({nav:'peers'});
+const timeNav=control({nav:'time'});
 let peerControls=[];
+let sortControls=[];
 globalThis.document={title:'',querySelector:s=>s==='#app'?app:null,querySelectorAll(s){
-  if(s==='[data-nav]')return [nav];
+  if(s==='[data-nav]')return [nav,timeNav];
+  if(s==='[data-dimension]'){
+    sortControls=[...app.innerHTML.matchAll(/data-dimension="([^"]+)"/g)].map(m=>control({dimension:m[1]}));return sortControls;
+  }
   if(s==='[data-peer-unit]'){
     peerControls=[...app.innerHTML.matchAll(/data-peer-unit="([^"]+)"(?: data-peer-group="([^"]+)")?/g)].map(m=>control({peerUnit:m[1],peerGroup:m[2]}));return peerControls;
   }
@@ -31,9 +36,22 @@ const calls=[];globalThis.fetch=async(url,options)=>{
 await import('../dist/app.js');for(let i=0;i<5;i++)await new Promise(r=>setImmediate(r));
 assert.doesNotMatch(app.innerHTML,/Không thể tải dữ liệu/);
 nav.handlers.click();
-assert.match(app.innerHTML,/<details class="comparison-notes"><summary>Lưu ý/);
-assert.doesNotMatch(app.innerHTML,/<details class="comparison-notes" open/);
+assert.doesNotMatch(app.innerHTML,/comparison-notes|<summary>Lưu ý/);
 assert.match(app.innerHTML,/Bảng xếp hạng/);
+const orderedIds=()=>peerControls.filter(c=>!c.dataset.peerGroup).map(c=>c.dataset.peerUnit);
+const originalOrder=orderedIds();
+assert.match(app.innerHTML,/data-dimension="total" data-sort-direction="desc"/);
+sortControls.find(c=>c.dataset.dimension==='total').handlers.click();
+assert.match(app.innerHTML,/aria-sort="ascending"/);
+assert.match(app.innerHTML,/data-dimension="total" data-sort-direction="asc"/);
+assert.notDeepEqual(orderedIds(),originalOrder,'Click changes the displayed row order');
+sortControls.find(c=>c.dataset.dimension==='total').handlers.click();
+assert.deepEqual(orderedIds(),originalOrder,'Second click restores descending rows');
+const dimension=data.groupOrder[1];
+sortControls.find(c=>c.dataset.dimension===dimension).handlers.click();
+assert(app.innerHTML.includes(`data-dimension="${dimension}" data-sort-direction="desc"`),'New column starts descending');
+sortControls.find(c=>c.dataset.dimension===dimension).handlers.click();
+assert(app.innerHTML.includes(`data-dimension="${dimension}" data-sort-direction="asc"`),'Same column toggles ascending');
 assert.doesNotMatch(app.innerHTML,/data-agency-change|data-time-mode|Biến động ngày liền trước/);
 assert.doesNotMatch(app.innerHTML,/Sở, ngành <span>|Xã, phường <span>/);
 assert(!calls.some(c=>c.url.includes('daily-history')),'month/agency comparison must not load day observations');
@@ -43,5 +61,8 @@ assert(group,'score cells link to the unit and group');group.handlers.click();
 assert.match(app.innerHTML,/data-overview-tab="details" aria-selected="true"/);
 assert.match(savedUrl,/period=month-2026-09/);assert.match(savedUrl,/scope=all/);
 assert.equal(new URLSearchParams(savedUrl.split('?')[1]).get('unit'),agency.departmentId);
+timeNav.handlers.click();
+assert.match(app.innerHTML,/Chuỗi điểm cùng loại kỳ/);
+assert.doesNotMatch(app.innerHTML,/comparison-notes|<summary>Lưu ý/,'Time comparison also removes notes with stale/mixed data');
 assert(calls.every(c=>c.method==='GET'));
-console.log('AGENCY_COMPARISON_UI_OK: collapsed caveats, six-group table, period-preserving group navigation, GET-only');
+console.log('AGENCY_COMPARISON_UI_OK: no notes in agency/time pages, six-group table, period-preserving group navigation, GET-only');

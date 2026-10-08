@@ -1,4 +1,4 @@
-"""04:00 daily collector. Dry-run default; shared lease, three HTTP requests, resumable blocks."""
+"""05:00 daily collector. Dry-run default; shared lease, three HTTP requests, resumable blocks."""
 import argparse
 import json
 import os

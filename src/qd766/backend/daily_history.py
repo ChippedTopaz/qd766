@@ -1,16 +1,16 @@
-"""04:00 Vietnam reporting policy and score-only daily history."""
+"""05:00 Vietnam reporting policy and score-only daily history."""
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from .models import DailyObservation, Snapshot, Dataset, Entity
 from .dashboard import NATIONAL_GROUP_CODES, NATIONAL_GROUP_MAXIMUMS
-from .province_refresh import VIETNAM, current_detail_periods
+from .province_refresh import VIETNAM, DAILY_COLLECTION_HOUR, current_detail_periods
 
 FIRST_VALID_REPORT_DATE = date(2026, 10, 6)
 
 def daily_target(now):
     local = now.replace(tzinfo=VIETNAM) if now.tzinfo is None else now.astimezone(VIETNAM)
-    boundary = local.replace(hour=4,minute=0,second=0,microsecond=0)
+    boundary = local.replace(hour=DAILY_COLLECTION_HOUR,minute=0,second=0,microsecond=0)
     if local < boundary:
         boundary -= timedelta(days=1)
     report_date = boundary.date()-timedelta(days=1)
@@ -84,4 +84,4 @@ def history_payload(db,root_id,unit_id,period,limit=31,include_peers=False):
         days.append({'reportDate':record.report_date.isoformat(),'capturedAt':record.captured_at.isoformat(),
             'nationalCapturedAt':record.national_summary.captured_at.isoformat(),'totalScore':total,'rank':rank,
             'cohortSize':len(cohort),'cohortKey':hashlib.sha256('|'.join(sorted(cohort)).encode()).hexdigest(),'groups':groups,'peerScores':peer_scores})
-    return {'days':days,'reportingPolicy':'previous-day-04:00-Asia/Ho_Chi_Minh','scope':'all'}
+    return {'days':days,'reportingPolicy':'previous-day-05:00-Asia/Ho_Chi_Minh','scope':'all'}

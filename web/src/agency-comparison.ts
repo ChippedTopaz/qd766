@@ -8,6 +8,19 @@ export interface AgencyComparisonRow {
 }
 const finite=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
 
+/** Public score inventory in the authorized province, not a detail-selection allowlist. */
+export function agencyComparisonUnits(snapshot:Snapshot):UnitOption[]{
+  const units=new Map<string,UnitOption>();
+  for(const dataset of snapshot.datasets)for(const entity of dataset.children){
+    if(entity.departmentLevel!=='PROVINCE'&&entity.departmentLevel!=='COMMUNE')continue;
+    if(!units.has(entity.departmentId))units.set(entity.departmentId,{
+      departmentId:entity.departmentId,departmentName:entity.departmentName,
+      departmentType:entity.departmentType,departmentLevel:entity.departmentLevel,
+    });
+  }
+  return [...units.values()];
+}
+
 /** Union all source groups; missing scores are not zero. The allowlist is mandatory. */
 export function agencyComparison(snapshot:Snapshot, previous:Snapshot|null, groups:GroupId[], allowed:UnitOption[]):AgencyComparisonRow[] {
   const inventory=(source:Snapshot):AgencyComparisonRow[]=>{
@@ -48,12 +61,13 @@ export function agencyComparison(snapshot:Snapshot, previous:Snapshot|null, grou
   return rows;
 }
 
-export function orderAgencies(rows:AgencyComparisonRow[], dimension:'total'|GroupId, query:string):AgencyComparisonRow[]{
+export function orderAgencies(rows:AgencyComparisonRow[], dimension:'total'|GroupId, query:string, direction:'asc'|'desc'='desc'):AgencyComparisonRow[]{
   const plain=(value:string)=>value.toLocaleLowerCase('vi').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d');
   const needle=plain(query.trim());
   return rows.filter(row=>plain(row.name).includes(needle)).sort((a,b)=>{
     const left=dimension==='total'?a.total:a.scores[dimension]??null;
     const right=dimension==='total'?b.total:b.scores[dimension]??null;
-    return left===null?(right===null?a.name.localeCompare(b.name,'vi'):1):right===null?-1:right-left||a.name.localeCompare(b.name,'vi');
+    return left===null?(right===null?a.name.localeCompare(b.name,'vi'):1):right===null?-1:
+      (direction==='asc'?left-right:right-left)||a.name.localeCompare(b.name,'vi');
   });
 }

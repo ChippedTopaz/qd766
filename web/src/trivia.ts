@@ -5,6 +5,7 @@ const esc=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;'
 let question:Question|null=null,stats:Stats={score:0,streak:0,best:0,answered:0},result:Result|null=null;
 let choice:number|null=null,started=false,busy=false,failed=false,message='',available=true,roundId='';
 let deadline=0,nextDeadline=0,retryAt=0,timer:ReturnType<typeof setInterval>|null=null;
+let mobileViewport:MediaQueryList|null=null;
 const remaining=()=>Math.max(0,Math.ceil((deadline-performance.now())/1000));
 const clockText=()=>result?`Tiếp sau ${Math.max(0,Math.ceil((nextDeadline-performance.now())/1000))} giây`:`Còn ${remaining()} giây`;
 export function triviaMarkup():string{
@@ -26,9 +27,14 @@ export function triviaMarkup():string{
 function paint(){document.querySelectorAll<HTMLElement>('.trivia-card').forEach(node=>{node.outerHTML=triviaMarkup()});}
 export function bindTrivia(csrf:string):void{
   const card=document.querySelector<HTMLElement>('.trivia-card');if(!card)return;
+  if(!mobileViewport){
+    mobileViewport=window.matchMedia('(max-width:760px)');
+    mobileViewport.addEventListener('change',()=>bindTrivia(csrf));
+  }
+  if(mobileViewport.matches){if(timer){clearInterval(timer);timer=null}return;}
   const render=()=>{paint();bindTrivia(csrf)};
   const load=async(restart=false)=>{
-    if(busy)return;busy=true;failed=false;message='';render();const requestedAt=performance.now();
+    if(busy||mobileViewport?.matches)return;busy=true;failed=false;message='';render();const requestedAt=performance.now();
     try{
       const response=await fetch('/api/v1/me/trivia'+(restart?'/restart':''),restart?
         {method:'POST',signal:AbortSignal.timeout(15000),headers:{'Content-Type':'application/json','X-QD766-CSRF':csrf},body:JSON.stringify({roundId})}:
@@ -42,7 +48,7 @@ export function bindTrivia(csrf:string):void{
     finally{busy=false;render()}
   };
   const tick=()=>{
-    if(document.hidden||!question||busy)return;
+    if(document.hidden||mobileViewport?.matches||!question||busy)return;
     document.querySelectorAll<HTMLElement>('[data-trivia-clock]').forEach(node=>{node.textContent=clockText()});
     const due=result?nextDeadline>0&&performance.now()>=nextDeadline:remaining()===0;
     if(due&&performance.now()>=retryAt)void load();

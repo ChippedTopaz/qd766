@@ -30,18 +30,18 @@ class DailyHistoryTest(unittest.TestCase):
         with self.assertRaises(ValueError):validate_daily_snapshot(snapshot,summary,date(2026,10,6),stamp+timedelta(minutes=1),PeriodSelection('year',2026,None),root)
 
     def test_reporting_day_and_rollovers(self):
-        day,boundary,periods=daily_target(datetime(2026,10,6,4,tzinfo=VIETNAM))
-        self.assertEqual(day,date(2026,10,5));self.assertEqual(boundary.hour,4)
-        self.assertEqual(daily_target(datetime(2026,10,6,3,59,tzinfo=VIETNAM))[0],date(2026,10,4))
-        self.assertEqual(daily_target(datetime(2026,10,5,21,tzinfo=timezone.utc))[0],day)
-        closing=daily_target(datetime(2027,1,1,4,tzinfo=VIETNAM))[2]
+        day,boundary,periods=daily_target(datetime(2026,10,6,5,tzinfo=VIETNAM))
+        self.assertEqual(day,date(2026,10,5));self.assertEqual(boundary.hour,5)
+        self.assertEqual(daily_target(datetime(2026,10,6,4,59,tzinfo=VIETNAM))[0],date(2026,10,4))
+        self.assertEqual(daily_target(datetime(2026,10,5,22,tzinfo=timezone.utc))[0],day)
+        closing=daily_target(datetime(2027,1,1,5,tzinfo=VIETNAM))[2]
         self.assertEqual({(p.type,p.year,p.value) for p in closing},{('month',2026,12),('quarter',2026,4),('year',2026,None)})
-        self.assertEqual(daily_target(datetime(2027,1,2,4,tzinfo=VIETNAM))[2][0].year,2027)
-        self.assertEqual(daily_target(datetime(2028,3,1,4,tzinfo=VIETNAM))[0],date(2028,2,29))
+        self.assertEqual(daily_target(datetime(2027,1,2,5,tzinfo=VIETNAM))[2][0].year,2027)
+        self.assertEqual(daily_target(datetime(2028,3,1,5,tzinfo=VIETNAM))[0],date(2028,2,29))
 
     def test_freshness_waits_for_daily_completion(self):
-        self.assertEqual(daily_fresh_after(datetime(2026,10,6,4,30,tzinfo=VIETNAM)).day,5)
-        self.assertEqual(daily_fresh_after(datetime(2026,10,6,5,tzinfo=VIETNAM)).day,6)
+        self.assertEqual(daily_fresh_after(datetime(2026,10,6,5,59,tzinfo=VIETNAM)).day,5)
+        self.assertEqual(daily_fresh_after(datetime(2026,10,6,6,tzinfo=VIETNAM)).day,6)
 
     def test_real_daily_versions_and_same_content_resume(self):
         engine=create_engine('sqlite://');Base.metadata.create_all(engine)
@@ -70,7 +70,7 @@ class DailyHistoryTest(unittest.TestCase):
                 history=history_payload(db,uuid.UUID(ROOT_ID),uuid.UUID(CHILD_ID),PeriodSelection('month',2026,8))
                 self.assertEqual(len(history['days']),1);self.assertEqual(len(history['days'][0]['groups']),6)
                 self.assertEqual(history['days'][0]['reportDate'],'2026-10-06')
-                self.assertEqual(history['reportingPolicy'],'previous-day-04:00-Asia/Ho_Chi_Minh')
+                self.assertEqual(history['reportingPolicy'],'previous-day-05:00-Asia/Ho_Chi_Minh')
                 self.assertEqual(len(list(db.scalars(select(DailyObservation)))),2)
                 self.assertEqual(history['days'][0]['rank'],1)
                 snapshot.created_at=stamp-timedelta(days=1)

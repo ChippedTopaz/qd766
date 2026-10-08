@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+let changed, tick, cleared=0, requests=0;
+const viewport={matches:true,addEventListener(event,callback){assert.equal(event,'change');changed=callback}};
+globalThis.window={matchMedia(query){assert.equal(query,'(max-width:760px)');return viewport}};
+const card={querySelectorAll(){return []},querySelector(){return null}};
+globalThis.document={hidden:false,querySelector(){return card},querySelectorAll(){return []},addEventListener(){}};
+globalThis.setInterval=callback=>{tick=callback;return 1};
+globalThis.clearInterval=()=>{cleared++};
+globalThis.fetch=async()=>{requests++;return {ok:true,json:async()=>({available:true,roundId:'round',
+  serverNow:'2026-10-08T00:00:00Z',question:{id:'question',prompt:'Câu hỏi',choices:['A','B'],roundId:'round',expiresAt:'2026-10-08T00:01:00Z'}})}};
+const {bindTrivia}=await import('../dist/trivia.js');
+bindTrivia('csrf');assert.equal(requests,0,'Mobile must not assign a question or start its deadline');
+viewport.matches=false;changed();
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(requests,1,'Desktop still loads Trivia');assert.equal(typeof tick,'function');
+viewport.matches=true;changed();assert.equal(cleared,1,'Mobile stops desktop timer');
+tick();bindTrivia('csrf');assert.equal(requests,1,'Hidden Trivia must not load or advance questions');
+viewport.matches=false;changed();assert.equal(requests,1,'Returning to desktop preserves the current question');
+const css=readFileSync(new URL('../bento.css',import.meta.url),'utf8');
+assert.match(css,/@media\(max-width:760px\)\{\.trivia-card\{display:none\}\}/);
+assert.doesNotMatch(css,/account-mobile:has\(\.trivia-card\)\{display:block\}/);
+console.log('TRIVIA_MOBILE_OK: hidden, no mobile requests/timer, desktop preserved, responsive switching');

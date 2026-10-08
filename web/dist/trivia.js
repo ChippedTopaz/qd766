@@ -2,6 +2,7 @@ const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&am
 let question = null, stats = { score: 0, streak: 0, best: 0, answered: 0 }, result = null;
 let choice = null, started = false, busy = false, failed = false, message = '', available = true, roundId = '';
 let deadline = 0, nextDeadline = 0, retryAt = 0, timer = null;
+let mobileViewport = null;
 const remaining = () => Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
 const clockText = () => result ? `Tiếp sau ${Math.max(0, Math.ceil((nextDeadline - performance.now()) / 1000))} giây` : `Còn ${remaining()} giây`;
 export function triviaMarkup() {
@@ -30,9 +31,20 @@ export function bindTrivia(csrf) {
     const card = document.querySelector('.trivia-card');
     if (!card)
         return;
+    if (!mobileViewport) {
+        mobileViewport = window.matchMedia('(max-width:760px)');
+        mobileViewport.addEventListener('change', () => bindTrivia(csrf));
+    }
+    if (mobileViewport.matches) {
+        if (timer) {
+            clearInterval(timer);
+            timer = null;
+        }
+        return;
+    }
     const render = () => { paint(); bindTrivia(csrf); };
     const load = async (restart = false) => {
-        if (busy)
+        if (busy || mobileViewport?.matches)
             return;
         busy = true;
         failed = false;
@@ -69,7 +81,7 @@ export function bindTrivia(csrf) {
         }
     };
     const tick = () => {
-        if (document.hidden || !question || busy)
+        if (document.hidden || mobileViewport?.matches || !question || busy)
             return;
         document.querySelectorAll('[data-trivia-clock]').forEach(node => { node.textContent = clockText(); });
         const due = result ? nextDeadline > 0 && performance.now() >= nextDeadline : remaining() === 0;

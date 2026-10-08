@@ -1,7 +1,7 @@
 /* Shared chrome and scoped Enterprise surfaces are cosmetic only. */
 .sidebar{background:#fff;color:#475569;border-right:1px solid #edf0f8;padding-top:24px}
 .trivia-card .trivia-header{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:8px}.trivia-card .trivia-header h3{margin:0;font-size:10px;letter-spacing:.025em}.trivia-card .trivia-header .trivia-clock{margin:0;font-size:10px;white-space:nowrap;flex-shrink:0}
-.trivia-question{white-space:pre-wrap}.trivia-clock{font-size:11px;color:#4338ca;margin:8px 0 0;font-variant-numeric:tabular-nums}@media(max-width:760px){.account-zone.account-mobile:has(.trivia-card){display:block}.account-mobile .trivia-card{width:min(100%,320px);margin-left:auto}.account-mobile .account-switch{margin-left:auto}}
+.trivia-question{white-space:pre-wrap}.trivia-clock{font-size:11px;color:#4338ca;margin:8px 0 0;font-variant-numeric:tabular-nums}
 .sidebar:has(.trivia-card){overflow-y:auto}.trivia-card{margin-bottom:12px;padding:12px;border:1px solid #e4e8fa;border-radius:14px;background:#f8faff;color:#172554;font-size:12px;max-height:35vh;overflow:auto}.trivia-card h3{font-size:11px;letter-spacing:.06em;margin:0 0 8px;color:#4f46e5}.trivia-stats{display:flex;gap:8px;flex-wrap:wrap;font-size:10px;color:#64748b}.trivia-question{font-weight:650;line-height:1.5}.trivia-choices{display:grid;gap:6px}.trivia-choices label{display:flex;align-items:flex-start;gap:6px;border:1px solid #e3e8f3;border-radius:8px;padding:7px;background:white;overflow-wrap:anywhere}.trivia-choices input{margin:2px 0 0;flex-shrink:0}.trivia-card button{margin-top:9px;width:100%;border:0;border-radius:8px;padding:8px;background:#4f46e5;color:white;font:inherit;cursor:pointer}.trivia-card button:disabled{opacity:.5;cursor:default}.trivia-choices .trivia-correct{border-color:#16a34a;background:#f0fdf4}.trivia-feedback{line-height:1.5}.account-mobile .trivia-card{max-height:250px}
 .brand{border-color:#edf0f8}.brand strong{color:#172554}.brand-mark{border-radius:12px;background:linear-gradient(135deg,#2563eb,#7c3aed);box-shadow:0 5px 15px #6366f126}.brand small,.side-meta{color:#64748b}.side-meta{border-color:#edf0f8}
 .trivia-card{display:flex;flex-direction:column;overflow:hidden;min-height:0}
@@ -18,7 +18,7 @@
   .sidebar .account-zone>.trivia-card{flex:1;max-height:none;min-height:150px;margin-bottom:12px}
   .sidebar .account-zone>.account-switch{flex-shrink:0}
 }
-@media(max-width:760px){.account-mobile .trivia-card{height:300px;max-height:300px}}
+@media(max-width:760px){.trivia-card{display:none}}
 .nav{gap:6px}.nav button{position:relative;color:#475569;border-radius:12px;padding:12px 10px}.nav button:hover{color:#4338ca;background:#f4f5ff}.nav button.active{color:#4338ca;background:#eef0ff}.nav button.active:before{content:"";position:absolute;left:0;top:25%;height:50%;width:3px;border-radius:4px;background:linear-gradient(#22d3ee,#7c3aed)}
 .nav-icon svg{width:18px;height:18px}
 .contextbar{border-color:#edf0f8;gap:10px}.contextbar select,.contextbar .ts-control{border-radius:999px;border-color:#e2e8f0;background:#fff}.contextbar .ts-dropdown{border-radius:14px;overflow:hidden}.contextbar .ts-control{padding-left:14px}.context-actions .btn{border-radius:999px;font-size:12px}.context-actions .btn.primary{background:#4f46e5;border-color:#4f46e5}.context-fields .field>span{letter-spacing:.025em;font-size:9px}
@@ -201,6 +201,7 @@ body:has(#app[aria-busy="true"])>.site-footer,body:has(#admin[aria-busy="true"])
 @media(max-width:600px){.agency-levels{width:100%;flex-wrap:nowrap}.agency-levels button{flex:1;padding:10px 12px}.annual-daily-comparison strong{font-size:15px}.annual-date-control input{max-width:145px}}
 .agency-ranking-scroll{max-height:65vh;overflow:auto;overscroll-behavior:contain}
 .agency-ranking table{min-width:1300px;border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums}
+.agency-ranking td.num,.agency-ranking th:not(:nth-child(2)){text-align:right}
 .agency-ranking thead th{position:sticky;top:0;z-index:3;background:#f4f7fe;box-shadow:0 1px 0 #e2e8f0}
 .agency-ranking th:nth-child(2),.agency-ranking td:nth-child(2){position:sticky;left:0;min-width:240px;max-width:340px;background:#fff;z-index:2}
 .agency-ranking th:nth-child(2){background:#f4f7fe;z-index:4}
@@ -210,6 +211,7 @@ body:has(#app[aria-busy="true"])>.site-footer,body:has(#admin[aria-busy="true"])
 .agency-sort{font-weight:600}
 .agency-sort.active{color:#4f46e5}
 .agency-sort.active::after{content:' ↓'}
+.agency-sort.active[data-sort-direction="asc"]::after{content:' ↑'}
 .agency-ranking .num .agency-link{font-variant-numeric:tabular-nums}
 @media(max-width:700px){.agency-ranking .panel-head{gap:10px}.agency-ranking #peer-search{flex:1;min-width:160px}.agency-ranking th:nth-child(2),.agency-ranking td:nth-child(2){min-width:160px;max-width:180px}.agency-ranking-scroll{max-height:60vh}.agency-ranking .table-toolbar{padding:10px 14px}}
 .formula-link{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;text-align:left;color:#4338ca;font-weight:650;cursor:pointer}

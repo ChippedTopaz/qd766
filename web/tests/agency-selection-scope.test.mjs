@@ -26,7 +26,7 @@ const forgedPeer=control('forged-peer');forgedPeer.dataset.peerUnit=other.depart
 const group=control('group');group.dataset.groupDetail='dossier-digitized';
 const metric=control('metric');metric.dataset.metricDetail='raw:comparison-test';
 globalThis.document={title:'',querySelector:s=>s==='#app'?app:['#unit-select','#period-value'].includes(s)?control(s):null,
-  querySelectorAll:s=>s==='[data-nav]'?[nav]:s==='[data-peer-unit]'?[forgedPeer]:s==='[data-group-detail]'?[group]:s==='[data-metric-detail]'?[metric]:[]};
+  querySelectorAll:s=>s==='[data-agency-level]'?['PROVINCE','COMMUNE'].map(level=>{const item=control('level-'+level);item.dataset.agencyLevel=level;return item}):s==='[data-nav]'?[nav]:s==='[data-peer-unit]'?[forgedPeer]:s==='[data-group-detail]'?[group]:s==='[data-metric-detail]'?[metric]:[]};
 globalThis.TomSelect=class{constructor(){}on(){}destroy(){}};
 globalThis.window={setTimeout:(fn,delay)=>{const timer=setTimeout(fn,delay);timer.unref();return timer},clearTimeout};
 globalThis.location={search:`?unit=${other.departmentId}`,hash:'',pathname:'/'};
@@ -72,4 +72,13 @@ control('#unit-select').handlers.change({target:{value:other.departmentId}});ass
 forgedPeer.handlers.click();assertOwn();
 nav.handlers.click();assertOwn();assert.match(app.innerHTML,/Bảng xếp hạng/);
 assert(!app.innerHTML.includes(`data-peer-unit="${other.departmentId}"`));
-console.log('AGENCY_SELECTION_SCOPE_OK: detail peer scores visible; forged URL/change/peer rejected; compact hydration and period changes preserve assignment');
+const escape=value=>value.replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+for(const level of ['PROVINCE','COMMUNE']){
+  assert(app.innerHTML.includes(`data-agency-level="${level}"`),'Both aggregate comparison levels available');
+  control('level-'+level).handlers.click();assertOwn();
+  const units=new Map(snapshot.datasets.flatMap(dataset=>dataset.children).filter(entity=>entity.departmentLevel===level).map(entity=>[entity.departmentId,entity]));
+  for(const entity of units.values())assert(app.innerHTML.includes(escape(entity.departmentName)),'Every province peer is listed: '+entity.departmentName);
+  assert(!app.innerHTML.includes(`data-peer-unit="${other.departmentId}"`),'Other agency scores are not links to private details');
+}
+forgedPeer.handlers.click();assertOwn();
+console.log('AGENCY_SELECTION_SCOPE_OK: all province aggregate peers in both levels; own-only detail selector; forged URL/change/peer rejected; component comparison preserved');
