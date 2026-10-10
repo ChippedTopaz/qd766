@@ -1,11 +1,11 @@
 """Shared agency-only invitation. Pending accounts cannot read dashboard data."""
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from starlette.responses import JSONResponse
 
@@ -63,6 +63,7 @@ def registration_status(request: Request):
         session, account, item = applicant(request, db)
         return {"state": "approved" if account.trial_admitted else item.state, "name": account.display_name,
                 "email": account.email, "csrfToken": session.csrf_token,
+                "publicRegistration": bool(item and item.link_id is None),
                 "provinceId": str(item.root_department_id) if item and item.root_department_id else None,
                 "unitId": str(item.unit_department_id) if item and item.unit_department_id else None}
 
@@ -88,6 +89,37 @@ class AgencySelection(BaseModel):
     unitId: uuid.UUID
 
 
+class PublicSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fullName: str = Field(min_length=2, max_length=160)
+    birthDate: date
+    gender: Literal["male", "female"]
+    workplace: str = Field(default="", max_length=240)
+    declarationAccepted: Literal[True]
+    accessTier: Literal["agency"]
+    provinceId: uuid.UUID
+    unitId: uuid.UUID | None = None
+
+    @field_validator("fullName", "workplace", mode="before")
+    @classmethod
+    def clean_text(cls, value):
+        if not isinstance(value, str) or any(ord(c) < 32 for c in value):
+            raise ValueError("Thông tin không hợp lệ.")
+        return value.strip()
+
+    @field_validator("birthDate")
+    @classmethod
+    def valid_birth(cls, value):
+        if value > datetime.now(timezone(timedelta(hours=7))).date():
+            raise ValueError("Ngày sinh không được ở tương lai.")
+        return value
+
+
+def validate_registration(db, province, unit, tier):
+    from .admin import Assignment, validate_assignment
+    validate_assignment(db, Assignment(provinceId=province, unitId=unit, accessTier=tier))
+
+
 def validate_agency(db, payload):
     from .admin import Assignment, validate_assignment
     validate_assignment(db, Assignment(provinceId=payload.provinceId, unitId=payload.unitId, accessTier="agency"))
@@ -100,6 +132,8 @@ def submit_registration(payload: AgencySelection, request: Request):
         _, account, item = applicant(request, db, write=True)
         if account.trial_admitted or item.state != "draft":
             raise HTTPException(409, "Yêu cầu đăng ký đã được gửi.")
+        if item.link_id is None:
+            raise HTTPException(422, "Vui lòng điền đầy đủ hồ sơ đăng ký tài khoản.")
         link = valid_link(db, link_id=item.link_id, lock=True)
         if link is None:
             raise HTTPException(403, "Link đăng ký đã hết hạn, đã đủ số người hoặc đã thu hồi.")
@@ -110,6 +144,25 @@ def submit_registration(payload: AgencySelection, request: Request):
         item.unit_department_id = payload.unitId
         item.submitted_at = datetime.now(timezone.utc)
     return {"state": "pending"}
+
+
+@router.post("/auth/registration/public")
+def submit_public_registration(payload: PublicSelection, request: Request):
+    enabled(request)
+    with request.app.state.session_factory.begin() as db:
+        _, account, item = applicant(request, db, write=True)
+        if account.trial_admitted or item is None or item.state != "draft":
+            raise HTTPException(409, "Yêu cầu đăng ký đã được gửi.")
+        if item.link_id is not None:
+            raise HTTPException(403, "Đây là hồ sơ qua link mời; vui lòng gửi theo phạm vi được mời.")
+        validate_registration(db, payload.provinceId, payload.unitId, payload.accessTier)
+        item.full_name, item.birth_date, item.gender, item.workplace = payload.fullName, payload.birthDate, payload.gender, payload.workplace
+        item.requested_tier = payload.accessTier
+        item.root_department_id, item.unit_department_id = payload.provinceId, payload.unitId
+        item.state = "pending"
+        item.submitted_at = datetime.now(timezone.utc)
+        account.display_name = payload.fullName
+    return {"state": "pending", "message": "Đăng ký thành công. Hồ sơ của bạn đã được gửi đến quản trị viên để xét duyệt. Sau khi được duyệt, bạn có thể đăng nhập bằng tài khoản Google đã đăng ký."}
 
 
 class LinkCreate(BaseModel):
@@ -165,13 +218,22 @@ def list_registrations(request: Request):
         administrator(request, db)
         rows = db.execute(select(TrialRegistration, UserAccount).join(UserAccount, TrialRegistration.account_id == UserAccount.id)
                           .where(TrialRegistration.state == "pending").order_by(TrialRegistration.submitted_at).limit(500)).all()
-        return [{"id": str(i.id), "name": a.display_name, "email": a.email, "provinceId": str(i.root_department_id),
-                 "unitId": str(i.unit_department_id), "province": db.get(Department, i.root_department_id).name,
-                 "unit": db.get(Department, i.unit_department_id).name} for i, a in rows]
+        return [{"id": str(i.id), "name": i.full_name or a.display_name, "email": a.email, "provinceId": str(i.root_department_id),
+                 "unitId": str(i.unit_department_id) if i.unit_department_id else None, "province": db.get(Department, i.root_department_id).name,
+                 "unit": db.get(Department, i.unit_department_id).name if i.unit_department_id else "Toàn tỉnh",
+                 "accessTier": i.requested_tier, "birthDate": i.birth_date.isoformat() if i.birth_date else None,
+                 "gender": i.gender, "workplace": i.workplace} for i, a in rows]
+
+
+class RegistrationAssignment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provinceId: uuid.UUID
+    unitId: uuid.UUID | None = None
+    accessTier: Literal["province", "agency"] = "agency"
 
 
 @router.post("/admin/registrations/{registration_id}/assignment")
-def edit_registration(registration_id: uuid.UUID, payload: AgencySelection, request: Request):
+def edit_registration(registration_id: uuid.UUID, payload: RegistrationAssignment, request: Request):
     enabled(request)
     from .admin import administrator, audit
     with request.app.state.session_factory.begin() as db:
@@ -179,8 +241,11 @@ def edit_registration(registration_id: uuid.UUID, payload: AgencySelection, requ
         item = db.scalar(select(TrialRegistration).where(TrialRegistration.id == registration_id).with_for_update())
         if item is None or item.state != "pending":
             raise HTTPException(409, "Yêu cầu không còn chờ duyệt.")
-        validate_agency(db, payload)
+        if item.link_id is not None and payload.accessTier != "agency":
+            raise HTTPException(422, "Link mời dùng chung chỉ cấp tài khoản cơ quan.")
+        validate_registration(db, payload.provinceId, payload.unitId, payload.accessTier)
         item.root_department_id, item.unit_department_id = payload.provinceId, payload.unitId
+        item.requested_tier = payload.accessTier
         audit(db, actor, "registration.assignment-updated", registrationId=str(item.id), **payload.model_dump(mode="json"))
     return {"updated": True}
 
@@ -214,14 +279,16 @@ def review_registrations(payload: ReviewBatch, request: Request):
                 raise HTTPException(409, "Tài khoản đã thay đổi; hãy tải lại danh sách.")
             now = datetime.now(timezone.utc)
             if payload.decision == "approve":
-                validate_agency(db, AgencySelection(provinceId=item.root_department_id, unitId=item.unit_department_id))
-                account.access_tier = "agency"
+                if item.requested_tier not in {"province", "agency"}:
+                    raise HTTPException(422, "Loại tài khoản không hợp lệ.")
+                validate_registration(db, item.root_department_id, item.unit_department_id, item.requested_tier)
+                account.access_tier = item.requested_tier
                 account.root_department_id, account.unit_department_id = item.root_department_id, item.unit_department_id
                 account.trial_admitted = True
                 # Reviewed admission is represented by a redeemed one-time invitation.
                 invitation = TrialInvitation(token_hash=digest(secrets.token_urlsafe(32)), created_by=actor.id,
                     recipient_email=account.email, root_department_id=item.root_department_id, unit_department_id=item.unit_department_id,
-                    access_tier="agency", expires_at=now+timedelta(days=1), used_at=now, used_by=account.id)
+                    access_tier=item.requested_tier, expires_at=now+timedelta(days=1), used_at=now, used_by=account.id)
                 db.add(invitation); db.flush()
                 activate_invited_trial(db, account.id, invitation, now=now)
             item.state = "approved" if payload.decision == "approve" else "rejected"

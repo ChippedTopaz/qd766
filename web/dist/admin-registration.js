@@ -1,4 +1,9 @@
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+export function pendingRegistrationRow(item) {
+    const birth = item.birthDate ? item.birthDate.split('-').reverse().join('/') : '—';
+    const gender = { male: 'Nam', female: 'Nữ', other: 'Khác' }[item.gender ?? ''] ?? '—';
+    return `<tr><td><input type="checkbox" data-registration-id="${esc(item.id)}" aria-label="Chọn ${esc(item.name)}"></td><td><strong>${esc(item.name)}</strong></td><td>${esc(birth)}</td><td>${esc(gender)}</td><td>${esc(item.email)}</td><td>${esc(item.workplace || '—')}</td><td>${esc(item.province)}</td><td>${esc(item.unit || '—')}</td><td>${item.accessTier === 'province' ? 'Cấp tỉnh' : 'Cơ quan'}</td><td><button data-edit-registration="${esc(item.id)}">Điều chỉnh</button></td></tr>`;
+}
 export async function installRegistrationAdmin(root, api, onReview, deferLoad = false) {
     const policy = await api('access-policy');
     if (!policy.sharedRegistrationEnabled)
@@ -8,8 +13,11 @@ export async function installRegistrationAdmin(root, api, onReview, deferLoad = 
     links.innerHTML = '<h2>Link đăng ký dùng chung</h2><p>Người dùng tự chọn tỉnh và cơ quan. Chỉ cấp quyền cơ quan sau khi duyệt.</p><form data-create-link><div class="form-grid"><label>Hạn link (ngày)<input name="days" type="number" min="1" max="30" value="7" required></label><label>Số người đăng ký tối đa<input name="max" type="number" min="1" max="1000" value="100" required></label></div><div class="actions"><button type="submit" class="primary">Tạo link dùng chung</button></div></form><div data-link-result></div><p data-link-message role="status"></p><div class="scroll"><table><thead><tr><th>Hết hạn</th><th>Đã đăng ký</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody data-links></tbody></table></div>';
     const pending = document.createElement('section');
     pending.dataset.registrationReview = 'true';
-    pending.innerHTML = '<h2>Đăng ký chờ duyệt</h2><p>Chỉ cấp quyền xem cơ quan được chọn. Khi duyệt, tự cấp 1 tháng dùng thử và 100 Credit một lần.</p><div class="actions"><button data-refresh> Làm mới</button><button class="primary" data-review="approve">Duyệt đã chọn</button><button data-review="reject">Từ chối đã chọn</button></div><p data-review-message role="status"></p><div class="scroll"><table><thead><tr><th><input type="checkbox" data-all aria-label="Chọn tối đa 100 yêu cầu"></th><th>Người đăng ký</th><th>Tỉnh/thành phố</th><th>Cơ quan, đơn vị</th><th>Thao tác</th></tr></thead><tbody data-pending></tbody></table></div><form data-edit hidden><h3>Điều chỉnh cơ quan</h3><div class="form-grid"><label>Tỉnh/thành phố<select data-edit-province required></select></label><label>Cơ quan<select data-edit-unit required></select></label></div><div class="actions"><button type="submit">Lưu lựa chọn</button><button type="button" data-cancel-edit>Hủy</button></div></form>';
+    pending.innerHTML = '<h2>Đăng ký chờ duyệt</h2><p>Kiểm tra hồ sơ và loại tài khoản đề nghị trước khi duyệt. Khi duyệt, tự cấp 1 tháng dùng thử và 100 Credit một lần.</p><div class="actions"><button data-refresh> Làm mới</button><button class="primary" data-review="approve">Duyệt đã chọn</button><button data-review="reject">Từ chối đã chọn</button></div><p data-review-message role="status"></p><div class="scroll"><table><thead><tr><th><input type="checkbox" data-all aria-label="Chọn tối đa 100 yêu cầu"></th><th>Người đăng ký</th><th>Tỉnh/thành phố</th><th>Cơ quan, đơn vị</th><th>Quyền đề nghị</th><th>Thao tác</th></tr></thead><tbody data-pending></tbody></table></div><form data-edit hidden><h3>Điều chỉnh quyền và cơ quan</h3><div class="form-grid"><label>Loại tài khoản<select data-edit-tier><option value="agency">Cơ quan</option><option value="province">Cấp tỉnh</option></select></label><label>Tỉnh/thành phố<select data-edit-province required></select></label><label>Cơ quan<select data-edit-unit required></select></label></div><div class="actions"><button type="submit">Lưu lựa chọn</button><button type="button" data-cancel-edit>Hủy</button></div></form>';
     root.append(links, pending);
+    const reviewTable = pending.querySelector('table');
+    reviewTable.classList.add('registration-review-table');
+    reviewTable.querySelector('thead tr').innerHTML = '<th><input type="checkbox" data-all aria-label="Chọn tối đa 100 yêu cầu"></th><th>Người đăng ký</th><th>Ngày sinh</th><th>Giới tính</th><th>Địa chỉ email</th><th>Đơn vị công tác</th><th>Tỉnh/thành phố</th><th>Cơ quan, đơn vị</th><th>Quyền</th><th>Thao tác</th>';
     let rows = [], editing = null;
     const message = (scope, selector, text) => { scope.querySelector(selector).textContent = text; };
     const loadLinks = async () => {
@@ -18,7 +26,7 @@ export async function installRegistrationAdmin(root, api, onReview, deferLoad = 
     };
     const loadPending = async () => {
         rows = await api('admin/registrations');
-        pending.querySelector('[data-pending]').innerHTML = rows.length ? rows.map(item => `<tr><td><input type="checkbox" data-registration-id="${esc(item.id)}" aria-label="Chọn ${esc(item.name)}"></td><td>${esc(item.name)}<br><small>${esc(item.email)}</small></td><td>${esc(item.province)}</td><td>${esc(item.unit)}</td><td><button data-edit-registration="${esc(item.id)}">Điều chỉnh</button></td></tr>`).join('') : '<tr><td colspan="5">Không có đăng ký chờ duyệt.</td></tr>';
+        pending.querySelector('[data-pending]').innerHTML = rows.length ? rows.map(pendingRegistrationRow).join('') : '<tr><td colspan="10">Không có đăng ký chờ duyệt.</td></tr>';
         pending.querySelector('[data-all]').checked = false;
     };
     async function action(scope, selector, work) { try {
@@ -81,18 +89,21 @@ export async function installRegistrationAdmin(root, api, onReview, deferLoad = 
         });
     const edit = pending.querySelector('[data-edit]');
     const province = edit.querySelector('[data-edit-province]'), unit = edit.querySelector('[data-edit-unit]');
+    const tier = edit.querySelector('[data-edit-tier]');
     let unitVersion = 0;
-    const loadUnits = async (selected) => { const version = ++unitVersion; unit.replaceChildren(); const reply = await api(`admin/directory?provinceId=${encodeURIComponent(province.value)}`); if (version !== unitVersion)
+    const loadUnits = async (selected) => { const version = ++unitVersion; unit.replaceChildren(); unit.required = tier.value !== 'province'; unit.closest('label').hidden = tier.value === 'province'; if (tier.value === 'province')
+        return; const reply = await api(`admin/directory?provinceId=${encodeURIComponent(province.value)}`); if (version !== unitVersion)
         return; for (const item of reply.units)
         unit.add(new Option(item.name, item.id)); if (selected)
         unit.value = selected; };
     pending.addEventListener('click', event => { const button = event.target.closest('[data-edit-registration]'); if (button)
         void action(pending, '[data-review-message]', async () => { const item = rows.find(row => row.id === button.dataset.editRegistration); editing = item.id; const directory = await api('admin/directory'); province.replaceChildren(); for (const root of directory.provinces)
-            province.add(new Option(root.name, root.id)); province.value = item.provinceId; await loadUnits(item.unitId); edit.hidden = false; edit.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }); });
+            province.add(new Option(root.name, root.id)); province.value = item.provinceId; tier.value = item.accessTier ?? 'agency'; await loadUnits(item.unitId); edit.hidden = false; edit.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }); });
+    tier.addEventListener('change', () => void action(pending, '[data-review-message]', () => loadUnits()));
     province.addEventListener('change', () => void action(pending, '[data-review-message]', () => loadUnits()));
     edit.querySelector('[data-cancel-edit]').addEventListener('click', () => { edit.hidden = true; editing = null; });
     edit.addEventListener('submit', event => { event.preventDefault(); if (editing)
-        void action(pending, '[data-review-message]', async () => { await api(`admin/registrations/${editing}/assignment`, { provinceId: province.value, unitId: unit.value }); edit.hidden = true; editing = null; await loadPending(); }); });
+        void action(pending, '[data-review-message]', async () => { await api(`admin/registrations/${editing}/assignment`, { provinceId: province.value, unitId: tier.value === 'province' ? null : unit.value, accessTier: tier.value }); edit.hidden = true; editing = null; await loadPending(); }); });
     if (deferLoad)
         root.addEventListener('click', event => {
             const key = event.target.closest('[data-admin-section]')?.dataset.adminSection;

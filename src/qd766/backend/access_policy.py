@@ -22,6 +22,7 @@ async def enforce_public_read_only(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
     registration_methods = {"/api/v1/auth/registration-link": {"POST"},
                             "/api/v1/auth/registration": {"GET", "POST"},
+                            "/api/v1/auth/registration/public": {"POST"},
                             "/api/v1/auth/registration/directory": {"GET"}}
     if path in registration_methods:
         if request.method not in registration_methods[path]:

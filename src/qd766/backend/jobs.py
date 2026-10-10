@@ -18,6 +18,31 @@ class JobStateError(RuntimeError):
     pass
 
 
+class WorkerLeaseLost(JobStateError):
+    """A stale worker must not publish data or change the wallet."""
+
+
+def owned_worker_job(session: Session, job_id, worker_id: str) -> CollectionJob:
+    # Match the claim lock order (control then job) to avoid inversion.
+    control = _locked_control(session)
+    job = session.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
+    if (control.circuit_state != 'closed' or control.lease_locked_by != worker_id
+            or job is None or job.state != 'running' or job.locked_by != worker_id):
+        raise WorkerLeaseLost('Worker no longer owns the collection job')
+    return job
+
+
+def renew_worker_lease(session: Session, worker_id: str, *, now=None) -> None:
+    control = _locked_control(session)
+    job = session.scalar(select(CollectionJob).where(
+        CollectionJob.state == 'running', CollectionJob.locked_by == worker_id).with_for_update())
+    if control.circuit_state != 'closed' or control.lease_locked_by != worker_id or job is None:
+        raise WorkerLeaseLost('Worker no longer owns the collection lease')
+    current = now or utc_now()
+    control.lease_locked_at = job.locked_at = current
+    session.flush()
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 

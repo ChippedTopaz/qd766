@@ -31,6 +31,8 @@ from .jobs import (
     release_collection_lease,
     retry_or_fail_job,
     succeed_job,
+    owned_worker_job,
+    WorkerLeaseLost,
 )
 from .models import CollectionJob
 from .paid_requests import (
@@ -136,7 +138,7 @@ def run_one_job(
     try:
         snapshot = processor(job_id, request)
         with factory.begin() as session:
-            job = _locked_job(session, job_id)
+            job = owned_worker_job(session, job_id, worker_id)
             stored_snapshot = store_normalized_snapshot(session, snapshot,
                 observation_id=str(job_id) if getattr(processor, 'max_workers', 1) > 1 else None)
             settle_paid_requests_for_job(session, job, stored_snapshot)
@@ -145,6 +147,8 @@ def run_one_job(
             finish_province_batch_job(session, job, "succeeded")
             release_collection_lease(session, worker_id)
         return WorkerResult(job_id, "succeeded")
+    except WorkerLeaseLost:
+        return WorkerResult(job_id, 'lease-lost')
     except SafetyStop as error:
         _halt(
             factory,
@@ -212,7 +216,7 @@ def _halt(
 ) -> None:
     with factory.begin() as session:
         detail = _error(kind, error, retryable=False)
-        job = _locked_job(session, job_id)
+        job = owned_worker_job(session, job_id, worker_id)
         halt_job(session, job, worker_id, detail)
         refund_paid_requests_for_job(session, job, detail)
         finish_batch_job(session, job, "halted", detail)
@@ -234,7 +238,7 @@ def _retry_or_fail(
     retry_delay_seconds: int,
 ) -> str:
     with factory.begin() as session:
-        job = _locked_job(session, job_id)
+        job = owned_worker_job(session, job_id, worker_id)
         retry_or_fail_job(
             session,
             job,

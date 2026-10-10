@@ -144,10 +144,13 @@ def validate_google_claims(identity: dict, nonce: str, audience: str) -> dict:
 
 
 @router.get("/google/start")
-def google_start(request: Request):
+def google_start(request: Request, register: str = ""):
     settings = request.app.state.settings
     if not enabled(settings):
         raise HTTPException(503, "Đăng nhập Google chưa được cấu hình.")
+    public_registration = register == "1"
+    if public_registration and not settings.shared_registration_enabled:
+        raise HTTPException(503, "Đăng ký tài khoản chưa được mở.")
     state, binding, nonce, verifier = [secrets.token_urlsafe(32) for _ in range(4)]
     now = datetime.now(timezone.utc)
     with request.app.state.session_factory.begin() as db:
@@ -158,8 +161,8 @@ def google_start(request: Request):
             invitation = db.scalar(select(TrialInvitation.id).where(TrialInvitation.token_hash == digest(invite_token),
                 TrialInvitation.used_at.is_(None), TrialInvitation.revoked_at.is_(None), TrialInvitation.expires_at > now))
         db.add(LoginAttempt(state_hash=digest(state), binding_hash=digest(binding), nonce=nonce, verifier=verifier,
-            invitation_id=invitation, expires_at=now + timedelta(minutes=10)))
-        if settings.shared_registration_enabled:
+            invitation_id=invitation, public_registration=public_registration, expires_at=now + timedelta(minutes=10)))
+        if settings.shared_registration_enabled and not public_registration:
             from .trial_registration import LINK_COOKIE, valid_link
             from .models import SharedTrialLogin
             token = request.cookies.get(LINK_COOKIE, "")
@@ -231,7 +234,8 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
             shared_login = db.get(SharedTrialLogin, attempt.state_hash)
             if shared_login:
                 shared_link = valid_link(db, link_id=shared_login.link_id)
-        if needs_invite and registration is None and shared_link is None:
+        public_registration = settings.shared_registration_enabled and attempt.public_registration
+        if needs_invite and registration is None and shared_link is None and not public_registration:
             # Atomic one-use claim; rolls back with account/session creation on errors.
             invitation = db.scalar(update(TrialInvitation).where(TrialInvitation.id == attempt.invitation_id,
                 TrialInvitation.used_at.is_(None), TrialInvitation.revoked_at.is_(None), TrialInvitation.expires_at > now,
@@ -248,11 +252,13 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
         if account is None or not account.active:
             return response
         account.email = identity["email"]
-        account.display_name = str(identity.get("name") or identity["email"])[:160]
+        account.display_name = registration.full_name if registration and registration.full_name else str(identity.get("name") or identity["email"])[:160]
         if not account.trial_admitted and registration is None and shared_link is not None:
             db.add(TrialRegistration(account_id=account.id, link_id=shared_link.id, state="draft"))
         elif registration is not None and registration.state == "draft" and shared_link is not None:
             registration.link_id = shared_link.id
+        elif not account.trial_admitted and registration is None and public_registration:
+            db.add(TrialRegistration(account_id=account.id, link_id=None, state="draft"))
         if invitation is not None:
             account.trial_admitted = True
             account.root_department_id = invitation.root_department_id

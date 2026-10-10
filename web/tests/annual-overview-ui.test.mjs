@@ -10,7 +10,7 @@ const nav=[control({nav:'time'}),control({nav:'peers'})];
 let dateControl;
 globalThis.document={title:'',querySelector:s=>s==='#app'?app:null,querySelectorAll(s){
   if(s==='[data-nav]')return nav;
-  if(s==='[data-annual-observation]'){dateControl=control({});dateControl.value='2026-10-07';return [dateControl];}
+  if(s==='[data-annual-observation]'){dateControl=control({});dateControl.value='2026-10-07';dateControl.validity={valid:true};return [dateControl];}
   return [];
 }};
 globalThis.window={setTimeout:(fn,delay)=>{const timer=setTimeout(fn,delay);timer.unref();return timer},clearTimeout};globalThis.location={search:'?period=year-2026',hash:'',pathname:'/'};
@@ -20,11 +20,12 @@ const calls=[];
 globalThis.fetch=async url=>{calls.push(url);return {ok:true,json:async()=>structuredClone(url==='/api/v1/access-policy'?{publicReadOnly:true}:url.includes('daily-history')?{days}:url==='/api/v1/dashboard?fast=true&compact=true'?data:[])}};
 await import('../dist/app.js?annual-ui');for(let i=0;i<8;i++)await new Promise(r=>setImmediate(r));
 assert.match(app.innerHTML,/data-annual-observation/);assert.match(app.innerHTML,/\+2,00 điểm/);
-dateControl.handlers.change();assert.match(app.innerHTML,/-1,00 điểm/);
-dateControl.value='2026-10-05';dateControl.handlers.change();assert.match(app.innerHTML,/-1,00 điểm/);
-dateControl.value='2026-10-09';dateControl.handlers.change();assert.match(app.innerHTML,/-1,00 điểm/);
+dateControl.value='2026-10-06';dateControl.handlers.change();assert.match(app.innerHTML,/\+1,00 điểm/);
+assert.match(app.innerHTML,/Dữ liệu mới nhất: 08\/10\/2026/);
+dateControl.value='2026-10-05';dateControl.validity.valid=false;dateControl.handlers.change();assert.match(app.innerHTML,/\+1,00 điểm/);
+dateControl.value='2026-10-09';dateControl.validity.valid=false;dateControl.handlers.change();assert.match(app.innerHTML,/\+1,00 điểm/);
 assert.equal(calls.filter(url=>url.includes('daily-history')).length,1);
-nav[0].handlers.click();assert.doesNotMatch(app.innerHTML,/data-annual-observation|data-time-mode/);
+nav[0].handlers.click();assert.doesNotMatch(app.innerHTML,/data-annual-observation|data-time-mode/);assert.match(app.innerHTML,/data-time-day="current"/);assert.match(app.innerHTML,/data-time-day="baseline"/);
 nav[1].handlers.click();assert.doesNotMatch(app.innerHTML,/data-annual-observation|data-agency-change/);
 assert.equal(calls.filter(url=>url.includes('daily-history')).length,1);
-console.log('ANNUAL_OVERVIEW_UI_OK: year-only hero, selected day, period-only comparison menus');
+console.log('ANNUAL_OVERVIEW_UI_OK: latest day fixed, selected baseline, bounded calendar, sidebar comparison dates');

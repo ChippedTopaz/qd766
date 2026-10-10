@@ -45,7 +45,7 @@ globalThis.fetch=async url=>url==='/api/v1/access-policy'
   :{ok:false,status:401,json:async()=>({})};
 await import('../dist/app.js?loader-login');
 await new Promise(resolve=>setTimeout(resolve,0));
-assert.match(loginRoot.innerHTML,/Tiếp tục với Google/);
+assert.match(loginRoot.innerHTML,/Đăng nhập với Google/);
 assert.doesNotMatch(loginRoot.innerHTML,/page-loader|Không thể tải dữ liệu/);
 assert.equal(loginRoot.attrs['aria-busy'],'false');
 console.log('PAGE_LOADER_OK: initial HTML, inline loading, matching styles, reduced motion, login and failure cleanup');

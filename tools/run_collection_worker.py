@@ -13,7 +13,9 @@ import os
 import socket
 import sys
 import time
+from sqlalchemy.exc import SQLAlchemyError
 from pathlib import Path
+from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -21,6 +23,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from qd766.backend.config import Settings, load_environment_file
 from qd766.backend.database import create_database_engine, create_session_factory
 from qd766.backend.worker import EvaluationSnapshotProcessor, run_one_job
+from qd766.backend.jobs import WorkerLeaseLost
 from qd766.collection import UrllibTransport
 
 
@@ -31,12 +34,14 @@ def _collection_root() -> Path:
     return ROOT.parent / "data" / "collections"
 
 
-def _event(state: str, job_id: object = None) -> str:
+def _event(state: str, job_id: object = None, duration_seconds: float | None = None) -> str:
     return json.dumps(
         {
             "event": "worker-state",
             "state": state,
             "jobId": str(job_id) if job_id else None,
+            "at": datetime.now(timezone.utc).isoformat(),
+            "durationSeconds": round(duration_seconds, 3) if duration_seconds is not None else None,
         },
         ensure_ascii=False,
     )
@@ -57,13 +62,10 @@ def main() -> int:
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     if arguments.controlled:
         from qd766.concurrent_collection import PooledHttpTransport
-        from qd766.backend.models import CollectionControl
-        from qd766.collection import SafetyStop
+        from qd766.backend.jobs import renew_worker_lease
         def guard():
-            with factory() as db:
-                control=db.get(CollectionControl,'dvcqg')
-                if control is None or control.circuit_state!='closed' or control.lease_locked_by!=worker_id:
-                    raise SafetyStop('Collection control changed')
+            with factory.begin() as db:
+                renew_worker_lease(db, worker_id)
         transport = PooledHttpTransport(max_workers=3, spacing=0.4, guard=guard)
     else:
         transport = UrllibTransport(timeout_seconds=45)
@@ -77,12 +79,32 @@ def main() -> int:
     )
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     previous_idle_state: str | None = None
+    database_failures = 0
     try:
         while True:
-            result = run_one_job(factory, processor, worker_id=worker_id)
+            started = time.monotonic()
+            try:
+                result = run_one_job(factory, processor, worker_id=worker_id)
+                database_failures = 0
+            except SQLAlchemyError as error:
+                # Never log connection strings/SQL parameters or spin on outages.
+                database_failures += 1
+                delay = min(60, 5 * 2 ** min(database_failures - 1, 4))
+                print(json.dumps({'event':'worker-database-retry', 'errorType':type(error).__name__,
+                                  'delaySeconds':delay}), flush=True)
+                if arguments.once:
+                    return 1
+                time.sleep(delay)
+                continue
+            except WorkerLeaseLost:
+                print(_event('lease-lost'), flush=True)
+                if arguments.once:
+                    return 0
+                time.sleep(arguments.poll_seconds)
+                continue
             state = result.state if result else "idle"
             if result and result.job_id is not None:
-                print(_event(state, result.job_id), flush=True)
+                print(_event(state, result.job_id, time.monotonic() - started), flush=True)
                 previous_idle_state = None
             elif state != previous_idle_state:
                 print(_event(state), flush=True)

@@ -35,6 +35,13 @@ class WalletSchemaVersionsTest(unittest.TestCase):
             with self.subTest(table=table), self.assertRaises(ValueError):
                 self.verify('20261008_0024',table)
 
+    def test_public_registration_requires_new_profile_and_previous_tables(self):
+        self.verify('20261009_0025',shared_registration=True)
+        for table in ('login_attempts','trial_registrations','formula_config_head',
+                      'trivia_answers','analysis_feature_control','analysis_queue_entries'):
+            with self.subTest(table=table), self.assertRaises(ValueError):
+                self.verify('20261009_0025',table)
+
     def test_trivia_tables_required_for_reviewed_upgrade(self):
         for table in ('trivia_questions','trivia_profiles','trivia_answers'):
             with self.assertRaises(ValueError):self.verify('20261007_0023',table)

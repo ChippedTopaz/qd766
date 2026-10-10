@@ -309,6 +309,24 @@ class TrialAdminTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/dashboard").status_code,403)
 
 
+    def test_collection_monitor_separates_system_and_user_sources(self):
+        from qd766.backend.jobs import enqueue_job
+        from qd766.backend.models import Formality,PaidDataRequest
+        with self.app.state.session_factory.begin() as db:
+            formality_id=uuid.uuid4()
+            db.add(Formality(id=formality_id,code='1.002345',name='Thủ tục kiểm thử phân loại nguồn'));db.flush()
+            system,_=enqueue_job(db,{'kind':'evaluation-snapshot','rootDepartmentId':ROOT_ID,'period':{'type':'month','year':2026,'month':9},'scope':'all'})
+            user,_=enqueue_job(db,{'kind':'evaluation-snapshot','rootDepartmentId':ROOT_ID,'period':{'type':'month','year':2026,'month':9},'scope':'formality','formalityId':str(formality_id)})
+            db.add(PaidDataRequest(account_id=self.admin_id,idempotency_key='monitor-source-test',dataset_key='monitor-source-test',state='reserved',credit_cost=5,province_code='25',root_department_id=uuid.UUID(ROOT_ID),formality_id=formality_id,period_type='month',year=2026,period_value=9,collection_job_id=user.id))
+            system_id,user_id=str(system.id),str(user.id)
+        for source,expected in [('system',system_id),('user',user_id)]:
+            result=self.client.get('/api/v1/admin/collection-log?source='+source)
+            self.assertEqual(result.status_code,200,result.text)
+            self.assertEqual(result.json()['total'],1)
+            self.assertEqual(result.json()['jobs'][0]['id'],expected)
+            self.assertEqual(result.json()['counts'],{'queued':1})
+        self.assertEqual(self.client.get('/api/v1/admin/collection-log?source=invalid').status_code,422)
+
     def test_collection_monitor_read_only_filtered_and_admin_only(self):
         from qd766.backend.jobs import enqueue_job
         from qd766.backend.models import CollectionJob,CollectionControl

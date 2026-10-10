@@ -51,11 +51,19 @@ $workerAction = New-ScheduledTaskAction `
     -Argument $workerArguments `
     -WorkingDirectory $RepositoryRoot
 $workerTrigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
+$workerSettings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -RestartCount 10 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit ([TimeSpan]::Zero)
 $workerTask = New-ScheduledTask `
     -Action $workerAction `
     -Trigger $workerTrigger `
     -Principal $principal `
-    -Settings $settings
+    -Settings $workerSettings
 Register-ScheduledTask -TaskName "QD766 Worker" -InputObject $workerTask -Force | Out-Null
 
 $nationalSummaryArguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $NationalSummaryScript

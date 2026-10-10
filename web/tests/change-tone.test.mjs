@@ -13,7 +13,7 @@ const time=source.slice(source.indexOf("function time():"),source.indexOf("funct
 assert.match(time,/class="num \$\{changeTone\(delta\)\}"/);
 assert.match(time,/changeTone\(rankImprovement\(/);
 assert.match(source, /hero-footer"><span class="\$\{changeTone\(rankChange\)\}"/);
-assert.match(source, /pillar-meta"><span class="\$\{changeTone\(delta\)\}"/);
+assert.match(source, /pillar-meta"><span[^>]*class="\$\{changeTone\(delta\)\}"/);
 assert.match(source, /class="num \$\{changeTone\(scoreChange\)\}"/);
 assert.match(source, /class="num \$\{changeTone\(rankChange\)\}"/);
 const css=readFileSync(new URL("../bento.css",import.meta.url),"utf8");

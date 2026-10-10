@@ -16,15 +16,16 @@ router = APIRouter(prefix="/api/v1/admin", tags=["trial administration"])
 
 @router.get('/collection-log')
 def collection_log(request: Request, kind: Literal['default','formality'] | None = None,
+                   source: Literal['system','user'] | None = None,
                    state: Literal['queued','running','succeeded','failed','halted'] | None = None,
                    offset: int = Query(0,ge=0,le=100000), limit: int = Query(30,ge=1,le=100)):
     from .collection_monitor import collection_status, probe_status, daily_status
     with request.app.state.session_factory() as db:
         administrator(request,db)
-        report=collection_status(db,kind=kind,state=state,offset=offset,limit=limit)
+        report=collection_status(db,kind=kind,source=source,state=state,offset=offset,limit=limit)
     report['localSimulation']=bool(request.app.state.settings.local_google_trial)
-    report['probe']=probe_status(getattr(request.app.state,'collection_probe_checkpoint',None))
-    report['daily']=daily_status()
+    report['probe']=None if source=='user' else probe_status(getattr(request.app.state,'collection_probe_checkpoint',None))
+    report['daily']=[] if source=='user' else daily_status()
     return report
 
 

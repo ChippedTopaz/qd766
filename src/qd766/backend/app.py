@@ -65,7 +65,7 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
                 "loginRequired": resolved.require_login,
                 "googleLoginEnabled": enabled(resolved), "paidRequestsEnabled": resolved.paid_requests_enabled,
                 "inviteRequired": resolved.invite_required,
-                **({"sharedRegistrationEnabled": True} if resolved.shared_registration_enabled else {}),
+                **({"sharedRegistrationEnabled": True, "publicRegistrationEnabled": True} if resolved.shared_registration_enabled else {}),
                 "trialCreditManagement": resolved.trial_credit_management,
                 **({"defaultCollectionAccess": True} if resolved.source_wallet_enabled else {}),
                 **({"collectionRequestsPaused": resolved.wallet_requests_paused} if resolved.real_wallet_enabled else {}),

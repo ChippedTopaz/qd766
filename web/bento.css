@@ -270,6 +270,14 @@ body:has(#app[aria-busy="true"])>.site-footer,body:has(#admin[aria-busy="true"])
 .annual-date-control{display:flex;justify-content:center;min-width:0}
 .annual-date-control input{width:min(100%,170px);min-width:0;min-height:36px;border:1px solid #e4e9f5;border-radius:10px;background:#f8faff;color:#334155;padding:6px 10px;font:inherit;font-size:12px;font-variant-numeric:tabular-nums;color-scheme:light}
 .annual-date-control input:focus-visible{outline:2px solid #818cf8;outline-offset:2px}
+.annual-calendar{position:relative;display:block;width:min(100%,170px)}
+.annual-calendar input{box-sizing:border-box;width:100%;color:transparent;caret-color:transparent}
+.annual-calendar input::-webkit-datetime-edit{opacity:0}
+.annual-calendar-date{position:absolute;left:11px;top:50%;transform:translateY(-50%);pointer-events:none;color:#334155;font-size:12px;font-variant-numeric:tabular-nums}
+.daily-date-toolbar{display:flex;flex-wrap:wrap;gap:24px;padding:16px 24px}
+.daily-date-toolbar>div{display:grid;gap:8px;min-width:170px}
+.daily-date-toolbar strong{font-size:12px}
+.daily-date-comparison{margin-bottom:20px}
 .annual-retry{justify-self:center;border:0;background:transparent;color:#4f46e5;cursor:pointer}
 @media(max-width:600px){.agency-levels{width:100%;flex-wrap:nowrap}.agency-levels button{flex:1;padding:10px 12px}.annual-daily-comparison strong{font-size:15px}.annual-date-control input{max-width:145px}}
 .agency-ranking-scroll{max-height:65vh;overflow:auto;overscroll-behavior:contain}
@@ -322,3 +330,13 @@ body:has(#app[aria-busy="true"])>.site-footer,body:has(#admin[aria-busy="true"])
 .context-actions .btn[data-action="new-collection"],.context-actions .btn[data-action="export"],.context-actions .btn[data-action="brief"]{width:152px;flex:0 0 152px;display:inline-flex;align-items:center;justify-content:center;text-align:center;white-space:normal}
 .formula-math-section>.formula-extra{margin-top:12px;padding:10px 12px;border-top:1px dashed #cbd5e1;border-radius:8px;background:rgba(255,255,255,.6)}.formula-extra-label{display:block;font-size:11px;font-weight:600;color:#64748b;margin-bottom:6px}.formula-extra .formula-equation{font-size:13px;gap:6px}.formula-extra-expression{display:inline-flex;align-items:center;flex-wrap:wrap;justify-content:center;gap:6px;max-width:100%}.formula-extra-expression b{padding:0 3px}
 .group-table-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.online-province-context{padding:10px 12px;border:1px solid #c7d2fe;border-radius:10px;background:#eef2ff;color:#3730a3;font-size:12px;line-height:1.6}.group-table-heading .group-table-actions{min-width:0}
+.login-register{margin:16px 0 0;text-align:center;font-size:12px;line-height:1.7;color:#64748b}.login-register a{color:#4f46e5;font-weight:650;text-decoration:none}.login-register a:hover{text-decoration:underline}.login-register a:focus-visible{outline:2px solid #a5b4fc;outline-offset:3px;border-radius:3px}
+.registration-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.registration-panel input,.registration-panel select{box-sizing:border-box;width:100%;min-height:44px;padding:10px 12px;border:1px solid #dce3ef;border-radius:12px;font:inherit;background:white;color:#17243c}
+.registration-panel label{font-weight:650}.registration-panel input,.registration-panel select{font-weight:400}
+.registration-panel .registration-declaration{display:flex;align-items:flex-start;gap:10px;font-weight:400;line-height:1.5}.registration-panel .registration-declaration input{width:16px;min-height:16px;height:16px;flex:0 0 16px;margin:3px 0 0;padding:0;accent-color:#4f46e5}
+.registration-panel{padding-block:24px!important}.registration-panel h2{margin:0 0 16px}.registration-panel label{gap:5px;margin-bottom:11px}.registration-panel input,.registration-panel select{min-height:38px;padding:8px 10px}.registration-panel .ts-control{min-height:38px;padding:8px 10px}.registration-panel [data-message]:empty{display:none}.registration-panel [data-logout]{margin-top:12px}.registration-panel .registration-declaration{margin-top:3px;margin-bottom:12px;font-size:12px}
+.registration-calendar{position:relative;display:block}.registration-calendar input[name=birthDate]{padding-right:40px}.registration-calendar [data-calendar]{position:absolute;right:3px;top:3px;width:32px;height:32px;border:0;border-radius:8px;background:transparent;color:#475569;font-size:22px;cursor:pointer}.registration-calendar [data-calendar]:hover{background:#eef2ff}.registration-panel .registration-calendar [data-date-picker]{position:absolute;right:0;bottom:0;width:1px;height:1px;min-height:0;padding:0;border:0;opacity:0;pointer-events:none}
+.registration-panel .registration-field-error{color:#b91c1c;font-size:12px;font-weight:400;line-height:1.4}.registration-panel [aria-invalid=true]{border-color:#dc2626}.registration-panel label:has(>select[aria-invalid=true]) .ts-control{border-color:#dc2626}
+.registration-panel .registration-declaration{flex-wrap:wrap}.registration-declaration>span:not([data-field-error]){flex:1}.registration-declaration>[data-field-error]{flex-basis:100%;margin-left:26px}
+@media(max-width:430px){.registration-row{grid-template-columns:1fr;gap:0}}

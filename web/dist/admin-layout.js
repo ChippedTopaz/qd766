@@ -5,7 +5,7 @@ export function installAdminLayout(root) {
     workspace.className = "admin-workspace";
     const sidebar = document.createElement("aside");
     sidebar.className = "admin-sidebar";
-    const items = [["accounts", "Quản lý tài khoản"], ["credits", "Quản lý credits"], ["invitations", "Mời dùng thử"], ["collection", "Nhật ký khai thác"], ["audit", "Nhật ký quản trị"]];
+    const items = [["accounts", "Quản lý tài khoản"], ["credits", "Quản lý credits"], ["invitations", "Mời dùng thử"], ["collection", "Nhật ký hệ thống"], ["audit", "Nhật ký quản trị"]];
     const registration = sections.find(s => s.dataset.registrationReview === "true"), sharedLinks = sections.find(s => s.dataset.sharedLinks === "true");
     const aiConfiguration = sections.find(s => s.dataset.analysisConfiguration === 'true');
     if (aiConfiguration)
@@ -30,6 +30,26 @@ export function installAdminLayout(root) {
         panels.registrations.append(registration);
     if (collection)
         panels.collection.append(collection);
+    const lookupRequests = sections.find(s => s.dataset.collectionSource === 'user');
+    if (lookupRequests) {
+        panels.collection.append(lookupRequests);
+        lookupRequests.hidden = true;
+        const submenus = document.createElement('nav');
+        submenus.className = 'collection-submenus';
+        submenus.setAttribute('aria-label', 'Nhật ký hệ thống');
+        submenus.innerHTML = '<button type="button" data-collection-tab="system" class="active" aria-pressed="true">Nhật ký hệ thống</button><button type="button" data-collection-tab="user" aria-pressed="false">Yêu cầu tra cứu</button>';
+        panels.collection.prepend(submenus);
+        submenus.addEventListener('click', event => {
+            const button = event.target.closest('[data-collection-tab]');
+            if (!button)
+                return;
+            const mode = button.dataset.collectionTab;
+            if (collection)
+                collection.hidden = mode !== 'system';
+            lookupRequests.hidden = mode !== 'user';
+            submenus.querySelectorAll('button').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)); });
+        });
+    }
     if (aiConfiguration)
         panels['ai-configuration'].append(aiConfiguration);
     if (formulas)

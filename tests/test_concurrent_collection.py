@@ -65,6 +65,33 @@ class ConcurrentCollectionTests(unittest.TestCase):
             collect_concurrent_snapshot(self.plan,**options)
             self.assertEqual(transport.calls,6)
 
+    def test_sustained_20_jobs_never_exceed_three_source_requests(self):
+        class Transport:
+            active=0
+            peak=0
+            calls=0
+            lock=threading.Lock()
+            def post_json(inner,url,payload):
+                with inner.lock:
+                    inner.active+=1
+                    inner.peak=max(inner.peak,inner.active)
+                    inner.calls+=1
+                try:
+                    time.sleep(.005)
+                    return response_for(url.rsplit('/',1)[1])
+                finally:
+                    with inner.lock:
+                        inner.active-=1
+        transport=Transport()
+        with test_directory() as temp:
+            for index in range(20):
+                manifest=collect_concurrent_snapshot(self.plan,period=self.period,
+                    output_dir=temp/str(index),transport=transport,max_workers=3)
+                self.assertEqual(manifest['status'],'complete')
+        self.assertEqual(transport.calls,120)
+        self.assertLessEqual(transport.peak,3)
+        self.assertEqual(transport.active,0)
+
     def test_failure_preserves_other_groups_and_only_retries_missing(self):
         class Transport:
             fail=True

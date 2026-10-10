@@ -29,7 +29,8 @@ import {presenceBadge,startPresence} from './presence.js';
 import {triviaMarkup,bindTrivia} from './trivia.js';
 import {agencyComparison, agencyComparisonUnits, orderAgencies, type AgencyLevel} from './agency-comparison.js';
 import {type DailyHistory} from './daily-history.js';
-import {annualDailyComparison} from './annual-daily-comparison.js';
+import {annualDailyComparison,annualGroupChange,annualObservationWindow,formatDay as displayVersionDay} from './annual-daily-comparison.js';
+import {renderDailyDateComparison,compareDailyDates,historyWithinPeriod} from './daily-period-comparison.js';
 import {onlineIndicators} from './online-indicators.js';
 import {RecentDashboard} from './recent-dashboard.js';
 import {lastAdminProvince,rememberAdminProvince,clearAdminProvince} from './admin-province-preference.js';
@@ -69,6 +70,7 @@ let overviewTab: OverviewTab = "overview";
 let agencyLevel:AgencyLevel|null=null;
 const dailyHistoryCache=new Map<string,{loading:boolean;history:DailyHistory|null;error:string}>();
 const annualObservationDates=new Map<string,string>();
+const timeComparisonDates=new Map<string,{current:string;baseline:string}>();
 let selectedFormulaGroup:GroupId="transparency";
 let selectionRequest=0;
 let pendingMessage="";
@@ -562,9 +564,16 @@ function groupPanel(group: UnitGroupView): string {
   const previous=previousPeriodFor();
   const prior=previous?buildUnitView(data,previous.id,state.scope,state.unitId).groups.find(g=>g.id===group.id):null;
   const priorScore=prior?scoreValue(prior):null;
-  const delta=score!==null&&priorScore!==null?score-priorScore:null;
+  const dailyMode=period().type==='year'&&state.scope==='all';
+  const dailyEntry=dailyHistoryCache.get(dailyContext().key);
+  const selectedDate=annualObservationDates.get(dailyContext().key);
+  const delta=dailyMode?annualGroupChange(dailyEntry?.history??null,group.id,selectedDate):score!==null&&priorScore!==null?score-priorScore:null;
+  const selectedDay=dailyMode?annualObservationWindow(dailyEntry?.history??null,selectedDate).selected:null;
+  const missingComparison=dailyMode?(dailyEntry?.loading||!dailyEntry?'Đang tải so sánh…':dailyEntry.error?'Chưa đọc được dữ liệu':dailyEntry.history?.days.length?'Chưa đủ dữ liệu ngày':'Chưa có lịch sử ngày'):'Chưa đủ kỳ trước';
+  const latestDay=dailyMode?annualObservationWindow(dailyEntry?.history??null,selectedDate).current:null;
+  const comparisonTitle=dailyMode&&selectedDay&&latestDay?`${displayVersionDay(latestDay.reportDate)} so với ${displayVersionDay(selectedDay.reportDate)} · cùng mốc ở Đồng hồ`:'Chưa đủ dữ liệu so sánh';
   const level=gaugeLevel(ratio);
-  return `<button class="bento-card pillar-card ${state.selectedGroup===group.id?"selected":""}" style="--pillar-color:${groupColors[group.id]}" data-motion-card="${group.id}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup===group.id}"><div class="pillar-heading"><h3>${esc(group.label)}</h3><span class="bento-icon">${groupIcon(group.id)}</span></div><div class="pillar-score" data-score-tone="${level.tone}"><strong>${n(score)}</strong><span>/ ${n(maximum)}</span></div><div class="pillar-meta"><span class="${changeTone(delta)}">${delta===null?"Chưa đủ kỳ trước":`${delta>=0?"+":""}${n(delta)} đ`}</span><span>${peer?`Hạng ${peer.rank}/${peer.total}`:"Chưa xếp hạng"}</span></div><div class="pillar-progress" role="img" aria-label="${ratio===null?"Chưa có tỷ lệ điểm":`Đạt ${pct(ratio)} điểm tối đa`}"><i style="width:${Math.max(0,Math.min(ratio??0,100))}%"></i></div><div class="pillar-bottom"><span>${ratio===null?"Chưa có điểm":pct(ratio)+" điểm tối đa"}</span><span>${peer?`Trung vị ${n(peer.median)} đ`:"Xem chi tiết →"}</span></div></button>`;
+  return `<button class="bento-card pillar-card ${state.selectedGroup===group.id?"selected":""}" style="--pillar-color:${groupColors[group.id]}" data-motion-card="${group.id}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup===group.id}"><div class="pillar-heading"><h3>${esc(group.label)}</h3><span class="bento-icon">${groupIcon(group.id)}</span></div><div class="pillar-score" data-score-tone="${level.tone}"><strong>${n(score)}</strong><span>/ ${n(maximum)}</span></div><div class="pillar-meta"><span title="${esc(comparisonTitle)}" class="${changeTone(delta)}">${delta===null?missingComparison:`${delta>=0?"+":""}${n(delta)} đ`}</span><span>${peer?`Hạng ${peer.rank}/${peer.total}`:"Chưa xếp hạng"}</span></div><div class="pillar-progress" role="img" aria-label="${ratio===null?"Chưa có tỷ lệ điểm":`Đạt ${pct(ratio)} điểm tối đa`}"><i style="width:${Math.max(0,Math.min(ratio??0,100))}%"></i></div><div class="pillar-bottom"><span>${ratio===null?"Chưa có điểm":pct(ratio)+" điểm tối đa"}</span><span>${peer?`Trung vị ${n(peer.median)} đ`:"Xem chi tiết →"}</span></div></button>`;
 }
 
 function totalPeerComparison(view:UnitView):string{
@@ -714,10 +723,10 @@ function miniTicket(item: Suggestion, good: boolean): string { return `<div clas
 
 function dailyContext(){
   const unitId=state.unitId;
-  return {unitId,key:[data.province.id,state.periodId,unitId].join(":")};
+  return {unitId,key:[data.province.id,state.periodId,unitId,state.scope,state.scope==='formality'?data.formality.id:''].join(":")};
 }
 function loadDailyHistory():void{
-  if(!state||!data||state.scope!=="all"||state.screen!=="overview"||overviewTab!=="overview"||period().type!=="year")return;
+  if(!state||!data||state.scope!=="all"||!(state.screen==="time"||(state.screen==="overview"&&overviewTab==="overview"&&period().type==="year")))return;
   const {unitId,key}=dailyContext();if(!unitId||dailyHistoryCache.has(key))return;
   const selected=period(),entry={loading:true,history:null as DailyHistory|null,error:""};
   dailyHistoryCache.set(key,entry);
@@ -726,12 +735,14 @@ function loadDailyHistory():void{
   void fetch("/api/v1/dashboard/daily-history?"+query).then(async response=>{
     if(!response.ok)throw new Error("Chưa đọc được lịch sử theo ngày. Vui lòng thử lại.");
     const body=await response.json() as DailyHistory;
-    entry.history={days:Array.isArray(body.days)?body.days:[],scope:"all"};
+    entry.history=historyWithinPeriod({days:Array.isArray(body.days)?body.days:[],scope:"all"},selected);
   }).catch(error=>{entry.error=error instanceof Error?error.message:"Không đọc được lịch sử ngày."}).finally(()=>{
-    entry.loading=false;if(state?.screen==='overview'&&dailyContext().key===key)render();
+    entry.loading=false;if((state?.screen==='overview'||state?.screen==='time')&&dailyContext().key===key)render();
   });
 }
 function time(): string {
+  const daily=dailyHistoryCache.get(dailyContext().key);
+  const dailyComparison=state.scope==='all'?renderDailyDateComparison(daily?.history??null,data.groupOrder,data.groupLabels,timeComparisonDates.get(dailyContext().key),daily?.loading??true,daily?.error??''):'';
   const samples=data.periods.filter(p=>p.type===period().type&&Boolean(data.snapshots[snapshotKey(p.id,state.scope,data.formality.id)]))
     .sort((a,b)=>periodOrder(b)-periodOrder(a)).map(p=>({p,v:buildUnitView(data,p.id,state.scope,state.unitId)}));
   const rows=samples.map(({p,v})=>{
@@ -741,7 +752,7 @@ function time(): string {
     const rank=rankFor(v,p.id,null);
     return `<tr><td>${esc(p.label)}${p.provisional?' <span class="badge warn">Tạm thời</span>':""}</td><td class="num">${n(v.totalScore)}</td><td class="num">${n(prior?.totalScore)}</td><td class="num ${changeTone(delta)}">${delta===null?"—":(delta>=0?"+":"")+n(delta)}</td><td class="num ${changeTone(rankImprovement(previous ? rankFor(prior!,previous.id,null)?.rank : null,rank?.rank))}">${rank?rank.rank+"/"+rank.total:"—"}</td>${v.groups.map(group=>`<td class="num">${n(group.score.value)}</td>`).join("")}</tr>`;
   }).join("");
-  return `${title("So sánh theo thời gian","Điểm các kỳ cùng loại và biến động so với kỳ liền trước.",period().provisional?"Đây là dữ liệu tạm thời do chưa kết thúc kỳ báo cáo.":"")}<section class="panel"><div class="panel-head"><div><h2>Chuỗi điểm cùng loại kỳ</h2><p>Thiếu kỳ liền trước thì không tính biến động. Thứ hạng chỉ hiển thị khi đã đọc dữ liệu so sánh của kỳ đó.</p></div></div><div class="table-wrap"><table><thead><tr><th>Kỳ</th><th>Tổng điểm</th><th>Điểm kỳ trước</th><th>Tăng/giảm điểm</th><th>Thứ hạng</th>${data.groupOrder.map(group=>`<th>${esc(data.groupLabels[group])}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></section>`;
+  return `${title("So sánh theo thời gian","Điểm các kỳ cùng loại và biến động so với kỳ liền trước.",period().provisional?"Đây là dữ liệu tạm thời do chưa kết thúc kỳ báo cáo.":"")}${dailyComparison}<section class="panel"><div class="panel-head"><div><h2>Chuỗi điểm cùng loại kỳ</h2><p>Thiếu kỳ liền trước thì không tính biến động. Thứ hạng chỉ hiển thị khi đã đọc dữ liệu so sánh của kỳ đó.</p></div></div><div class="table-wrap"><table><thead><tr><th>Kỳ</th><th>Tổng điểm</th><th>Điểm kỳ trước</th><th>Tăng/giảm điểm</th><th>Thứ hạng</th>${data.groupOrder.map(group=>`<th>${esc(data.groupLabels[group])}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></section>`;
 }
 
 function peers(): string {
@@ -932,9 +943,14 @@ function bind(): void {
   document.querySelectorAll('[data-daily-refresh]').forEach(el=>el.addEventListener('click',()=>{dailyHistoryCache.delete(dailyContext().key);render()}));
   document.querySelectorAll<HTMLInputElement>('[data-annual-observation]').forEach(el=>el.addEventListener('change',()=>{
     const context=dailyContext();
-    const days=dailyHistoryCache.get(context.key)?.history?.days??[];
-    if(el.value>='2026-10-06'&&days.some(day=>day.reportDate===el.value))annualObservationDates.set(context.key,el.value);
-    // Native calendar bounds disable pre-launch/future dates; gaps must not select fabricated data.
+    if(el.value&&el.validity.valid)annualObservationDates.set(context.key,el.value);
+    // Missing dates are kept and reported, never replaced by another observation.
+    render();
+  }));
+  document.querySelectorAll<HTMLInputElement>('[data-time-day]').forEach(el=>el.addEventListener('change',()=>{
+    if(!el.value||!el.validity.valid)return;
+    const context=dailyContext(),pair=compareDailyDates(dailyHistoryCache.get(context.key)?.history??null,timeComparisonDates.get(context.key));
+    timeComparisonDates.set(context.key,{current:el.dataset.timeDay==='current'?el.value:pair.currentDate,baseline:el.dataset.timeDay==='baseline'?el.value:pair.baselineDate});
     render();
   }));
   document.querySelectorAll('[data-group-export]').forEach(button=>button.addEventListener('click',()=>{
@@ -1342,6 +1358,7 @@ async function start(): Promise<void> {
   if(cleanSearch!==null)history.replaceState(history.state??null,"",`${location.pathname}${cleanSearch}${location.hash??""}`);
   const productionSite=document.querySelector('meta[name="qd766-deployment"]')?.getAttribute("content")==="public";
   let invitationOnly=false;
+  let publicRegistrationEnabled=false;
   try {
     const registrationToken=new URLSearchParams(location.hash.slice(1)).get("register");
     if(registrationToken){
@@ -1364,6 +1381,7 @@ async function start(): Promise<void> {
       localSimulation=Boolean(policy.localSimulation);
       localGoogleTrial=Boolean(policy.localGoogleTrial);
       invitationOnly=Boolean(policy.inviteRequired);
+      publicRegistrationEnabled=Boolean((policy as {publicRegistrationEnabled?:boolean}).publicRegistrationEnabled);
       if(productionSite&&policy.publicReadOnly!==true)throw new Error("Backend chưa bật chế độ truy cập công khai an toàn.");
       publicReadOnly=Boolean(policy.publicReadOnly);loginRequired=Boolean(policy.loginRequired);googleLoginEnabled=Boolean(policy.googleLoginEnabled);
       paidRequestsEnabled=Boolean(policy.paidRequestsEnabled);
@@ -1378,7 +1396,7 @@ async function start(): Promise<void> {
         if(localSimulation){location.assign("/local-trial.html");return;}
         root.innerHTML=loginView({pending:Boolean(signedInUser),name:signedInUser?.name??"",local:localGoogleTrial,
           failed:new URLSearchParams(location.search).get("login")==="failed",
-          inviteRequired:invitationOnly,googleEnabled:googleLoginEnabled});
+          inviteRequired:invitationOnly,googleEnabled:googleLoginEnabled,publicRegistrationEnabled});
         bind();return;
       }
     }

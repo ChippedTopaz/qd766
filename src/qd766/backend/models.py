@@ -340,6 +340,7 @@ class LoginAttempt(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     invitation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("trial_invitations.id", ondelete="SET NULL"))
+    public_registration: Mapped[bool] = mapped_column(default=False, server_default="false")
 
 
 class TrialInvitation(Base):
@@ -383,10 +384,17 @@ class TrialRegistration(Base):
     __tablename__ = "trial_registrations"
     __table_args__ = (
         CheckConstraint("state IN ('draft','pending','approved','rejected')", name="ck_registration_state"),
-        CheckConstraint("state = 'draft' OR (root_department_id IS NOT NULL AND unit_department_id IS NOT NULL)", name="ck_registration_scope"),)
+        CheckConstraint("requested_tier IN ('province','agency')", name="ck_registration_tier"),
+        CheckConstraint("link_id IS NULL OR requested_tier = 'agency'", name="ck_registration_link_tier"),
+        CheckConstraint("state = 'draft' OR (root_department_id IS NOT NULL AND ((requested_tier = 'agency' AND unit_department_id IS NOT NULL) OR (requested_tier = 'province' AND unit_department_id IS NULL)))", name="ck_registration_scope"),)
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_accounts.id", ondelete="RESTRICT"), unique=True)
-    link_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("shared_trial_links.id", ondelete="RESTRICT"))
+    link_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("shared_trial_links.id", ondelete="RESTRICT"))
+    requested_tier: Mapped[str] = mapped_column(String(16), default="agency", server_default="agency")
+    full_name: Mapped[str | None] = mapped_column(String(160))
+    birth_date: Mapped[date | None] = mapped_column(Date)
+    gender: Mapped[str | None] = mapped_column(String(16))
+    workplace: Mapped[str | None] = mapped_column(String(240))
     state: Mapped[str] = mapped_column(String(16), default="draft")
     root_department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("departments.id", ondelete="RESTRICT"))
     unit_department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("departments.id", ondelete="RESTRICT"))

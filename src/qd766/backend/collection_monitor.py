@@ -34,8 +34,11 @@ def daily_status():
         if len(reports)>=7:break
     return reports
 
-def collection_status(db, *, kind=None, state=None, offset=0, limit=30):
+def collection_status(db, *, kind=None, source=None, state=None, offset=0, limit=30):
     query=select(CollectionJob)
+    linked_request=select(PaidDataRequest.id).where(PaidDataRequest.collection_job_id==CollectionJob.id).exists()
+    if source=='user':query=query.where(linked_request)
+    elif source=='system':query=query.where(~linked_request)
     if state:
         query=query.where(CollectionJob.state==state)
     if kind=='formality':
@@ -59,7 +62,8 @@ def collection_status(db, *, kind=None, state=None, offset=0, limit=30):
         try: formality_ids.append(uuid.UUID(j.request.get('formalityId','')))
         except (ValueError,TypeError,AttributeError): pass
     formalities={str(f.id):f'{f.code} · {f.name}' for f in db.scalars(select(Formality).where(Formality.id.in_(formality_ids)))} if formality_ids else {}
-    counts=dict(db.execute(select(CollectionJob.state,func.count()).group_by(CollectionJob.state)).all())
+    count_rows=query.subquery()
+    counts=dict(db.execute(select(count_rows.c.state,func.count()).group_by(count_rows.c.state)).all())
     control=db.get(CollectionControl,'dvcqg')
     batches=list(db.scalars(select(ProvinceCollectionBatch).order_by(ProvinceCollectionBatch.created_at.desc()).limit(30)))
     return {'counts':counts,'total':total,'offset':offset,'limit':limit,
