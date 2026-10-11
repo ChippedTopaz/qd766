@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const source=readFileSync(new URL('../src/app.ts',import.meta.url),'utf8');
+assert.match(source,/request\.snapshotId\?\?''/,'History opens pinned snapshot');
+assert.match(source,/params\.set\('snapshot_id',historicalSnapshotId\)/,'Selection asks for exact snapshot');
+assert.match(source,/query\.set\('snapshot_id',historicalSnapshotId\)/,'Group Excel keeps historical version');
+assert.match(source,/params\.set\('snapshot',historicalSnapshotId\)/,'URL retains history version');
+assert.match(source,/delete data\.snapshots\[snapshotKey\(periodId,'formality',item\.id\)\]/,'Old frontend cache cannot replace selected history');
+assert.match(source,/function requestPeriod[\s\S]*?dateTime\(item.createdAt\)/,'History distinguishes collection times');
+console.log('FORMALITY_HISTORY_VERSION_OK: pinned selection/export/URL, cache isolation, timestamps');

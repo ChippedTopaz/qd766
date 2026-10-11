@@ -46,7 +46,7 @@ def verify_real_wallet_schema(factory, *, shared_registration=False):
             if not set(Base.metadata.tables[name].columns.keys()) <= actual:
                 raise ValueError("Wallet schema is incomplete")
         revisions = list(db.execute(text("SELECT version_num FROM public.alembic_version")).scalars())
-        reviewed_revisions = {"20261004_0015", "20261005_0016", "20261005_0017", "20261006_0018", "20261007_0019", "20261007_0020", "20261007_0021", "20261007_0022", "20261007_0023", "20261008_0024", "20261009_0025"}
+        reviewed_revisions = {"20261004_0015", "20261005_0016", "20261005_0017", "20261006_0018", "20261007_0019", "20261007_0020", "20261007_0021", "20261007_0022", "20261007_0023", "20261008_0024", "20261009_0025", "20261011_0026", "20261011_0027"}
         if len(revisions) != 1 or revisions[0] not in reviewed_revisions:
             raise ValueError("Wallet schema version has not been reviewed")
         if shared_registration and revisions[0] == '20261004_0015':
@@ -54,6 +54,13 @@ def verify_real_wallet_schema(factory, *, shared_registration=False):
         # Reviewed additive upgrades must include their actual tables, not just
         # a claimed version number. Never accept arbitrary future revisions.
         extra = []
+        revision = revisions[0]
+        if revision in {'20261011_0026', '20261011_0027'}:
+            extra += ['agency_challenges']
+            if revision == '20261011_0027':
+                extra += ['agency_watch_preferences']
+            # These reviewed additive schemas retain every prerequisite of 0025.
+            revisions = ['20261009_0025']
         if revisions[0] == '20261009_0025':
             extra += ['login_attempts']
         if revisions[0] in reviewed_revisions-{"20261004_0015"}:

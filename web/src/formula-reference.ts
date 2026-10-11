@@ -11,6 +11,7 @@ export interface FormulaGroup { id:GroupId; name:string; maximum:number; items:F
 export interface FormulaConfiguration {source:typeof formulaSource;groups:FormulaGroup[];guide:string[]}
 let activeConfiguration:FormulaConfiguration|null=null;
 export function setFormulaConfiguration(value:FormulaConfiguration):void {activeConfiguration=value;}
+export function getFormulaConfiguration():FormulaConfiguration {return activeConfiguration??defaultFormulaConfiguration();}
 const formulaDefinitions: {id:GroupId; name:string; maximum:number; items:FormulaEquation[]}[] = [
  {id:'transparency',name:'Công khai, minh bạch',maximum:18,items:[
   {id:'1.1',numerator:'TTHC công bố đúng hạn',denominator:'TTHC đã công bố trong kỳ'},

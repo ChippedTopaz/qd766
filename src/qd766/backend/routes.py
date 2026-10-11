@@ -366,6 +366,8 @@ def preview_province_catalog(
             PaidDataRequest.root_department_id==root_department_id,PaidDataRequest.period_type==period_type,
             PaidDataRequest.year==year,PaidDataRequest.state=="ready")
         owned=owned.where(PaidDataRequest.period_value.is_(None) if period_value is None else PaidDataRequest.period_value==period_value)
+        from .formality_freshness import daily_cutoff,fresh_entitlement
+        owned=fresh_entitlement(owned,daily_cutoff(period_type,year,period_value),request_model=PaidDataRequest,snapshot_model=Snapshot)
         available_ids={str(item) for item in session.scalars(owned)}
     available_count = sum(item.id in available_ids for item in selected)
     page = selected[offset : offset + limit]
@@ -1107,8 +1109,17 @@ def dashboard_selection(
     period_value: int | None = None,
     formality_id: uuid.UUID | None = None,
     root_department_id: uuid.UUID | None = None,
+    snapshot_id: uuid.UUID | None = None,
 ) -> dict:
     root_department_id = getattr(request.state, "authorized_root_id", None) or root_department_id
+    if snapshot_id is not None:
+        if scope!='formality':raise HTTPException(422,'Phiên dữ liệu chỉ áp dụng cho tra cứu TTHC.')
+        from .user_collection import account_for,own_requests
+        from .models import PaidDataRequest
+        account=account_for(request,session)
+        owned=own_requests(session,account,period_type,year,period_value,root_department_id).where(
+            PaidDataRequest.state=='ready',PaidDataRequest.formality_id==formality_id,PaidDataRequest.snapshot_id==snapshot_id)
+        if session.scalar(owned.limit(1)) is None:raise HTTPException(403,'Bạn chưa có quyền xem phiên dữ liệu này.')
     cache_key = ":".join(
         [
             "selection",
@@ -1118,6 +1129,7 @@ def dashboard_selection(
             str(period_value or 0),
             scope,
             str(formality_id or "all"),
+            str(snapshot_id or "latest"),
         ]
     )
 
@@ -1159,6 +1171,7 @@ def dashboard_selection(
             if formality_id is None
             else statement.where(Snapshot.formality_id == formality_id)
         )
+        if snapshot_id is not None:statement=statement.where(Snapshot.id==snapshot_id)
         selected = session.scalar(statement.limit(1))
         national_summary = latest_national_summary(
             session,
@@ -1191,6 +1204,7 @@ def dashboard_group_export(
     period_value: int | None = None, formality_id: uuid.UUID | None = None,
     root_department_id: uuid.UUID | None = None,
     group: str = "all", unit_department_id: uuid.UUID | None = None,
+    snapshot_id: uuid.UUID | None = None,
 ) -> dict:
     from .group_export import group_export_payload
     authorized_unit = getattr(request.state, "authorized_unit_id", None)
@@ -1203,7 +1217,7 @@ def dashboard_group_export(
     if (scope == "formality") != (formality_id is not None):
         raise HTTPException(422, "Phạm vi thủ tục không hợp lệ.")
     payload = dashboard_selection(request, response, session, period_type, year, scope,
-                                  period_value, formality_id, root_department_id)
+                                  period_value, formality_id, root_department_id,snapshot_id)
     response.headers["Cache-Control"] = "no-store"
     return group_export_payload(payload["snapshot"], unit_id=authorized_unit, selected_group=group)
 

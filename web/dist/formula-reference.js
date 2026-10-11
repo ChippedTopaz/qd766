@@ -4,6 +4,7 @@ import { formulaDocument } from './formula-document.js';
 export const formulaSource = { name: formulaDocument.name, sha256: formulaDocument.sha256, version: 'Đối chiếu ngày 07/10/2026' };
 let activeConfiguration = null;
 export function setFormulaConfiguration(value) { activeConfiguration = value; }
+export function getFormulaConfiguration() { return activeConfiguration ?? defaultFormulaConfiguration(); }
 const formulaDefinitions = [
     { id: 'transparency', name: 'Công khai, minh bạch', maximum: 18, items: [
             { id: '1.1', numerator: 'TTHC công bố đúng hạn', denominator: 'TTHC đã công bố trong kỳ' },

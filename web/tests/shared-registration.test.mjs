@@ -4,6 +4,8 @@ const read=name=>readFileSync(new URL('../src/'+name,import.meta.url),'utf8');
 const registration=read('trial-registration.ts');
 assert.match(registration,/new TomSelect\(province/);
 assert.match(registration,/new TomSelect\(unit/);
+// Provinces with more than 50 agencies must show every option without typing.
+assert.match(registration,/new TomSelect\(unit,\{[^}]*maxOptions:null/);
 assert.match(registration,/provinceId:province.value,unitId:unit.value/);
 assert.doesNotMatch(registration,/value="national"/);
 assert.match(registration,/profile.publicRegistration===true/);

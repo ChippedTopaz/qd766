@@ -71,8 +71,11 @@ def own_requests(db,account,kind,year,value,root_id=None):
     return statement.where(PaidDataRequest.period_value.is_(None) if value is None else PaidDataRequest.period_value==value)
 
 def entitlement(db,account,kind,year,value,formality_id,root_id=None):
-    return db.scalar(own_requests(db,account,kind,year,value,root_id).where(
-        PaidDataRequest.formality_id==formality_id,PaidDataRequest.state.in_(("reserved","waiting","ready"))))
+    from .formality_freshness import daily_cutoff, fresh_entitlement
+    statement=own_requests(db,account,kind,year,value,root_id).where(
+        PaidDataRequest.formality_id==formality_id,PaidDataRequest.state.in_(("reserved","waiting","ready")))
+    return db.scalar(fresh_entitlement(statement,daily_cutoff(kind,year,value),
+        request_model=PaidDataRequest,snapshot_model=Snapshot).order_by(PaidDataRequest.created_at.desc()))
 
 def valid_period(kind,year,value):
     try:PeriodSelection(kind,year,value).validate_collectable()
@@ -246,7 +249,7 @@ def serialize_request(db,paid):
     progress="running" if paid.state=="waiting" and job is not None and job.state=="running" else paid.state
     return {"id":str(paid.id),"state":progress,"formalityId":str(paid.formality_id),"rootDepartmentId":str(paid.root_department_id),
         "code":formality.code,"name":formality.name,"periodType":paid.period_type,"year":paid.year,"periodValue":paid.period_value,
-        "creditCost":paid.credit_cost,"createdAt":paid.created_at.isoformat(),"error":
+        "creditCost":paid.credit_cost,"createdAt":paid.created_at.isoformat(),"snapshotId":str(paid.snapshot_id) if paid.snapshot_id else None,"error":
             {"kind":paid.error.get("kind"),"message":"Yêu cầu đã dừng; toàn bộ credit đã được hoàn trả."} if paid.error else None}
 
 @router.get("/formality-requests")
@@ -271,6 +274,13 @@ def read_notifications(payload:NotificationRead,request:Request,db:Db):
 @router.get("/formalities")
 def library(request:Request,db:Db,period_type:str=Query(pattern="^(month|quarter|year)$"),year:int=Query(ge=2000,le=2200),period_value:int|None=None,root_department_id:uuid.UUID|None=None):
     account=account_for(request,db);valid_period(period_type,year,period_value)
-    rows=db.scalars(own_requests(db,account,period_type,year,period_value,root_department_id).where(PaidDataRequest.state=="ready").order_by(PaidDataRequest.created_at.desc()))
-    return {"items":[{"id":str(row.formality_id),"code":db.get(Formality,row.formality_id).code,
-        "name":db.get(Formality,row.formality_id).name} for row in rows if (snapshot:=db.get(Snapshot,row.snapshot_id)) is not None and snapshot.state=="complete"]}
+    from .formality_freshness import daily_cutoff,fresh_entitlement
+    statement=own_requests(db,account,period_type,year,period_value,root_department_id).where(PaidDataRequest.state=="ready")
+    rows=db.scalars(fresh_entitlement(statement,daily_cutoff(period_type,year,period_value),request_model=PaidDataRequest,snapshot_model=Snapshot).order_by(PaidDataRequest.created_at.desc()))
+    items={}
+    for row in rows:
+        snapshot=db.get(Snapshot,row.snapshot_id)
+        if snapshot is None or snapshot.state!='complete' or row.formality_id in items:continue
+        formality=db.get(Formality,row.formality_id)
+        items[row.formality_id]={"id":str(row.formality_id),"code":formality.code,"name":formality.name}
+    return {"items":list(items.values())}

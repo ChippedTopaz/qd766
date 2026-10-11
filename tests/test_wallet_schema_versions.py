@@ -25,8 +25,16 @@ class WalletSchemaVersionsTest(unittest.TestCase):
             with self.subTest(version=version):self.verify(version)
 
     def test_unknown_revision_rejected(self):
+        with self.assertRaises(ValueError):self.verify('20261011_0028')
         with self.assertRaises(ValueError):self.verify('20261007_0024')
         with self.assertRaises(ValueError):self.verify('20261008_0025')
+
+    def test_challenge_watch_schemas_require_new_and_previous_tables(self):
+        for version in ('20261011_0026','20261011_0027'):
+            self.verify(version,shared_registration=True)
+            for table in ('agency_challenges','login_attempts','formula_config_head','credit_lots','trivia_answers'):
+                with self.subTest(version=version,table=table), self.assertRaises(ValueError):self.verify(version,table)
+        with self.assertRaises(ValueError):self.verify('20261011_0027','agency_watch_preferences')
 
     def test_formula_upgrade_requires_all_previous_and_formula_tables(self):
         self.verify('20261008_0024',shared_registration=True)

@@ -8,8 +8,12 @@ const app={innerHTML:'',setAttribute(){}};
 const control=dataset=>({dataset,handlers:{},addEventListener(k,cb){this.handlers[k]=cb}});
 const nav=[control({nav:'time'}),control({nav:'peers'})];
 let dateControl;
+let timeTabs=[],kindControl,dayControls=[];
 globalThis.document={title:'',querySelector:s=>s==='#app'?app:null,querySelectorAll(s){
   if(s==='[data-nav]')return nav;
+  if(s==='[data-time-tab]'){timeTabs=['default','custom'].map(timeTab=>control({timeTab}));return timeTabs;}
+  if(s==='[data-time-kind]'){kindControl=control({});return [kindControl];}
+  if(s==='[data-time-day]'){dayControls=['baseline','current'].map(timeDay=>({...control({timeDay}),validity:{valid:true}}));return dayControls;}
   if(s==='[data-annual-observation]'){dateControl=control({});dateControl.value='2026-10-07';dateControl.validity={valid:true};return [dateControl];}
   return [];
 }};
@@ -25,7 +29,19 @@ assert.match(app.innerHTML,/Dữ liệu mới nhất: 08\/10\/2026/);
 dateControl.value='2026-10-05';dateControl.validity.valid=false;dateControl.handlers.change();assert.match(app.innerHTML,/\+1,00 điểm/);
 dateControl.value='2026-10-09';dateControl.validity.valid=false;dateControl.handlers.change();assert.match(app.innerHTML,/\+1,00 điểm/);
 assert.equal(calls.filter(url=>url.includes('daily-history')).length,1);
-nav[0].handlers.click();assert.doesNotMatch(app.innerHTML,/data-annual-observation|data-time-mode/);assert.match(app.innerHTML,/data-time-day="current"/);assert.match(app.innerHTML,/data-time-day="baseline"/);
+nav[0].handlers.click();assert.doesNotMatch(app.innerHTML,/data-annual-observation|data-time-day/);assert.match(app.innerHTML,/Chuỗi điểm cùng loại kỳ/);
+timeTabs[1].handlers.click();assert.match(app.innerHTML,/data-time-period="current"/);assert.match(app.innerHTML,/data-time-period="baseline"/);
+kindControl.value='day';kindControl.handlers.change();assert.match(app.innerHTML,/data-time-day="current"/);assert.match(app.innerHTML,/data-time-day="baseline"/);
+assert.match(app.innerHTML,/Ngày làm mốc/);assert.match(app.innerHTML,/Ngày so sánh/);
+assert.doesNotMatch(app.innerHTML.match(/<select data-time-day="baseline"[^>]*>([\s\S]*?)<\/select>/)[1],/value="2026-10-08"/);
+assert.doesNotMatch(app.innerHTML.match(/<select data-time-day="current"[^>]*>([\s\S]*?)<\/select>/)[1],/value="2026-10-07"/);
+const beforeDuplicate=app.innerHTML;
+dayControls[0].value='2026-10-08';dayControls[0].handlers.change();assert.equal(app.innerHTML,beforeDuplicate);
+dayControls[0].value='2026-10-06';dayControls[0].handlers.change();
+assert.doesNotMatch(app.innerHTML.match(/<select data-time-day="current"[^>]*>([\s\S]*?)<\/select>/)[1],/value="2026-10-06"/);
+assert.match(app.innerHTML,/06\/10\/2026/);
+assert.equal((app.innerHTML.match(/<tbody>[\s\S]*?<\/tbody>/)?.[0].match(/<tr>/g)??[]).length,2);
+timeTabs[0].handlers.click();assert.match(app.innerHTML,/Chuỗi điểm cùng loại kỳ/);assert.doesNotMatch(app.innerHTML,/data-time-period|data-time-day/);
 nav[1].handlers.click();assert.doesNotMatch(app.innerHTML,/data-annual-observation|data-agency-change/);
 assert.equal(calls.filter(url=>url.includes('daily-history')).length,1);
 console.log('ANNUAL_OVERVIEW_UI_OK: latest day fixed, selected baseline, bounded calendar, sidebar comparison dates');

@@ -56,6 +56,19 @@ async def enforce_public_read_only(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
+    if path=='/api/v1/me/agency-watch':
+        if request.method not in {'GET','POST'}:return JSONResponse(status_code=405,content={'detail':'Method not allowed'})
+        response=await call_next(request)
+        response.headers['Cache-Control']='no-store'
+        response.headers['Referrer-Policy']='no-referrer'
+        return response
+    if path=='/api/v1/me/challenges' or path in {'/api/v1/me/challenges/directory','/api/v1/me/challenges/board','/api/v1/me/challenges/incoming'} or (
+            path.startswith('/api/v1/me/challenges/') and path.endswith('/answer')):
+        # Independent authenticated capability; handlers check admission and CSRF.
+        response=await call_next(request)
+        response.headers['Cache-Control']='no-store'
+        response.headers['Referrer-Policy']='no-referrer'
+        return response
     if path in {'/api/v1/me/trivia','/api/v1/me/trivia/leaderboard','/api/v1/me/trivia/answer','/api/v1/me/trivia/restart'}:
         expected='GET' if path in {'/api/v1/me/trivia','/api/v1/me/trivia/leaderboard'} else 'POST'
         if request.method!=expected:return JSONResponse(status_code=405,content={'detail':'Method not allowed'})
@@ -151,6 +164,17 @@ async def enforce_public_read_only(request: Request, call_next):
                     PaidDataRequest.root_department_id==authorized_root,PaidDataRequest.formality_id==formality_id,
                     PaidDataRequest.period_type==kind,PaidDataRequest.year==year,PaidDataRequest.state=="ready")
                 statement=statement.where(PaidDataRequest.period_value.is_(None) if value is None else PaidDataRequest.period_value==value)
+                versions=request.query_params.getlist('snapshot_id')
+                if versions:
+                    try:
+                        if len(versions)!=1:raise ValueError()
+                        selected_snapshot=uuid.UUID(versions[0])
+                    except ValueError:return JSONResponse(status_code=422,content={"detail":"Phiên dữ liệu không hợp lệ."})
+                    statement=statement.where(PaidDataRequest.snapshot_id==selected_snapshot)
+                else:
+                    from .formality_freshness import daily_cutoff,fresh_entitlement
+                    from .models import Snapshot
+                    statement=fresh_entitlement(statement,daily_cutoff(kind,year,value),request_model=PaidDataRequest,snapshot_model=Snapshot)
                 if db.scalar(statement.limit(1)) is None:
                     return JSONResponse(status_code=403,content={"detail":"Tài khoản chưa khai thác TTHC trong kỳ này. Hãy tạo yêu cầu lấy dữ liệu."})
     response = await call_next(request)

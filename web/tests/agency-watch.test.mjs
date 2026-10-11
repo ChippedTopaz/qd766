@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import {similarReceived,watchTone,readWatch,saveWatch} from '../dist/agency-watch.js';
+const entity=(id,volume)=>({departmentId:id,parameters:{totalReceived:volume}});
+const snapshot={scope:'all',datasets:[{group:'dvc-progress-tree',root:entity('root',1000),children:[entity('own',100),entity('min',80),entity('max',120),entity('below',79),entity('above',121),entity('zero',0),entity('missing',null)]}]};
+for(const id of ['min','max'])assert.equal(similarReceived(snapshot,'own',id),true);
+for(const id of ['below','above','zero'])assert.equal(similarReceived(snapshot,'own',id),false);
+assert.equal(similarReceived(snapshot,'own','missing'),null);
+assert.equal(similarReceived({...snapshot,scope:'formality'},'own','min'),null);
+snapshot.datasets[0].children.push({departmentId:'redacted',parameters:{},similarReceivedVolume:true});
+assert.equal(similarReceived(snapshot,'own','redacted'),true);
+assert.equal(watchTone(12,10),'watch-higher');assert.equal(watchTone(8,10),'watch-lower');assert.equal(watchTone(10,10),'watch-equal');assert.equal(watchTone(null,10),'watch-missing');
+const server=new Map(),calls=[];let account='A';
+globalThis.localStorage={getItem(){throw Error('Must not use browser storage')},setItem(){throw Error('Must not use browser storage')}};
+globalThis.fetch=async(url,options)=>{
+ calls.push({url,options});const payload=options.body?JSON.parse(options.body):null;
+ const province=payload?.provinceId??new URL(url,'https://test.invalid').searchParams.get('province_id');
+ const key=account+':'+province;
+ if(payload)server.set(key,payload.unitIds);
+ return {ok:true,json:async()=>({unitIds:server.get(key)??[]})};
+};
+assert.deepEqual(await saveWatch('province-A',['1','2','3','4','5'],'csrf-A'),['1','2','3','4','5']);
+assert.equal(calls[0].options.headers['X-QD766-CSRF'],'csrf-A');
+await assert.rejects(saveWatch('province-A',['1','2','3','4','5','6'],'csrf-A'));
+assert.deepEqual(await readWatch('province-A'),['1','2','3','4','5']);
+account='B';assert.deepEqual(await readWatch('province-A'),[]);
+account='A';assert.deepEqual(await readWatch('province-B'),[]);
+assert.ok(calls.every(c=>c.url.startsWith('/api/v1/me/agency-watch')));
+console.log('AGENCY_WATCH_OK: server account/province storage, no localStorage, max 5, CSRF, ±20% inclusive, redaction, score colors');

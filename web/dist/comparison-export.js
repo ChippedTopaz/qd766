@@ -91,8 +91,15 @@ export function bindComparisonExports(context, WorkbookClass) {
         button.textContent = 'Tải Excel';
         button.setAttribute('data-comparison-export', '');
         button.addEventListener('click', () => void download(button, read()));
-        if (host.matches('.comparison-card'))
-            host.querySelector('h3')?.after(button);
+        if (host.matches('.comparison-card')) {
+            const title = host.querySelector('h3');
+            if (title) {
+                const heading = document.createElement('div');
+                heading.className = 'peer-comparison-heading';
+                title.before(heading);
+                heading.append(title, button);
+            }
+        }
         else
             host.append(button);
     };

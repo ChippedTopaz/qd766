@@ -41,6 +41,15 @@ def restrict_agency(payload: dict, unit_id) -> dict:
         level = next((child.get('departmentLevel') for dataset in item.get('datasets', [])
             for child in dataset.get('children', []) if child.get('departmentId') == unit_id
             and child.get('departmentLevel') in {'COMMUNE', 'PROVINCE'}), None)
+        progress=next((g for g in item.get('datasets',[]) if g.get('group')=='dvc-progress-tree'),{})
+        own=next((e for e in progress.get('children',[]) if e.get('departmentId')==unit_id),{})
+        volume=own.get('parameters',{}).get('totalReceived')
+        def valid_volume(value):
+            return isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value) and value>=0
+        if item.get('scope')=='all':
+            for peer in progress.get('children',[]):
+                received=peer.get('parameters',{}).get('totalReceived')
+                peer['similarReceivedVolume']=(volume*.8<=received<=volume*1.2) if valid_volume(volume) and valid_volume(received) else None
         for dataset in item.get("datasets", []):
             dataset["raw"] = {"path": "", "sha256": ""}
             root = dataset.get("root", {})

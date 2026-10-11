@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -140,8 +141,18 @@ def run_one_job(
         with factory.begin() as session:
             job = owned_worker_job(session, job_id, worker_id)
             stored_snapshot = store_normalized_snapshot(session, snapshot,
-                observation_id=str(job_id) if getattr(processor, 'max_workers', 1) > 1 else None)
+                observation_id=str(job_id) if request.get('scope')=='formality' or getattr(processor, 'max_workers', 1) > 1 else None)
             settle_paid_requests_for_job(session, job, stored_snapshot)
+            from .challenges import settle_snapshot
+            # Isolate the new feature from collection/Credit settlement.
+            # A verified repeat fetch may reuse an identical immutable snapshot.
+            try:
+                from datetime import datetime, timezone
+                with session.begin_nested():
+                    settle_snapshot(session, stored_snapshot,collected_at=datetime.now(timezone.utc),
+                        collection_job_id=job.id)
+            except Exception:
+                logging.getLogger(__name__).exception('CHALLENGE_SETTLEMENT_FAILED job=%s',job.id)
             succeed_job(session, job, worker_id)
             finish_batch_job(session, job, "succeeded")
             finish_province_batch_job(session, job, "succeeded")

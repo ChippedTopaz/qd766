@@ -9,6 +9,7 @@ import { orderSatisfactionRows, detailMetricName } from './satisfaction-display-
 import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
 import { loadFormulaConfiguration } from './formula-loader.js';
+import { openScoreSimulator } from './score-simulator.js';
 import { renderPeerList } from './peer-list.js';
 import { renderPaidAnalysis, bindPaidAnalysis, clearPaidAnalysis, stopPaidAnalysisPolling } from './paid-analysis.js';
 import { latestPeriod } from './period-choice.js';
@@ -27,9 +28,12 @@ import { mountTrialRegistration } from './trial-registration.js';
 import { pageLoader } from './page-loader.js';
 import { presenceBadge, startPresence } from './presence.js';
 import { triviaMarkup, bindTrivia } from './trivia.js';
+import { challengeMarkup, bindChallenges, bindChallengeNotifications, openChallengeBoard } from './challenges.js';
 import { agencyComparison, agencyComparisonUnits, orderAgencies } from './agency-comparison.js';
+import { readWatch, saveWatch, similarReceived, watchTone, WATCH_LIMIT } from './agency-watch.js';
 import { annualDailyComparison, annualGroupChange, annualObservationWindow, formatDay as displayVersionDay } from './annual-daily-comparison.js';
-import { renderDailyDateComparison, compareDailyDates, historyWithinPeriod } from './daily-period-comparison.js';
+import { compareDailyDates, historyWithinPeriod } from './daily-period-comparison.js';
+import { customComparisonTable } from './time-custom-comparison.js';
 import { onlineIndicators } from './online-indicators.js';
 import { RecentDashboard } from './recent-dashboard.js';
 import { lastAdminProvince, rememberAdminProvince, clearAdminProvince } from './admin-province-preference.js';
@@ -58,9 +62,16 @@ let data;
 let state;
 let overviewTab = "overview";
 let agencyLevel = null;
+let agencyTab = 'default';
+let watchSimilar = false, watchQuery = '';
+let watchSortDimension = null, watchSortDirection = 'desc';
+const watchDrafts = new Map(), watchMessages = new Map();
 const dailyHistoryCache = new Map();
 const annualObservationDates = new Map();
 const timeComparisonDates = new Map();
+let timeTab = 'default';
+const customTimeChoices = new Map();
+const customPeriodLoads = new Map();
 let selectedFormulaGroup = "transparency";
 let selectionRequest = 0;
 let pendingMessage = "";
@@ -89,6 +100,7 @@ function initializeCatalogLevel() {
 }
 let catalogPreviewRequest = 0;
 let catalogSearchTimer = 0;
+let historicalSnapshotId = typeof location === 'undefined' ? '' : new URLSearchParams(location.search).get('snapshot') ?? '';
 let library = [];
 let libraryLoading = false, libraryError = "";
 let libraryRequest = 0;
@@ -233,7 +245,8 @@ async function loadMyRequests(markRead = false) {
             historyTimer = window.setTimeout(() => { void loadMyRequests(); }, 10000);
     }
 }
-async function openSavedFormality(item, periodId = state.periodId) {
+async function openSavedFormality(item, periodId = state.periodId, snapshotId = '') {
+    historicalSnapshotId = snapshotId;
     state.periodId = periodId;
     state.scope = "formality";
     state.screen = "overview";
@@ -242,6 +255,7 @@ async function openSavedFormality(item, periodId = state.periodId) {
     data.formality = { ...item };
     catalogPreview.selectedId = item.id;
     catalogPreview.mode = "single";
+    delete data.snapshots[snapshotKey(periodId, 'formality', item.id)];
     saveSelectionUrl();
     await loadSelection();
     void loadLibrary();
@@ -253,9 +267,11 @@ function saveSelectionUrl() {
     const params = new URLSearchParams({ province: data.province.id, period: state.periodId, scope: state.scope, unit: state.unitId });
     if (state.scope === "formality")
         params.set("formality", data.formality.id);
+    if (state.scope === 'formality' && historicalSnapshotId)
+        params.set('snapshot', historicalSnapshotId);
     history.replaceState(null, "", `${location.pathname}?${params}`);
 }
-function requestPeriod(item) { return item.periodType === "month" ? `Tháng ${item.periodValue}/${item.year}` : item.periodType === "quarter" ? `Quý ${item.periodValue}/${item.year}` : `Năm ${item.year}`; }
+function requestPeriod(item) { return (item.periodType === "month" ? `Tháng ${item.periodValue}/${item.year}` : item.periodType === "quarter" ? `Quý ${item.periodValue}/${item.year}` : `Năm ${item.year}`) + ' · ' + dateTime(item.createdAt); }
 function acquisitionPage() {
     if (!canAcquire())
         return `<section class="panel"><div class="empty-state"><h2>Khai thác dữ liệu theo TTHC</h2><p>Đăng nhập tài khoản được cấp quyền để tạo yêu cầu khai thác.</p></div></section>`;
@@ -641,7 +657,7 @@ function overview() {
   ${renderPaidAnalysis(analysisSelection(), Boolean(signedInUser), geminiAnalysisEnabled)}`}</div>`;
 }
 function groupTableHeading(label, extra = '') {
-    return `<div class="group-table-heading"><h3>${esc(label)}</h3><div class="group-table-actions">${extra}<button type="button" class="btn group-export-button" data-group-export>Tải biểu Excel</button></div></div>`;
+    return `<div class="group-table-heading"><h3>${esc(label)}</h3><div class="group-table-actions">${extra}${state.selectedGroup ? '<button type="button" class="btn" data-score-simulator>Giả lập</button>' : ''}<button type="button" class="btn group-export-button" data-group-export>Tải biểu Excel</button></div></div>`;
 }
 function overviewGroupNavigator(view) {
     const total = `<button type="button" class="score-tile score-total" data-motion-card="total" data-score-total aria-pressed="${state.selectedGroup === null}" style="--tile-color:#4f46e5"><span>Điểm tổng hợp</span><strong>${n(view.totalScore)}<small>/ ${n(view.totalMaximum)}</small></strong></button>`;
@@ -813,7 +829,7 @@ function overviewGroupDetail(view) {
     const emptyDetailMessage = group.id === "provide-online-tree" && data.units.find(item => item.departmentId === state.unitId)?.departmentLevel !== "PROVINCE_TOTAL"
         ? provinceMode ? "Chưa có dữ liệu chi tiết DVC trực tuyến của tỉnh trong kỳ đã chọn." : "Dữ liệu DVC trực tuyến hiện nay chỉ có dữ liệu chi tiết của tỉnh, chưa có dữ liệu chi tiết của cơ quan bạn."
         : "Nhóm này chưa có số liệu thành phần để hiển thị.";
-    const heading = `<div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary"><button class="text-button" data-action="close-group-detail">← Xem lại 6 nhóm</button>${state.selectedMetric ? `<button class="text-button" data-action="clear-metric-detail">← So sánh cả nhóm</button>` : ""}<strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${detailRank ? `Hạng ${detailRank.rank}/${detailRank.total}` : "Chưa xếp hạng"}</span></div></div>`;
+    const heading = `<div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary">${state.selectedMetric ? `<button class="text-button" data-action="clear-metric-detail">← So sánh cả nhóm</button>` : ""}<strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${detailRank ? `Hạng ${detailRank.rank}/${detailRank.total}` : "Chưa xếp hạng"}</span></div></div>`;
     if (progress)
         return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card progress-detail">${groupTableHeading("Kết quả các chỉ tiêu thành phần")}${referenceNotice(group.id)}${progress}</div>${comparison}</div></section>`;
     return `<section class="panel group-detail${group.id === 'provide-online-tree' ? ' online-detail-full' : ''}" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card">${groupTableHeading("Kết quả các chỉ tiêu thành phần", provinceButton)}${referenceNotice(group.id)}${provinceNotice}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="7">${esc(emptyDetailMessage)}</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div>${comparison}</div></section>`;
@@ -824,7 +840,7 @@ function dailyContext() {
     return { unitId, key: [data.province.id, state.periodId, unitId, state.scope, state.scope === 'formality' ? data.formality.id : ''].join(":") };
 }
 function loadDailyHistory() {
-    if (!state || !data || state.scope !== "all" || !(state.screen === "time" || (state.screen === "overview" && overviewTab === "overview" && period().type === "year")))
+    if (!state || !data || state.scope !== "all" || !((state.screen === "time" && timeTab === 'custom' && customTimeChoice().kind === 'day') || (state.screen === "overview" && overviewTab === "overview" && period().type === "year")))
         return;
     const { unitId, key } = dailyContext();
     if (!unitId || dailyHistoryCache.has(key))
@@ -845,9 +861,108 @@ function loadDailyHistory() {
             render();
     });
 }
+function customTimeChoice() {
+    const key = dailyContext().key;
+    let choice = customTimeChoices.get(key);
+    if (!choice) {
+        choice = { kind: period().type, baseline: '', current: '' };
+        customTimeChoices.set(key, choice);
+    }
+    if (choice.kind !== 'day') {
+        const options = data.periods.filter(p => p.type === choice.kind).sort((a, b) => periodOrder(b) - periodOrder(a));
+        if (!choice.current)
+            choice.current = options.find(p => p.id === state.periodId)?.id ?? options[0]?.id ?? '';
+        if (!choice.baseline || choice.baseline === choice.current)
+            choice.baseline = options.find(p => p.id !== choice.current)?.id ?? '';
+    }
+    return choice;
+}
+function loadCustomTimePeriods() {
+    if (!state || !data || state.screen !== 'time' || timeTab !== 'custom')
+        return;
+    const choice = customTimeChoice();
+    if (choice.kind === 'day')
+        return;
+    const context = dailyContext().key, target = data, scope = state.scope, formality = data.formality.id;
+    for (const id of new Set([choice.current, choice.baseline])) {
+        const selected = target.periods.find(p => p.id === id);
+        if (!selected)
+            continue;
+        const key = snapshotKey(id, scope, formality), loadKey = context + ':' + id;
+        const cached = target.snapshots[key];
+        const hasUnit = cached?.datasets.some(g => g.root.departmentId === state.unitId || g.children.some(e => e.departmentId === state.unitId));
+        if (hasUnit || customPeriodLoads.has(loadKey))
+            continue;
+        const entry = { loading: true, error: '' };
+        customPeriodLoads.set(loadKey, entry);
+        const query = new URLSearchParams({ root_department_id: target.province.id, period_type: selected.type, year: String(selected.year), scope });
+        if (selected.value != null)
+            query.set('period_value', String(selected.value));
+        if (scope === 'formality')
+            query.set('formality_id', formality);
+        void fetch('/api/v1/dashboard/selection?' + query).then(async (response) => {
+            if (!response.ok)
+                throw new Error(response.status === 404 ? 'Kỳ được chọn chưa có dữ liệu.' : 'Không đọc được dữ liệu kỳ được chọn.');
+            const body = await response.json();
+            if (!body.snapshot)
+                throw new Error('Kỳ được chọn chưa có dữ liệu.');
+            if (body.metadata)
+                body.snapshot.delivery = body.metadata;
+            target.snapshots[key] = body.snapshot;
+        }).catch(error => { entry.error = error instanceof Error ? error.message : 'Không đọc được dữ liệu.'; }).finally(() => { entry.loading = false; if (dailyContext().key === context)
+            render(); });
+    }
+}
+function customTime() {
+    const choice = customTimeChoice(), key = dailyContext().key;
+    const names = { day: 'Ngày', month: 'Tháng', quarter: 'Quý', year: 'Năm' };
+    let controls = '', status = '', current, baseline;
+    if (choice.kind === 'day') {
+        const daily = dailyHistoryCache.get(key), pair = compareDailyDates(daily?.history ?? null, timeComparisonDates.get(key));
+        if (!timeComparisonDates.has(key)) {
+            const first = pair.days[0]?.reportDate ?? '', second = pair.days.find(d => d.reportDate !== first)?.reportDate ?? '';
+            timeComparisonDates.set(key, { current: first, baseline: second });
+            Object.assign(pair, compareDailyDates(daily?.history ?? null, { current: first, baseline: second }));
+            if (!pair.days.length)
+                timeComparisonDates.delete(key);
+        }
+        controls = ['baseline', 'current'].map(role => {
+            const value = role === 'baseline' ? pair.baselineDate : pair.currentDate, other = role === 'baseline' ? pair.currentDate : pair.baselineDate;
+            const available = pair.days.filter(d => d.reportDate !== other);
+            return `<label><strong>Ngày ${role === 'baseline' ? 'làm mốc' : 'so sánh'}</strong><select data-time-day="${role}" ${!available.length ? 'disabled' : ''}><option value="" ${!value ? 'selected' : ''} disabled>Chọn ngày</option>${available.map(d => `<option value="${esc(d.reportDate)}" ${d.reportDate === value ? 'selected' : ''}>${esc(displayVersionDay(d.reportDate))}</option>`).join('')}</select></label>`;
+        }).join('');
+        status = state.scope !== 'all' ? 'Chưa có dữ liệu theo ngày cho phạm vi thủ tục này.' : !daily || daily.loading ? 'Đang tải lịch sử ngày…' : daily.error || (!pair.current || !pair.baseline ? 'Ngày được chọn chưa có dữ liệu.' : '');
+        const row = (day, date) => ({ label: displayVersionDay(date), chronology: Date.parse(date + 'T00:00:00Z'), total: day?.totalScore ?? null, rank: day?.rank != null ? day.rank + '/' + day.cohortSize : '—', groups: Object.fromEntries(data.groupOrder.map(g => [g, day?.groups[g]?.score ?? null])) });
+        current = row(pair.current, pair.currentDate);
+        baseline = row(pair.baseline, pair.baselineDate);
+    }
+    else {
+        const options = data.periods.filter(p => p.type === choice.kind).sort((a, b) => periodOrder(b) - periodOrder(a));
+        controls = ['baseline', 'current'].map(role => {
+            const available = options.filter(p => p.id !== choice[role === 'baseline' ? 'current' : 'baseline']);
+            return `<label><strong>${names[choice.kind]} ${role === 'baseline' ? 'làm mốc' : 'so sánh'}</strong><select data-time-period="${role}" ${!available.length ? 'disabled' : ''}><option value="" ${!choice[role] ? 'selected' : ''} disabled>Chọn kỳ</option>${available.map(p => `<option value="${esc(p.id)}" ${p.id === choice[role] ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></label>`;
+        }).join('');
+        const row = (id) => {
+            const selected = options.find(p => p.id === id), snap = data.snapshots[snapshotKey(id, state.scope, data.formality.id)], loading = customPeriodLoads.get(key + ':' + id);
+            if (!snap) {
+                status = loading?.loading ? 'Đang tải dữ liệu…' : loading?.error || 'Kỳ được chọn chưa có dữ liệu.';
+                return { label: selected?.label ?? 'Chưa chọn kỳ', total: null, rank: '—', groups: {} };
+            }
+            const view = buildUnitView(data, id, state.scope, state.unitId), rank = rankFor(view, id, null);
+            if (view.groups.every(g => g.score.value == null))
+                status = loading?.loading ? 'Đang tải dữ liệu…' : loading?.error || 'Kỳ được chọn chưa có dữ liệu của cơ quan này.';
+            return { label: selected?.label ?? id, chronology: selected ? periodOrder(selected) : NaN, total: view.totalScore, rank: rank ? rank.rank + '/' + rank.total : '—', groups: Object.fromEntries(view.groups.map(g => [g.id, g.score.value])), provisional: selected?.provisional ?? false };
+        };
+        current = row(choice.current);
+        baseline = row(choice.baseline);
+    }
+    return `<section class="panel"><div class="panel-head"><div><h2>So sánh tuỳ chỉnh</h2><p>Tăng/giảm = Điểm kỳ mới hơn − Điểm kỳ cũ hơn.${choice.kind === 'day' ? ' Các ngày thuộc ' + esc(period().label) + '.' : ''}</p></div></div><div class="custom-time-toolbar"><label><strong>So sánh theo</strong><select data-time-kind>${Object.entries(names).map(([id, label]) => `<option value="${id}" ${id === choice.kind ? 'selected' : ''} ${id === 'day' && state.scope !== 'all' ? 'disabled' : ''}>${label}</option>`).join('')}</select></label>${controls}</div>${status ? `<p class="collection-feedback" role="status">${esc(status)}</p>` : ''}${customComparisonTable(current, baseline, data.groupOrder, data.groupLabels)}</section>`;
+}
 function time() {
     const daily = dailyHistoryCache.get(dailyContext().key);
-    const dailyComparison = state.scope === 'all' ? renderDailyDateComparison(daily?.history ?? null, data.groupOrder, data.groupLabels, timeComparisonDates.get(dailyContext().key), daily?.loading ?? true, daily?.error ?? '') : '';
+    const dailyComparison = `<div class="overview-tabs" role="tablist" aria-label="Chế độ so sánh"><button role="tab" data-time-tab="default" aria-selected="${timeTab === 'default'}">Mặc định</button><button role="tab" data-time-tab="custom" aria-selected="${timeTab === 'custom'}">So sánh tuỳ chỉnh</button></div>`;
+    if (timeTab === 'custom')
+        return title('So sánh theo thời gian', '', '') + dailyComparison + customTime();
     const samples = data.periods.filter(p => p.type === period().type && Boolean(data.snapshots[snapshotKey(p.id, state.scope, data.formality.id)]))
         .sort((a, b) => periodOrder(b) - periodOrder(a)).map(p => ({ p, v: buildUnitView(data, p.id, state.scope, state.unitId) }));
     const rows = samples.map(({ p, v }) => {
@@ -859,7 +974,63 @@ function time() {
     }).join("");
     return `${title("So sánh theo thời gian", "Điểm các kỳ cùng loại và biến động so với kỳ liền trước.", period().provisional ? "Đây là dữ liệu tạm thời do chưa kết thúc kỳ báo cáo." : "")}${dailyComparison}<section class="panel"><div class="panel-head"><div><h2>Chuỗi điểm cùng loại kỳ</h2><p>Thiếu kỳ liền trước thì không tính biến động. Thứ hạng chỉ hiển thị khi đã đọc dữ liệu so sánh của kỳ đó.</p></div></div><div class="table-wrap"><table><thead><tr><th>Kỳ</th><th>Tổng điểm</th><th>Điểm kỳ trước</th><th>Tăng/giảm điểm</th><th>Thứ hạng</th>${data.groupOrder.map(group => `<th>${esc(data.groupLabels[group])}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></section>`;
 }
+function watchContext() {
+    const ownId = signedInUser?.unitId ?? state.unitId;
+    const key = 'qd766:agency-watch:v1:' + String(signedInUser?.id ?? 'local-preview') + ':' + data.province.id;
+    let ids = watchDrafts.get(key);
+    if (!ids) {
+        ids = [];
+        watchDrafts.set(key, ids);
+    }
+    return { key, ids, ownId };
+}
+const watchLoads = new Map(), watchSaves = new Set();
+function loadWatch() {
+    if (!signedInUser || state.screen !== 'peers' || agencyTab !== 'watch')
+        return;
+    const { key, ownId } = watchContext();
+    if (watchLoads.has(key))
+        return;
+    const entry = { loading: true, error: '' };
+    watchLoads.set(key, entry);
+    void readWatch(data.province.id).then(ids => { watchDrafts.set(key, ids.filter(id => id !== ownId)); }).catch(e => { entry.error = e.message; watchMessages.set(key, entry.error); }).finally(() => { entry.loading = false; if (state.screen === 'peers' && agencyTab === 'watch' && watchContext().key === key)
+        render(); });
+}
+function agencyWatch() {
+    if (state.scope !== 'all')
+        return `<section class="panel"><div class="empty-state"><h2>Theo dõi cơ quan</h2><p>Chọn phạm vi Tất cả thủ tục hành chính để theo dõi điểm tổng quan.</p></div></section>`;
+    const { key, ids, ownId } = watchContext(), snap = snapshot();
+    const loading = watchLoads.get(key);
+    if (signedInUser && (!loading || loading.loading))
+        return '<section class="panel"><div class="panel-body">Đang tải danh sách theo dõi của tài khoản…</div></section>';
+    if (loading?.error)
+        return `<section class="panel"><div class="panel-body"><p role="status">${esc(loading.error)}</p><button class="btn" data-watch-retry>Thử lại</button></div></section>`;
+    const options = agencyRestricted() ? agencyComparisonUnits(snap) : data.units;
+    const rows = agencyComparison(snap, null, data.groupOrder, options);
+    const own = buildUnitView(data, state.periodId, state.scope, ownId);
+    const ownLevel = data.units.find(u => u.departmentId === ownId)?.departmentLevel;
+    const available = options.filter(u => u.departmentId !== ownId && u.departmentLevel === ownLevel && (u.departmentLevel === 'PROVINCE' || u.departmentLevel === 'COMMUNE'));
+    const comparable = available.filter(u => !watchSimilar || similarReceived(snap, ownId, u.departmentId) === true);
+    const plain = (text) => text.toLocaleLowerCase('vi').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+    const needle = plain(watchQuery.trim());
+    const found = needle ? comparable.filter(u => plain(u.departmentName).includes(needle)).sort((a, b) => alphabet.compare(a.departmentName, b.departmentName)) : [];
+    const matches = found.slice(0, 10);
+    const visible = ids.map(id => rows.find(r => r.id === id)).filter((r) => Boolean(r) && comparable.some(u => u.departmentId === r.id));
+    const ownRow = { id: ownId, name: own.name, level: ownLevel === 'COMMUNE' ? 'COMMUNE' : 'PROVINCE',
+        total: own.totalScore, scores: Object.fromEntries(own.groups.filter(g => g.score.value !== null).map(g => [g.id, g.score.value])),
+        rank: null, scoreChange: null, rankChange: null };
+    const combined = [ownRow, ...visible];
+    const ordered = watchSortDimension ? orderAgencies(combined, watchSortDimension, '', watchSortDirection) : combined;
+    const cohortLabel = ownLevel === 'COMMUNE' ? 'xã, phường' : ownLevel === 'PROVINCE' ? 'sở, ngành' : 'cơ quan';
+    const filterNote = ownLevel !== 'COMMUNE' && ownLevel !== 'PROVINCE' ? 'Chọn một cơ quan cụ thể để theo dõi các đơn vị cùng cấp.' :
+        `${comparable.length} ${cohortLabel} cùng tỉnh phù hợp${watchSimilar && own.volume != null ? ' · Hồ sơ tiếp nhận: ' + int(own.volume) + ' · Khoảng tương đồng: ' + int(Math.ceil(own.volume * .8)) + '–' + int(Math.floor(own.volume * 1.2)) + ' hồ sơ' : ''}${watchSimilar && own.volume == null ? ' · Chưa có số hồ sơ tiếp nhận của cơ quan làm mốc.' : ''}`;
+    const cell = (value, base, isOwn = false) => `<td class="num ${isOwn ? 'watch-equal' : watchTone(value, base)}">${n(value)}</td>`;
+    const heading = (key, label) => `<th aria-sort="${watchSortDimension === key ? (watchSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}"><button type="button" class="agency-sort ${watchSortDimension === key ? 'active' : ''}" data-watch-sort="${key}" data-sort-direction="${watchSortDimension === key ? watchSortDirection : 'desc'}" aria-label="Sắp xếp ${watchSortDimension === key && watchSortDirection === 'desc' ? 'tăng' : 'giảm'} dần theo ${esc(label)}">${esc(label)}</button></th>`;
+    const hidden = ids.length - visible.length;
+    return `<section class="panel agency-watch"><div class="panel-head"><div><h2>Theo dõi cơ quan</h2><p>${esc(own.name)} · ${esc(period().label)}</p></div></div><div class="watch-toolbar"><input data-watch-search type="search" value="${esc(watchQuery)}" placeholder="Tìm cơ quan để theo dõi…" aria-label="Tìm cơ quan để theo dõi"><label><input data-watch-similar type="checkbox" ${watchSimilar ? 'checked' : ''}> Cùng hạng cân (±20% HS)</label><span>${ids.length}/${WATCH_LIMIT} cơ quan</span></div><p class="watch-status">${esc(filterNote)}</p>${needle ? `<div class="watch-choices">${matches.map(u => `<label><input data-watch-unit="${esc(u.departmentId)}" type="checkbox" ${ids.includes(u.departmentId) ? 'checked' : ''} ${ids.length >= WATCH_LIMIT && !ids.includes(u.departmentId) ? 'disabled' : ''}><span>${esc(u.departmentName)}</span></label>`).join('') || '<p>Không có cơ quan phù hợp với từ khóa và bộ lọc.</p>'}${found.length > 10 ? '<p>Hiển thị 10 kết quả. Nhập từ khóa cụ thể hơn để thu hẹp danh sách.</p>' : ''}</div>` : ''}<div class="watch-selected">${ids.map(id => `<button class="btn small" data-watch-remove="${esc(id)}" aria-label="Bỏ theo dõi ${esc(available.find(u => u.departmentId === id)?.departmentName ?? id)}">${esc(available.find(u => u.departmentId === id)?.departmentName ?? 'Cơ quan chưa có dữ liệu kỳ này')} ×</button>`).join('')}</div>${watchMessages.get(key) || hidden ? `<p class="watch-status" role="status">${esc(watchMessages.get(key) ?? '')}${hidden ? ' ' + hidden + ' cơ quan đang không có dữ liệu hoặc không phù hợp bộ lọc; danh sách đã lưu vẫn được giữ.' : ''}</p>` : ''}<div class="table-wrap"><table><thead><tr><th>Cơ quan, đơn vị</th>${heading('total', 'Tổng điểm')}${data.groupOrder.map(g => heading(g, data.groupLabels[g])).join('')}</tr></thead><tbody>${ordered.map(row => `<tr class="${row.id === ownId ? 'mine' : ''}"><td>${row.id === ownId ? `<strong>${esc(row.name)}</strong>` : esc(row.name)}</td>${cell(row.total, own.totalScore, row.id === ownId)}${data.groupOrder.map(g => cell(row.scores[g], own.groups.find(x => x.id === g)?.score.value, row.id === ownId)).join('')}</tr>`).join('')}</tbody></table></div><div class="watch-actions"><button class="btn primary small" data-watch-save>Lưu danh sách</button></div></section>`;
+}
 function peers() {
+    const pageHeading = `<header class="page-head"><div><h1>So sánh theo cơ quan</h1><p>${esc(data.province.name)} · ${esc(period().label)}</p></div></header>`;
     const selected = data.units.find(item => item.departmentId === state.unitId);
     const restricted = agencyRestricted() && state.scope !== "all";
     const allowed = restricted ? data.units.filter(item => item.departmentId === signedInUser?.unitId) :
@@ -879,11 +1050,17 @@ function peers() {
     const delta = (value) => value === null ? "—" : (value > 0 ? "+" : "") + n(Math.abs(value) < .005 ? 0 : value);
     const heading = (key, label) => `<th aria-sort="${state.peerDimension === key ? (state.peerSortDirection === "asc" ? "ascending" : "descending") : "none"}"><button class="agency-sort ${state.peerDimension === key ? "active" : ""}" data-dimension="${key}" data-sort-direction="${state.peerDimension === key ? state.peerSortDirection : "desc"}" aria-label="Sắp xếp ${state.peerDimension === key && state.peerSortDirection === "asc" ? "tăng" : "giảm"} dần theo ${esc(label)}">${esc(label)}</button></th>`;
     const unitCell = (id, label, group, name = label) => canSelectUnit(id) ? `<button class="agency-link" data-peer-unit="${esc(id)}"${group ? ` data-peer-group="${group}" aria-label="${esc(data.groupLabels[group])} · ${esc(name)}"` : ""}>${esc(label)}</button>` : `<span>${esc(label)}</span>`;
-    const tabs = ["PROVINCE", "COMMUNE"].filter(item => !restricted || item === ownLevel).map(item => `<button type="button" data-agency-level="${item}" class="${item === level ? "active" : ""}" aria-pressed="${item === level}"><i aria-hidden="true">${icon(item === 'PROVINCE' ? 'chart' : 'shield')}</i>${item === "PROVINCE" ? "Sở, ngành" : "Xã, phường"}</button>`).join("");
-    return `${title("So sánh theo cơ quan", data.province.name + " · " + period().label, "")}
+    const tabs = ["PROVINCE", "COMMUNE"].filter(item => !restricted || item === ownLevel).map(item => `<button type="button" data-agency-level="${item}" class="${agencyTab === 'default' && item === level ? "active" : ""}" aria-pressed="${agencyTab === 'default' && item === level}"><i aria-hidden="true">${icon(item === 'PROVINCE' ? 'chart' : 'shield')}</i>${item === "PROVINCE" ? "Sở, ngành" : "Xã, phường"}</button>`).join("");
+    const navigation = `<div class="table-toolbar"><div class="agency-levels" role="group" aria-label="Chế độ so sánh cơ quan">${tabs}<button type="button" data-agency-tab="watch" class="${agencyTab === 'watch' ? 'active' : ''}" aria-pressed="${agencyTab === 'watch'}">Theo dõi</button></div></div>`;
+    const challengeNavigation = navigation.replace('</div></div>', `<button type="button" data-agency-tab="challenge" class="${agencyTab === 'challenge' ? 'active' : ''}" aria-pressed="${agencyTab === 'challenge'}">Thách đấu</button></div></div>`);
+    if (agencyTab === 'watch')
+        return pageHeading + challengeNavigation + agencyWatch();
+    if (agencyTab === 'challenge')
+        return pageHeading + challengeNavigation + challengeMarkup();
+    return `${pageHeading}
+  ${challengeNavigation}
   <section class="panel agency-ranking"><div class="panel-head"><div><h2>Bảng xếp hạng</h2><p>${visible.length} cơ quan, đơn vị · ${previous ? "So với " + esc(previous.label) : "Chưa có kỳ liền trước"}</p></div>
   <input id="peer-search" type="search" aria-label="Tìm cơ quan, đơn vị" value="${esc(state.search)}" placeholder="Tìm cơ quan, đơn vị…"></div>
-  <div class="table-toolbar"><div class="agency-levels" role="group" aria-label="Cấp cơ quan">${tabs}</div></div>
   <div class="table-wrap agency-ranking-scroll"><table><thead><tr><th>Hạng</th><th>Cơ quan, đơn vị</th>${heading("total", "Tổng điểm")}<th>Tăng/giảm điểm</th><th>Tăng/giảm hạng</th>${data.groupOrder.map(group => heading(group, data.groupLabels[group])).join("")}</tr></thead><tbody>
   ${visible.map(row => `<tr class="${row.id === state.unitId ? "mine" : ""}"><td class="num">${row.rank ?? "—"}</td><td>${unitCell(row.id, row.name)}</td><td class="num"><strong>${n(row.total)}</strong></td><td class="num ${changeTone(row.scoreChange)}">${delta(row.scoreChange)}</td><td class="num ${changeTone(row.rankChange)}">${row.rankChange === null ? "—" : (row.rankChange > 0 ? "+" : "") + row.rankChange}</td>${data.groupOrder.map(group => `<td class="num">${unitCell(row.id, n(row.scores[group] ?? null), group, row.name)}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${5 + data.groupOrder.length}">Không có cơ quan, đơn vị phù hợp trong phạm vi được phép xem.</td></tr>`}
   </tbody></table></div></section>`;
@@ -1073,6 +1250,12 @@ async function downloadAnalysisExcel(kind) {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function bind() {
+    if (state)
+        loadWatch();
+    document.querySelector('[data-watch-retry]')?.addEventListener('click', () => { watchLoads.delete(watchContext().key); render(); });
+    if (state?.screen === 'overview' && !document.querySelector('[data-challenge-board]')) {
+        root.insertAdjacentHTML?.('beforeend', '<button type="button" class="btn primary challenge-floating" data-challenge-board>BXH thách đấu</button>');
+    }
     if (state?.screen === 'overview' && overviewTab === 'analysis')
         bindPaidAnalysis(analysisSelection(), signedInUser?.csrfToken ?? '', render, id => { if (data.groupOrder.includes(id)) {
             overviewTab = 'details';
@@ -1085,6 +1268,34 @@ function bind() {
         } });
     loadDailyHistory();
     document.querySelectorAll('[data-daily-refresh]').forEach(el => el.addEventListener('click', () => { dailyHistoryCache.delete(dailyContext().key); render(); }));
+    loadCustomTimePeriods();
+    document.querySelectorAll('[data-time-tab]').forEach(el => {
+        const activate = () => { timeTab = el.dataset.timeTab === 'custom' ? 'custom' : 'default'; render(); };
+        el.addEventListener('click', activate);
+        el.addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+            event.preventDefault();
+            timeTab = event.key === 'Home' ? 'default' : event.key === 'End' ? 'custom' : timeTab === 'default' ? 'custom' : 'default';
+            render();
+            document.querySelector(`[data-time-tab="${timeTab}"]`)?.focus();
+        } });
+    });
+    document.querySelectorAll('[data-time-kind]').forEach(el => el.addEventListener('change', () => {
+        if (!['day', 'month', 'quarter', 'year'].includes(el.value) || el.value === 'day' && state.scope !== 'all')
+            return;
+        customTimeChoices.set(dailyContext().key, { kind: el.value, current: '', baseline: '' });
+        render();
+    }));
+    document.querySelectorAll('[data-time-period]').forEach(el => el.addEventListener('change', () => {
+        const choice = customTimeChoice();
+        if (!data.periods.some(p => p.id === el.value && p.type === choice.kind))
+            return;
+        if (el.value === choice[el.dataset.timePeriod === 'baseline' ? 'current' : 'baseline']) {
+            render();
+            return;
+        }
+        choice[el.dataset.timePeriod === 'baseline' ? 'baseline' : 'current'] = el.value;
+        render();
+    }));
     document.querySelectorAll('[data-annual-observation]').forEach(el => el.addEventListener('change', () => {
         const context = dailyContext();
         if (el.value && el.validity.valid)
@@ -1096,8 +1307,17 @@ function bind() {
         if (!el.value || !el.validity.valid)
             return;
         const context = dailyContext(), pair = compareDailyDates(dailyHistoryCache.get(context.key)?.history ?? null, timeComparisonDates.get(context.key));
+        if (!pair.days.some(d => d.reportDate === el.value) || el.value === (el.dataset.timeDay === 'current' ? pair.baselineDate : pair.currentDate)) {
+            render();
+            return;
+        }
         timeComparisonDates.set(context.key, { current: el.dataset.timeDay === 'current' ? el.value : pair.currentDate, baseline: el.dataset.timeDay === 'baseline' ? el.value : pair.baselineDate });
         render();
+    }));
+    document.querySelectorAll('[data-score-simulator]').forEach(button => button.addEventListener('click', () => {
+        const group = unit().groups.find(g => g.id === state.selectedGroup);
+        if (group?.entity)
+            void openScoreSimulator(group.id, group.label, group.entity);
     }));
     document.querySelectorAll('[data-group-export]').forEach(button => button.addEventListener('click', () => {
         const group = state.selectedGroup ?? data.groupOrder[0];
@@ -1107,6 +1327,8 @@ function bind() {
             query.set('period_value', String(current.value));
         if (state.scope === 'formality')
             query.set('formality_id', data.formality.id);
+        if (state.scope === 'formality' && historicalSnapshotId)
+            query.set('snapshot_id', historicalSnapshotId);
         openGroupExport({ group, groupLabel: data.groupLabels[group], defaultAll: state.selectedGroup === null, agency: signedInUser?.accessTier === 'agency', query, WorkbookClass: ExcelJS.Workbook,
             context: { name: signedInUser?.accessTier === 'agency' ? unit().name : data.province.name, period: current.label, scope: state.scope === 'all' ? 'Tất cả thủ tục hành chính' : data.formality.code + ' · ' + data.formality.name, snapshot: snapshot(), ...(group === 'provide-online-tree' && state.scope === 'all' && provinceOnlineViewKey === onlineProvinceKey() ? { provinceOnlineReference: { unitId: state.unitId, provinceName: data.province.name, parameters: unit().groups.find(g => g.id === group)?.dataset?.provinceOnlineParameters ?? unit().groups.find(g => g.id === group)?.dataset?.root.parameters ?? {} } } : {}) } });
     }));
@@ -1194,7 +1416,7 @@ function bind() {
             return;
         const selected = data.periods.find(item => item.type === request.periodType && item.year === request.year && (item.value ?? null) === (request.periodValue ?? null));
         if (selected)
-            void openSavedFormality({ id: request.formalityId, code: request.code, name: request.name }, selected.id);
+            void openSavedFormality({ id: request.formalityId, code: request.code, name: request.name }, selected.id, request.snapshotId ?? '');
     }));
     document.querySelectorAll("[data-trend-toggle]").forEach(button => button.addEventListener("click", () => {
         const id = button.dataset.trendToggle;
@@ -1267,7 +1489,72 @@ function bind() {
         void loadSelection();
     } scrollTo(0, 0); }));
     document.querySelectorAll("[data-state]").forEach(el => el.addEventListener("click", () => { state.demo = el.dataset.state; render(); }));
-    document.querySelectorAll("[data-agency-level]").forEach(el => el.addEventListener("click", () => { agencyLevel = el.dataset.agencyLevel; state.search = ""; render(); }));
+    document.querySelectorAll("[data-agency-level]").forEach(el => el.addEventListener("click", () => { agencyLevel = el.dataset.agencyLevel; agencyTab = 'default'; state.search = ""; render(); }));
+    document.querySelectorAll('[data-agency-tab]').forEach(el => el.addEventListener('click', () => { agencyTab = el.dataset.agencyTab === 'challenge' ? 'challenge' : el.dataset.agencyTab === 'watch' ? 'watch' : 'default'; render(); }));
+    document.querySelector('[data-challenge-board]')?.addEventListener('click', () => void openChallengeBoard());
+    if (state && signedInUser)
+        bindChallengeNotifications(signedInUser.id + ':' + data.province.id, signedInUser.csrfToken, () => { state.screen = 'peers'; agencyTab = 'challenge'; render(); scrollTo(0, 0); });
+    if (state?.screen === 'peers' && agencyTab === 'challenge')
+        bindChallenges(String(signedInUser?.id ?? 'preview') + ':' + data.province.id, signedInUser?.csrfToken ?? '', render);
+    document.querySelector('[data-watch-similar]')?.addEventListener('change', event => { watchSimilar = event.target.checked; render(); });
+    document.querySelector('[data-watch-search]')?.addEventListener('input', event => { const input = event.target, pos = input.selectionStart; watchQuery = input.value; render(); const next = document.querySelector('[data-watch-search]'); next?.focus(); if (next && pos != null)
+        next.setSelectionRange(pos, pos); });
+    document.querySelectorAll('[data-watch-unit]').forEach(el => el.addEventListener('change', () => {
+        const { key, ids, ownId } = watchContext(), id = el.dataset.watchUnit;
+        const allowed = agencyRestricted() ? agencyComparisonUnits(snapshot()) : data.units;
+        const ownLevel = data.units.find(u => u.departmentId === ownId)?.departmentLevel;
+        if (id === ownId || !allowed.some(u => u.departmentId === id && u.departmentLevel === ownLevel) || watchSimilar && similarReceived(snapshot(), ownId, id) !== true) {
+            render();
+            return;
+        }
+        if (el.checked && !ids.includes(id) && ids.length < WATCH_LIMIT)
+            ids.push(id);
+        else if (!el.checked) {
+            const index = ids.indexOf(id);
+            if (index >= 0)
+                ids.splice(index, 1);
+        }
+        watchMessages.set(key, 'Danh sách đã thay đổi. Bấm Lưu danh sách để giữ lựa chọn.');
+        render();
+    }));
+    document.querySelectorAll('[data-watch-remove]').forEach(el => el.addEventListener('click', () => { const { key, ids } = watchContext(); watchDrafts.set(key, ids.filter(id => id !== el.dataset.watchRemove)); watchMessages.set(key, 'Danh sách đã thay đổi. Bấm Lưu danh sách để giữ lựa chọn.'); render(); }));
+    document.querySelector('[data-watch-save]')?.addEventListener('click', async () => {
+        const { key, ids } = watchContext();
+        if (watchSaves.has(key))
+            return;
+        if (!signedInUser) {
+            watchMessages.set(key, 'Bản xem thử chưa đăng nhập; danh sách chỉ giữ trong phiên thử nghiệm này.');
+            render();
+            return;
+        }
+        watchSaves.add(key);
+        const draft = [...ids], province = data.province.id;
+        const button = document.querySelector('[data-watch-save]');
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Đang lưu…';
+        }
+        try {
+            await saveWatch(province, draft, signedInUser.csrfToken);
+            watchMessages.set(key, JSON.stringify(watchDrafts.get(key)) === JSON.stringify(draft) ? 'Đã lưu danh sách theo tài khoản.' : 'Đã lưu danh sách trước đó; có lựa chọn mới chưa lưu.');
+        }
+        catch (e) {
+            watchMessages.set(key, e.message);
+        }
+        finally {
+            watchSaves.delete(key);
+            if (watchContext().key === key)
+                render();
+        }
+    });
+    document.querySelectorAll('[data-watch-sort]').forEach(el => el.addEventListener('click', () => {
+        const dimension = el.dataset.watchSort;
+        if (dimension !== 'total' && !data.groupOrder.includes(dimension))
+            return;
+        watchSortDirection = watchSortDimension === dimension && watchSortDirection === 'desc' ? 'asc' : 'desc';
+        watchSortDimension = dimension;
+        render();
+    }));
     document.querySelectorAll("[data-peer-unit]").forEach(el => el.addEventListener("click", () => {
         const id = el.dataset.peerUnit;
         if (!id || !canSelectUnit(id))
@@ -1310,7 +1597,7 @@ function bind() {
     document.querySelector("#period-value")?.addEventListener("change", e => { void selectPeriod(e.target.value); });
     document.querySelector("#report-year")?.addEventListener("change", e => { const year = Number(e.target.value); const matches = data.periods.filter(item => item.type === period().type && item.year === year); const match = latestPeriod(matches); if (match)
         void selectPeriod(match.id); });
-    document.querySelector("#scope-select")?.addEventListener("change", e => { completionMessage = ""; state.scope = e.target.value; state.selectedGroup = null; state.selectedMetric = null; if (state.scope === "formality") {
+    document.querySelector("#scope-select")?.addEventListener("change", e => { historicalSnapshotId = ''; completionMessage = ""; state.scope = e.target.value; state.selectedGroup = null; state.selectedMetric = null; if (state.scope === "formality") {
         data.formality = { id: "", code: "", name: "" };
         catalogPreview.selectedId = null;
         state.demo = "ready";
@@ -1400,6 +1687,7 @@ function mergeUnits(snapshot) {
     }
 }
 async function selectPeriod(periodId) {
+    historicalSnapshotId = '';
     completionMessage = "";
     creditQuote = null;
     confirmationToken = "";
@@ -1614,7 +1902,7 @@ async function loadSelection() {
     const requestId = ++selectionRequest;
     const selected = period();
     const key = snapshotKey(selected.id, state.scope, data.formality.id);
-    if (data.snapshots[key] && data.snapshots[key].detailsLoaded !== false) {
+    if (!historicalSnapshotId && data.snapshots[key] && data.snapshots[key].detailsLoaded !== false) {
         state.demo = "normal";
         render();
         return;
@@ -1626,6 +1914,8 @@ async function loadSelection() {
         params.set("period_value", String(selected.value));
     if (state.scope === "formality" && data.formality.id)
         params.set("formality_id", data.formality.id);
+    if (state.scope === "formality" && historicalSnapshotId)
+        params.set('snapshot_id', historicalSnapshotId);
     try {
         const response = await fetch(`/api/v1/dashboard/selection?${params.toString()}`);
         if (response.status === 404) {
@@ -1692,6 +1982,7 @@ async function openProvince(rootDepartmentId, requestId) {
 async function switchProvince(rootDepartmentId) {
     if (rootDepartmentId === data.province.id)
         return;
+    historicalSnapshotId = '';
     creditQuote = null;
     confirmationToken = "";
     state.modal = "none";

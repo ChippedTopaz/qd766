@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {registrationBirthDate,registrationFieldError} from '../dist/trial-registration.js';
+import {registrationBirthDate,registrationFieldError,registrationBirthMask,bindRegistrationBirthMask} from '../dist/trial-registration.js';
 const today=new Date(2026,9,9);
 assert.equal(registrationBirthDate('17/05/1990',today),'1990-05-17');
 assert.equal(registrationBirthDate('29/02/2024',today),'2024-02-29');
@@ -17,3 +17,25 @@ assert.equal(registrationFieldError('declarationAccepted',false),'Vui lòng tíc
 assert.equal(registrationFieldError('workplace',''),'');
 assert.equal(registrationFieldError('fullName','Nguyễn Văn A'),'');
 console.log('REGISTRATION_VIETNAMESE_VALIDATION_OK');
+let typed='';
+for(const digit of '17051990')typed=registrationBirthMask(typed+digit).value;
+assert.equal(typed,'17/05/1990');
+assert.equal(registrationBirthMask('17051990').value,'17/05/1990');
+assert.equal(registrationBirthMask('17/05/1990').value,'17/05/1990');
+assert.equal(registrationBirthMask('').value,'');
+assert.equal(registrationBirthMask('17051990123').value,'17/05/1990');
+assert.deepEqual(registrationBirthMask('17'),{value:'17/',caret:3});
+assert.deepEqual(registrationBirthMask('17',2,true),{value:'17',caret:2});
+assert.deepEqual(registrationBirthMask('17/05',5,true),{value:'17/05',caret:5});
+assert.deepEqual(registrationBirthMask('17/06/1990',5),{value:'17/06/1990',caret:6});
+assert.equal(registrationBirthMask('17/05/1990',0).caret,0);
+const handlers={};const field={value:'17051990',selectionStart:8,
+  addEventListener(type,handler){handlers[type]=handler;},setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end;}};
+bindRegistrationBirthMask(field);handlers.input({inputType:'insertFromPaste'});
+assert.equal(field.value,'17/05/1990');assert.equal(field.selectionStart,10);
+field.value='17';field.selectionStart=2;handlers.input({inputType:'deleteContentBackward'});
+assert.equal(field.value,'17');assert.equal(field.selectionStart,2);
+handlers.input({isComposing:true});assert.equal(field.value,'17');
+assert.equal(registrationBirthDate(typed,today),'1990-05-17');
+assert.throws(()=>registrationBirthDate(registrationBirthMask('31021990').value,today));
+console.log('REGISTRATION_BIRTH_MASK_OK: numeric typing/paste, automatic separators, deletion, caret, calendar-format and strict dates');

@@ -116,13 +116,20 @@ def create_paid_data_request(
         period_value=period_value,
     )
     dataset_key = request_idempotency_key(request_value)
+    from .formality_freshness import daily_cutoff, fresh_entitlement
+    cutoff = daily_cutoff(period_type, year, period_value, now=utc_now())
+    job_key = dataset_key + (":day:" + cutoff.isoformat() if cutoff else "")
     entitlement = session.scalar(
-        select(PaidDataRequest)
+        fresh_entitlement(select(PaidDataRequest)
         .where(
             PaidDataRequest.account_id == account.id,
-            PaidDataRequest.dataset_key == dataset_key,
+            PaidDataRequest.root_department_id == root_department_id,
+            PaidDataRequest.formality_id == formality_id,
+            PaidDataRequest.period_type == period_type,
+            PaidDataRequest.year == year,
+            PaidDataRequest.period_value == period_value,
             PaidDataRequest.state.in_(("reserved", "waiting", "ready")),
-        )
+        ),cutoff,request_model=PaidDataRequest,snapshot_model=Snapshot)
         .order_by(PaidDataRequest.created_at.desc())
         .limit(1)
     )
@@ -165,7 +172,7 @@ def create_paid_data_request(
     paid_request = PaidDataRequest(
         account_id=account.id,
         idempotency_key=idempotency_key,
-        dataset_key=dataset_key,
+        dataset_key=job_key,
         state="reserved",
         credit_cost=credit_cost,
         province_code=province_code,
@@ -201,14 +208,14 @@ def create_paid_data_request(
         _settle_request(session, paid_request, account, snapshot)
         return paid_request, True
 
-    job, _ = enqueue_job(session, request_value, priority=50)
+    job, _ = enqueue_job(session, request_value, priority=50,idempotency_key=job_key)
     # A fresh confirmed request may retry a terminal failure. Preserve the old
     # job and refunded requests; use a deterministic successor key so concurrent
     # accounts join the same new attempt via enqueue_job's unique-key savepoint.
     while job.state in {"failed", "halted"}:
         job, _ = enqueue_job(
             session, request_value, priority=50,
-            idempotency_key=f"{dataset_key}:retry:{job.id}",
+            idempotency_key=f"{job_key}:retry:{job.id}",
         )
     paid_request.collection_job_id = job.id
     if job.state in {"queued", "running"}:
@@ -377,6 +384,9 @@ def _matching_snapshot(
         if period_value is None
         else statement.where(Snapshot.period_value == period_value)
     )
+    from .formality_freshness import daily_cutoff
+    cutoff=daily_cutoff(period_type,year,period_value,now=utc_now())
+    if cutoff is not None:statement=statement.where(Snapshot.created_at>=cutoff)
     return session.scalar(statement.order_by(Snapshot.created_at.desc()).limit(1))
 
 

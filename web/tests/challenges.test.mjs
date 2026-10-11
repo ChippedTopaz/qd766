@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {periodChoices,duelRows,incomingMarkup} from '../dist/challenges.js';
+assert.deepEqual(periodChoices('month',2026,{year:2026,month:10}),[10,11,12]);
+assert.deepEqual(periodChoices('quarter',2026,{year:2026,month:10}),[4]);
+assert.deepEqual(periodChoices('year',2026,{year:2026,month:10}),[0]);
+assert.deepEqual(periodChoices('month',2027,{year:2026,month:10}),[1,2,3,4,5,6,7,8,9,10,11,12]);
+assert.deepEqual(periodChoices('month',2025,{year:2026,month:10}),[]);
+const row={id:'test',senderId:'a',recipientId:'b',sender:'<script>',recipient:'Người B',senderUnit:'Xã A',recipientUnit:'Xã B',periodType:'month',year:2026,periodValue:11,state:'pending',senderScore:null,recipientScore:null,winnerId:null,canAnswer:true};
+assert.match(duelRows([row],true),/Chấp nhận/);
+assert.match(incomingMarkup([row]),/1 lời thách đấu mới/);
+assert.match(incomingMarkup([row]),/data-incoming-action="accept"/);
+assert.doesNotMatch(incomingMarkup([row]),/<script>/);
+assert.equal(incomingMarkup([],0),'');
+assert.doesNotMatch(duelRows([row],true),/<script>/);
+assert.doesNotMatch(duelRows([row],false),/data-duel-answer/);
+assert.match(duelRows([{...row,state:'finished',senderScore:0,recipientScore:0,canAnswer:false}]),/0.00 \/ 0.00/);
+assert.match(duelRows([{...row,state:'finished',senderScore:1,recipientScore:0,winnerId:'a',canAnswer:false}]),/&lt;script&gt; thắng/);
+console.log('CHALLENGES_UI_OK: current/future periods, escaping, explicit acceptance, missing vs zero, winner and draw');

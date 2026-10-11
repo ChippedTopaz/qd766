@@ -280,6 +280,44 @@ class UserAccount(Base):
     )
 
 
+class AgencyWatchPreference(Base):
+    __tablename__ = 'agency_watch_preferences'
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('user_accounts.id', ondelete='RESTRICT'), primary_key=True)
+    root_department_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('departments.id', ondelete='RESTRICT'), primary_key=True)
+    unit_ids: Mapped[list[str]] = mapped_column(JsonDocument, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AgencyChallenge(Base):
+    __tablename__ = 'agency_challenges'
+    __table_args__ = (
+        UniqueConstraint('pair_key', 'period_type', 'year', 'period_key', name='uq_challenge_pair_period'),
+        CheckConstraint("state IN ('pending','accepted','declined','finished')", name='ck_challenge_state'),
+        CheckConstraint("period_type IN ('month','quarter','year')", name='ck_challenge_period'),
+        CheckConstraint('sender_id != recipient_id', name='ck_challenge_distinct_accounts'),
+        Index('ix_challenge_incoming','recipient_id','state','year'),
+        Index('ix_challenge_board','root_department_id','state','created_at'),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    sender_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('user_accounts.id', ondelete='RESTRICT'), index=True)
+    recipient_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('user_accounts.id', ondelete='RESTRICT'), index=True)
+    root_department_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('departments.id', ondelete='RESTRICT'))
+    sender_unit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('departments.id', ondelete='RESTRICT'))
+    recipient_unit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('departments.id', ondelete='RESTRICT'))
+    pair_key: Mapped[str] = mapped_column(String(80))
+    period_type: Mapped[str] = mapped_column(String(16))
+    year: Mapped[int] = mapped_column(Integer)
+    period_key: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(16), default='pending')
+    sender_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    recipient_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    result_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('snapshots.id', ondelete='RESTRICT'))
+    result_collection_job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('collection_jobs.id', ondelete='RESTRICT'))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class TriviaQuestion(Base):
     __tablename__ = 'trivia_questions'
     __table_args__ = (CheckConstraint("state IN ('draft','published','retired')", name='ck_trivia_state'),)

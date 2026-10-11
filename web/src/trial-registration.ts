@@ -4,6 +4,28 @@ declare const TomSelect: typeof TomSelectControl;
 type Status={state:'draft'|'pending'|'approved'|'rejected';name:string;email:string;csrfToken:string;publicRegistration?:boolean};
 type Directory={provinces:Array<{id:string;name:string}>;units:Array<{id:string;name:string}>};
 
+/** Numeric keyboard input, preserving the cursor when editing within the date. */
+export function registrationBirthMask(raw:string,position=raw.length,deleting=false):{value:string;caret:number}{
+  const digits=raw.replace(/\D/g,'').slice(0,8);
+  const before=Math.min(raw.slice(0,position).replace(/\D/g,'').length,digits.length);
+  let value=digits.slice(0,2);
+  if(digits.length>2||(digits.length===2&&!deleting))value+='/'+digits.slice(2,4);
+  if(digits.length>4||(digits.length===4&&!deleting))value+='/'+digits.slice(4);
+  let caret=0,count=0;
+  while(caret<value.length&&count<before){if(/\d/.test(value[caret]!))count++;caret++;}
+  if(!deleting&&value[caret]==='/')caret++;
+  return {value,caret};
+}
+
+export function bindRegistrationBirthMask(input:HTMLInputElement):void{
+  input.addEventListener('input',event=>{
+    const entry=event as InputEvent;if(entry.isComposing)return;
+    const result=registrationBirthMask(input.value,input.selectionStart??input.value.length,
+      (entry.inputType??'').startsWith('delete'));
+    input.value=result.value;input.setSelectionRange(result.caret,result.caret);
+  });
+}
+
 export function registrationBirthDate(value:string,today=new Date()):string{
   const match=/^([0-9]{2})\/([0-9]{2})\/([0-9]{4})$/.exec(value.trim());
   if(!match)throw new Error('Ngày sinh phải có định dạng dd/mm/yyyy.');
@@ -55,6 +77,7 @@ export async function mountTrialRegistration(root:HTMLElement,local:boolean):Pro
       const fields=document.createElement('div');fields.className='registration-fields';
       fields.innerHTML='<label>Họ và tên<input name="fullName" autocomplete="name" minlength="2" maxlength="160" required></label><div class="registration-row"><label>Ngày sinh<span class="registration-calendar"><input name="birthDate" type="text" inputmode="numeric" autocomplete="bday" placeholder="dd/mm/yyyy" pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}" maxlength="10" required><button type="button" data-calendar aria-label="Mở lịch chọn ngày sinh" title="Chọn ngày sinh">▦</button><input type="date" data-date-picker aria-label="Lịch chọn ngày sinh" tabindex="-1"></span></label><label>Giới tính<select name="gender" required><option value="">Chọn giới tính</option><option value="male">Nam</option><option value="female">Nữ</option></select></label></div><label>Đơn vị công tác<input name="workplace" maxlength="240" minlength="2" autocomplete="organization"></label>';
       const birth=fields.querySelector<HTMLInputElement>('[name=birthDate]')!;
+      bindRegistrationBirthMask(birth);
       const picker=fields.querySelector<HTMLInputElement>('[data-date-picker]')!;
       const today=new Date();picker.max=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
       picker.addEventListener('change',()=>{if(picker.value){const [year,month,day]=picker.value.split('-');birth.value=`${day}/${month}/${year}`;birth.dispatchEvent(new Event('input',{bubbles:true}));}});
@@ -83,7 +106,7 @@ export async function mountTrialRegistration(root:HTMLElement,local:boolean):Pro
     const message=form.querySelector<HTMLElement>('[data-message]')!;
     const tier=form.querySelector<HTMLSelectElement>('[name=accessTier]');
     for(const item of directory.provinces){const option=new Option(item.name,item.id);province.add(option);}
-    const units=new TomSelect(unit,{placeholder:'Tìm cơ quan, đơn vị…',maxItems:1,create:false});
+    const units=new TomSelect(unit,{placeholder:'Tìm cơ quan, đơn vị…',maxItems:1,maxOptions:null,create:false});
     let loading=0;
     const loadUnits=async()=>{
       const version=++loading;submit.disabled=true;units.disable();units.clear();units.clearOptions();message.textContent='';

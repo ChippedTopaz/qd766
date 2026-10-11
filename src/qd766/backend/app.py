@@ -102,6 +102,10 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
     app.include_router(admin_router)
     from .trivia import router as trivia_router
     app.include_router(trivia_router)
+    from .challenges import router as challenges_router
+    app.include_router(challenges_router)
+    from .agency_watch import router as agency_watch_router
+    app.include_router(agency_watch_router)
     from .analysis_configuration import router as analysis_configuration_router
     app.include_router(analysis_configuration_router)
     from .formula_configuration import router as formula_configuration_router

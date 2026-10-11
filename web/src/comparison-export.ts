@@ -81,7 +81,10 @@ export function bindComparisonExports(context:ComparisonContext,WorkbookClass:()
     const button=document.createElement('button');button.className='btn small comparison-export';button.textContent='Tải Excel';
     button.setAttribute('data-comparison-export','');
     button.addEventListener('click',()=>void download(button,read()));
-    if(host.matches('.comparison-card'))host.querySelector('h3')?.after(button);else host.append(button);
+    if(host.matches('.comparison-card')){
+      const title=host.querySelector('h3');
+      if(title){const heading=document.createElement('div');heading.className='peer-comparison-heading';title.before(heading);heading.append(title,button);}
+    }else host.append(button);
   };
   // Export rendered rows only: respects filtering and the caller's access scope.
   document.querySelectorAll<HTMLTableElement>('.content table').forEach(table=>{
