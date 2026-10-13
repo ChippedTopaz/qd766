@@ -14,6 +14,7 @@ PUBLIC_READ_PATHS = frozenset({
     "/api/v1/presence", "/api/v1/formula-reference",
     "/api/v1/dashboard", "/api/v1/dashboard/selection", "/api/v1/dashboard/group-export",
     "/api/v1/dashboard/provinces", "/api/v1/dashboard/province-rankings", "/api/v1/dashboard/daily-history",
+    "/api/v1/dashboard/daily-indicator-comparison",
     "/api/v1/national-summaries", "/api/v1/national-summaries/latest",
 })
 

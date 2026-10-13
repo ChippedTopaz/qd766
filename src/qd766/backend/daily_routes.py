@@ -1,5 +1,6 @@
 """Daily score history only, independent of paid TTHC collection."""
 import uuid
+from datetime import date
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import inspect
@@ -9,6 +10,31 @@ from .database import get_session
 from .daily_history import history_payload
 from .models import Department
 router=APIRouter(prefix='/api/v1/dashboard')
+
+@router.get('/daily-indicator-comparison')
+def daily_indicator_comparison(request:Request,root_department_id:uuid.UUID,unit_id:uuid.UUID,
+        group:str,period_type:Literal['month','quarter','year'],year:int=Query(ge=2026,le=2100),
+        period_value:int|None=Query(default=None,ge=1,le=12),scope:Literal['all']='all',
+        current_date:date|None=None,baseline_date:date|None=None,db:Session=Depends(get_session)):
+    root=getattr(request.state,'authorized_root_id',None)
+    unit=getattr(request.state,'authorized_unit_id',None)
+    if root is not None and root!=root_department_id:
+        raise HTTPException(403,'Tỉnh không thuộc phạm vi được phép xem.')
+    if unit is not None and unit!=unit_id:
+        raise HTTPException(403,'Cơ quan không thuộc phạm vi được phép xem.')
+    try:
+        period=PeriodSelection(period_type,year,period_value);period.validate_collectable()
+    except ValueError:
+        raise HTTPException(422,'Kỳ báo cáo không hợp lệ.')
+    from .daily_indicators import comparison_payload
+    # Authorization precedes cache lookup; the key includes the unit, never just province/day.
+    from .daily_indicators import authorize_unit
+    department=authorize_unit(db,root_department_id,unit_id)
+    key='daily-indicators:'+':'.join(map(str,(root_department_id,unit_id,period_type,year,
+        period_value,group,current_date,baseline_date)))
+    payload,_=request.app.state.daily_indicator_cache.get_or_load(key,lambda:comparison_payload(
+        db,root_department_id,unit_id,period,group,current_date,baseline_date,department=department))
+    return payload
 
 @router.get('/daily-history')
 def daily_history(request:Request,root_department_id:uuid.UUID,unit_id:uuid.UUID,

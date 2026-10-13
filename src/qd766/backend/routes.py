@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -1118,8 +1119,11 @@ def dashboard_selection(
     formality_id: uuid.UUID | None = None,
     root_department_id: uuid.UUID | None = None,
     snapshot_id: uuid.UUID | None = None,
+    report_date: date | None = None,
 ) -> dict:
     root_department_id = getattr(request.state, "authorized_root_id", None) or root_department_id
+    if report_date is not None and (scope!='all' or snapshot_id is not None or formality_id is not None):
+        raise HTTPException(422,'Ngày dữ liệu chỉ áp dụng cho dữ liệu tổng hợp tất cả TTHC.')
     if snapshot_id is not None:
         if scope!='formality':raise HTTPException(422,'Phiên dữ liệu chỉ áp dụng cho tra cứu TTHC.')
         from .user_collection import account_for,own_requests
@@ -1138,6 +1142,7 @@ def dashboard_selection(
             scope,
             str(formality_id or "all"),
             str(snapshot_id or "latest"),
+            str(report_date or "latest"),
         ]
     )
 
@@ -1150,6 +1155,10 @@ def dashboard_selection(
                 .order_by(Snapshot.created_at.desc())
                 .limit(1)
             )
+        daily_record = None
+        if report_date is not None:
+            from .daily_selection import saved_daily_record
+            daily_record = saved_daily_record(session,resolved_root_id,PeriodSelection(period_type,year,period_value),report_date)
         statement = (
             select(Snapshot)
             .options(
@@ -1180,13 +1189,14 @@ def dashboard_selection(
             else statement.where(Snapshot.formality_id == formality_id)
         )
         if snapshot_id is not None:statement=statement.where(Snapshot.id==snapshot_id)
+        if daily_record is not None:statement=statement.where(Snapshot.id==daily_record.snapshot_id)
         selected = session.scalar(statement.limit(1))
-        national_summary = latest_national_summary(
+        national_summary = daily_record.national_summary if daily_record is not None else latest_national_summary(
             session,
             PeriodSelection(period_type, year, period_value),
         )
         if selected is None:
-            if scope == "all" and formality_id is None and national_summary is not None:
+            if daily_record is None and scope == "all" and formality_id is None and national_summary is not None:
                 item = summary_only_snapshot(national_summary, str(resolved_root_id))
                 if item is not None:
                     return {"metadata": item["delivery"], "snapshot": item}
@@ -1194,6 +1204,10 @@ def dashboard_selection(
         item = snapshot_payload(selected, national_summary)
         from .payment_reference import attach_payment_reference
         attach_payment_reference(session, selected, item)
+        if daily_record is not None:
+            from .daily_selection import daily_benchmarks
+            item['delivery']['reportDate']=report_date.isoformat()
+            return {"metadata":item['delivery'],"snapshot":item,"benchmarks":daily_benchmarks(national_summary)}
         return {"metadata": item["delivery"], "snapshot": item}
 
     payload, cache_result = request.app.state.dashboard_cache.get_or_load(
@@ -1215,6 +1229,7 @@ def dashboard_group_export(
     root_department_id: uuid.UUID | None = None,
     group: str = "all", unit_department_id: uuid.UUID | None = None,
     snapshot_id: uuid.UUID | None = None,
+    report_date: date | None = None,
 ) -> dict:
     from .group_export import group_export_payload
     authorized_unit = getattr(request.state, "authorized_unit_id", None)
@@ -1227,7 +1242,7 @@ def dashboard_group_export(
     if (scope == "formality") != (formality_id is not None):
         raise HTTPException(422, "Phạm vi thủ tục không hợp lệ.")
     payload = dashboard_selection(request, response, session, period_type, year, scope,
-                                  period_value, formality_id, root_department_id,snapshot_id)
+                                  period_value, formality_id, root_department_id,snapshot_id,report_date)
     response.headers["Cache-Control"] = "no-store"
     return group_export_payload(payload["snapshot"], unit_id=authorized_unit, selected_group=group)
 

@@ -28,10 +28,14 @@ class _Entry(Generic[V]):
 class SingleFlightTTLCache(Generic[K, V]):
     """Small process-local TTL cache with one loader per key at a time."""
 
-    def __init__(self, ttl_seconds: float, *, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, ttl_seconds: float, *, clock: Callable[[], float] = time.monotonic,
+                 max_entries: int | None = None):
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
+        if max_entries is not None and (type(max_entries) is not int or max_entries <= 0):
+            raise ValueError("max_entries must be a positive integer")
         self.ttl_seconds = ttl_seconds
+        self.max_entries = max_entries
         self._clock = clock
         self._condition = threading.Condition()
         self._entries: dict[K, _Entry[V]] = {}
@@ -45,6 +49,11 @@ class SingleFlightTTLCache(Generic[K, V]):
         with self._condition:
             while True:
                 now = self._clock()
+                if self.max_entries is not None:
+                    # Opt-in bounded caches prune on reads; existing caches keep
+                    # their original behavior when no capacity is configured.
+                    for expired in [k for k, v in self._entries.items() if v.expires_at <= now]:
+                        self._entries.pop(expired, None)
                 entry = self._entries.get(key)
                 if entry is not None and entry.expires_at > now:
                     self._hits += 1
@@ -69,6 +78,10 @@ class SingleFlightTTLCache(Generic[K, V]):
             raise
 
         with self._condition:
+            if self.max_entries is not None and key not in self._entries:
+                while len(self._entries) >= self.max_entries:
+                    oldest = min(self._entries, key=lambda k: self._entries[k].expires_at)
+                    self._entries.pop(oldest, None)
             self._entries[key] = _Entry(value, self._clock() + self.ttl_seconds)
             self._in_flight.discard(key)
             self._condition.notify_all()

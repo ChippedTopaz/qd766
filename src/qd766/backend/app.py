@@ -80,6 +80,10 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
     app.state.dashboard_cache = SingleFlightTTLCache[str, dict](
         resolved.dashboard_cache_ttl_seconds
     )
+    # Large per-day ranges have their own bounded cache, never evict dashboard data.
+    app.state.daily_indicator_cache = SingleFlightTTLCache[str, dict](
+        resolved.dashboard_cache_ttl_seconds, max_entries=64
+    )
     app.state.province_catalog_client = AmSieuTocCatalogClient(
         resolved.province_catalog_index_url,
         resolved.province_catalog_version_url,

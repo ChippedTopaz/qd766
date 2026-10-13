@@ -11,6 +11,8 @@ import { referenceNotice, renderFormulaReference } from "./formula-reference.js"
 import { loadFormulaConfiguration } from './formula-loader.js';
 import { openScoreSimulator } from './score-simulator.js';
 import { renderPeerList, centerPeerLists } from './peer-list.js';
+import { scoreDetailAllowed, renderScoreDetailLink } from './score-drilldown.js';
+import { DailyIndicatorPanel, supportsDailyIndicators } from './daily-indicator-comparison.js';
 import { renderPaidAnalysis, bindPaidAnalysis, clearPaidAnalysis, stopPaidAnalysisPolling } from './paid-analysis.js';
 import { latestPeriod } from './period-choice.js';
 import { CollectionTracker } from "./collection-tracker.js";
@@ -61,6 +63,11 @@ const canSelectUnit = (id) => (!agencyRestricted() || id === signedInUser?.unitI
 let data;
 let state;
 let overviewTab = "overview";
+let indicatorDetailTab = 'current';
+const dailyIndicatorPanel = new DailyIndicatorPanel(() => render());
+const indicatorContext = () => ({ accountId: signedInUser?.id ?? 'preview', provinceId: data.province.id, unitId: state.unitId,
+    unitName: unit().name, group: state.selectedGroup, period: period() });
+const indicatorActive = () => state?.scope === 'all' && state.screen === 'overview' && state.demo === 'normal' && overviewTab === 'details' && state.selectedGroup !== null && indicatorDetailTab === 'daily' && supportsDailyIndicators(state.selectedGroup, unit().groups.find(g => g.id === state.selectedGroup)?.entity ?? null, data.province.id);
 let agencyLevel = null;
 let agencyTab = 'default';
 let watchSimilar = false, watchQuery = '', watchPickerOpen = false, watchOutsideBound = false;
@@ -74,6 +81,9 @@ const customTimeChoices = new Map();
 const customPeriodLoads = new Map();
 let selectedFormulaGroup = "transparency";
 let selectionRequest = 0;
+const scoreDetailTargets = new Map();
+let scoreDetailError = '';
+let scoreRenderAccess = null;
 let pendingMessage = "";
 let completionMessage = "";
 let pendingProvinceId = "";
@@ -101,6 +111,99 @@ function initializeCatalogLevel() {
 let catalogPreviewRequest = 0;
 let catalogSearchTimer = 0;
 let historicalSnapshotId = typeof location === 'undefined' ? '' : new URLSearchParams(location.search).get('snapshot') ?? '';
+let historicalReportDate = typeof location === 'undefined' ? '' : new URLSearchParams(location.search).get('report_date') ?? '';
+let dailyDetailOriginal = null;
+function clearDailyDetail() {
+    indicatorDetailTab = 'current';
+    dailyIndicatorPanel.pause();
+    if (historicalReportDate || dailyDetailOriginal)
+        ++selectionRequest;
+    if (dailyDetailOriginal) {
+        const saved = dailyDetailOriginal;
+        if (saved.snapshot)
+            saved.data.snapshots[saved.key] = saved.snapshot;
+        else
+            delete saved.data.snapshots[saved.key];
+        dailyDetailOriginal = null;
+    }
+    historicalReportDate = '';
+    scoreDetailError = '';
+}
+function scoreAccess() {
+    return { provinceId: data.province.id, unitIds: data.units.map(u => u.departmentId), groupIds: data.groupOrder,
+        role: signedInUser?.role, accessTier: signedInUser?.accessTier, assignedUnitId: signedInUser?.unitId,
+        availableProvinceIds: provinceOptions.filter(p => p.available).map(p => p.id) };
+}
+function detailScore(value, target, name) {
+    const allowed = scoreDetailAllowed(target, scoreRenderAccess ?? scoreAccess()) && data.periods.some(p => p.id === target.periodId);
+    const key = allowed && value != null && Number.isFinite(value) ? 'score-' + scoreDetailTargets.size : null;
+    if (key)
+        scoreDetailTargets.set(key, target);
+    return renderScoreDetailLink(value, key, `Xem ${target.group ? data.groupLabels[target.group] : 'điểm tổng hợp'} · ${name} · ${target.reportDate ? displayVersionDay(target.reportDate) : data.periods.find(p => p.id === target.periodId)?.label ?? target.periodId}`);
+}
+function timeScore(value, periodId, group = null, reportDate = '') {
+    return detailScore(value, { provinceId: data.province.id, unitId: state.unitId, periodId, scope: state.scope, formalityId: data.formality.id, group, reportDate }, data.units.find(u => u.departmentId === state.unitId)?.departmentName ?? data.province.name);
+}
+async function openScoreDetail(target) {
+    if (!scoreDetailAllowed(target, scoreAccess()))
+        return;
+    if (target.scope === 'formality' && target.formalityId !== data.formality.id)
+        return;
+    clearDailyDetail();
+    state.modal = 'none';
+    creditQuote = null;
+    confirmationToken = '';
+    completionMessage = '';
+    if (target.provinceId !== data.province.id) {
+        const requestId = ++selectionRequest;
+        pendingProvinceId = target.provinceId;
+        state.demo = 'loading';
+        render();
+        try {
+            await openProvince(target.provinceId, requestId);
+        }
+        catch {
+            if (requestId !== selectionRequest)
+                return;
+            scoreDetailError = 'Chưa mở được dữ liệu tỉnh được chọn.';
+            state.demo = 'error';
+            render();
+            return;
+        }
+        if (requestId !== selectionRequest || data.province.id !== target.provinceId)
+            return;
+    }
+    if (!scoreDetailAllowed(target, scoreAccess()))
+        return;
+    if (!data.periods.some(p => p.id === target.periodId)) {
+        scoreDetailError = 'Chưa có kỳ báo cáo được chọn tại tỉnh này.';
+        state.demo = 'error';
+        render();
+        return;
+    }
+    if (target.periodId !== state.periodId || target.scope !== state.scope)
+        historicalSnapshotId = '';
+    state.periodId = target.periodId;
+    state.scope = target.scope;
+    state.unitId = target.unitId;
+    if (target.scope === 'formality' && target.formalityId !== data.formality.id)
+        return;
+    historicalReportDate = target.reportDate ?? '';
+    state.screen = 'overview';
+    state.selectedGroup = target.group;
+    state.selectedMetric = null;
+    overviewTab = 'details';
+    pendingMessage = '';
+    saveSelectionUrl();
+    const pending = loadSelection(true), requestId = selectionRequest;
+    await pending;
+    if (requestId !== selectionRequest)
+        return;
+    if (!historicalReportDate)
+        void loadProvinceBenchmarks();
+    document.querySelector(target.group ? `.overview-score-strip [data-group-detail="${target.group}"]` : '[data-score-total]')?.focus?.({ preventScroll: true });
+    scrollTo(0, 0);
+}
 let library = [];
 let libraryLoading = false, libraryError = "";
 let libraryRequest = 0;
@@ -187,6 +290,7 @@ async function loadLibrary() {
     }
 }
 async function openAcquisition(tab = "new") {
+    clearDailyDetail();
     state.screen = "procedure";
     state.modal = "none";
     collectionTab = tab;
@@ -249,6 +353,7 @@ async function loadMyRequests(markRead = false) {
     }
 }
 async function openSavedFormality(item, periodId = state.periodId, snapshotId = '') {
+    clearDailyDetail();
     historicalSnapshotId = snapshotId;
     state.periodId = periodId;
     state.scope = "formality";
@@ -272,6 +377,8 @@ function saveSelectionUrl() {
         params.set("formality", data.formality.id);
     if (state.scope === 'formality' && historicalSnapshotId)
         params.set('snapshot', historicalSnapshotId);
+    if (state.scope === 'all' && historicalReportDate)
+        params.set('report_date', historicalReportDate);
     history.replaceState(null, "", `${location.pathname}?${params}`);
 }
 function requestPeriod(item) { return (item.periodType === "month" ? `Tháng ${item.periodValue}/${item.year}` : item.periodType === "quarter" ? `Quý ${item.periodValue}/${item.year}` : `Năm ${item.year}`) + ' · ' + dateTime(item.createdAt); }
@@ -459,7 +566,7 @@ const periodOrder = (item) => item.type === "month" ? item.year * 12 + (item.val
 function previousPeriodFor(periodId = state.periodId) {
     return previousAvailablePeriod(data, periodId, state.scope);
 }
-const benchmarkCacheKey = (periodId) => `${periodId}:${state.scope}:${state.scope === "formality" ? data.formality.id : "all"}`;
+const benchmarkCacheKey = (periodId) => `${periodId}:${state.scope}:${state.scope === "formality" ? data.formality.id : "all"}${historicalReportDate && periodId === state.periodId ? ':day:' + historicalReportDate : ''}`;
 function benchmarkRank(periodId, groupId, rootId = state.unitId) {
     const rows = provinceBenchmarks[benchmarkCacheKey(periodId)] ?? [];
     const current = rows.find(item => item.rootDepartmentId === rootId);
@@ -584,6 +691,8 @@ function initSearchableSelects() {
     }
 }
 function unavailable(kind) {
+    if (scoreDetailError)
+        return `<section class="panel"><div class="empty-state"><h2>Chưa mở được chi tiết điểm</h2><p>${esc(scoreDetailError)}</p><p>Không tự chuyển sang kỳ khác, khai thác mới hoặc sử dụng Credit.</p><button class="btn" data-nav="time">So sánh theo thời gian</button></div></section>`;
     if (kind === "ready")
         return `<section class="panel"><div class="empty-state"><h2>${libraryLoading ? "Đang đọc danh sách thủ tục…" : "Chọn thủ tục đã khai thác"}</h2><p>${esc(libraryError || "Chọn thủ tục trong ô phía trên để xem lại. Chưa có thủ tục phù hợp? Hãy tạo yêu cầu lấy dữ liệu.")}</p><button class="btn primary" data-action="new-collection">Lấy dữ liệu TTHC</button></div></section>`;
     if (kind === "loading")
@@ -599,6 +708,10 @@ function unavailable(kind) {
     return `${title("Chưa đủ dữ liệu lịch sử", "Hệ thống chưa có chuỗi kỳ đồng nhất để so sánh.")}<div class="empty-state"><h2>Cần tối thiểu hai kỳ cùng loại</h2><p>Hiện có Tháng 8/2026, Quý III/2026 và Năm 2026. Ba kỳ này khác độ dài nên không được ghép thành một xu hướng.</p><button class="btn" data-state="normal">Quay lại báo cáo</button></div>`;
 }
 function render() {
+    if (!indicatorActive())
+        dailyIndicatorPanel.pause();
+    scoreDetailTargets.clear();
+    scoreRenderAccess = scoreAccess();
     stopPaidAnalysisPolling();
     if (state.screen === "procedure")
         return shell(acquisitionPage());
@@ -646,7 +759,7 @@ function overview() {
     const rankChange = rankImprovement(previousRank?.rank, currentRank?.rank);
     const points = data.periods.filter(p => p.type === period().type && periodOrder(p) <= periodOrder(period()) && Boolean(data.snapshots[snapshotKey(p.id, state.scope, data.formality.id)]))
         .sort((a, b) => periodOrder(a) - periodOrder(b)).slice(-12).map(p => ({ label: p.label, order: periodOrder(p), view: buildUnitView(data, p.id, state.scope, state.unitId) }));
-    return `<section class="overview-intro" aria-label="Cơ quan và kỳ báo cáo"><header class="bento-heading overview-heading"><h1>${esc(view.name)}</h1><p>${esc(period().label)} <span>·</span> ${state.scope === "all" ? "Tất cả thủ tục hành chính" : esc(data.formality.code + " · " + data.formality.name)}</p></header>
+    return `<section class="overview-intro" aria-label="Cơ quan và kỳ báo cáo"><header class="bento-heading overview-heading"><h1>${esc(view.name)}</h1><p>${esc(period().label)}${historicalReportDate ? ` · Dữ liệu ngày ${esc(displayVersionDay(historicalReportDate))}` : ""} <span>·</span> ${state.scope === "all" ? "Tất cả thủ tục hành chính" : esc(data.formality.code + " · " + data.formality.name)}</p></header>
   ${overviewTabs(overviewTab)}
   ${overviewStatus()}</section>
   <div id="overview-tab-panel" role="tabpanel" aria-labelledby="overview-tab-${overviewTab}">
@@ -816,8 +929,12 @@ function overviewGroupDetail(view) {
     if (!group)
         return groupComparisonSummary(view);
     const entity = group.entity;
+    const dailyAllowed = state.scope === 'all' && supportsDailyIndicators(group.id, entity ?? null, data.province.id);
+    const modes = dailyAllowed ? `<div class="indicator-detail-tabs" role="tablist" aria-label="Chế độ xem chi tiết nhóm chỉ tiêu"><button type="button" role="tab" data-indicator-detail-tab="current" aria-selected="${indicatorDetailTab === 'current'}">Chi tiết hiện tại</button><button type="button" role="tab" data-indicator-detail-tab="daily" aria-selected="${indicatorDetailTab === 'daily'}">Biến động theo ngày</button></div>` : '';
+    if (dailyAllowed && indicatorDetailTab === 'daily')
+        return `<section class="panel group-detail daily-indicator-panel" id="daily-indicator-detail"><div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)} · Tất cả TTHC</p></div></div>${modes}<div class="daily-indicator-content" role="tabpanel" aria-label="Biến động theo ngày">${dailyIndicatorPanel.render(indicatorContext())}</div></section>`;
     if (!entity)
-        return `<section class="panel group-detail"><div class="panel-head"><div><h2>Chi tiết ${esc(group.label)}</h2><p>Chưa có số liệu chi tiết cho lựa chọn hiện tại.</p></div></div></section>`;
+        return `<section class="panel group-detail"><div class="panel-head"><div><h2>Chi tiết ${esc(group.label)}</h2><p>Chưa có số liệu chi tiết cho lựa chọn hiện tại.</p></div></div>${modes}</section>`;
     const onlineChild = group.id === 'provide-online-tree' && state.scope === 'all' && entity.departmentId !== data.province.id;
     const provinceMode = onlineChild && provinceOnlineViewKey === onlineProvinceKey();
     const provinceParameters = group.dataset?.provinceOnlineParameters ?? group.dataset?.root.parameters ?? {};
@@ -838,8 +955,8 @@ function overviewGroupDetail(view) {
         : "Nhóm này chưa có số liệu thành phần để hiển thị.";
     const heading = `<div class="panel-head"><div><p class="eyebrow">Chi tiết nhóm chỉ tiêu</p><h2>${esc(group.label)}</h2><p>${esc(view.name)} · ${esc(period().label)}</p></div><div class="detail-summary">${state.selectedMetric ? `<button class="text-button" data-action="clear-metric-detail">← So sánh cả nhóm</button>` : ""}<strong class="num">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</strong><span>${detailRank ? `Hạng ${detailRank.rank}/${detailRank.total}` : "Chưa xếp hạng"}</span></div></div>`;
     if (progress)
-        return `<section class="panel group-detail" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card progress-detail">${groupTableHeading("Kết quả các chỉ tiêu thành phần")}${referenceNotice(group.id)}${progress}</div>${comparison}</div></section>`;
-    return `<section class="panel group-detail${group.id === 'provide-online-tree' ? ' online-detail-full' : ''}" id="group-detail">${heading}<div class="detail-columns"><div class="detail-metrics-card">${groupTableHeading("Kết quả các chỉ tiêu thành phần", provinceButton)}${referenceNotice(group.id)}${provinceNotice}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="7">${esc(emptyDetailMessage)}</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div>${comparison}</div></section>`;
+        return `<section class="panel group-detail" id="group-detail">${heading}${modes}<div class="detail-columns"><div class="detail-metrics-card progress-detail">${groupTableHeading("Kết quả các chỉ tiêu thành phần")}${referenceNotice(group.id)}${progress}</div>${comparison}</div></section>`;
+    return `<section class="panel group-detail${group.id === 'provide-online-tree' ? ' online-detail-full' : ''}" id="group-detail">${heading}${modes}<div class="detail-columns"><div class="detail-metrics-card">${groupTableHeading("Kết quả các chỉ tiêu thành phần", provinceButton)}${referenceNotice(group.id)}${provinceNotice}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="7">${esc(emptyDetailMessage)}</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></div>${comparison}</div></section>`;
 }
 function miniTicket(item, good) { return `<div class="mini-ticket"><i class="ticket-dot ${good ? "good" : ""}"></i><div><strong>${esc(item.finding)}</strong><p>${esc(item.evidence)} ${esc(item.action)}</p></div></div>`; }
 function dailyContext() {
@@ -939,7 +1056,7 @@ function customTime() {
             return `<label><strong>Ngày ${role === 'baseline' ? 'làm mốc' : 'so sánh'}</strong><select data-time-day="${role}" ${!available.length ? 'disabled' : ''}><option value="" ${!value ? 'selected' : ''} disabled>Chọn ngày</option>${available.map(d => `<option value="${esc(d.reportDate)}" ${d.reportDate === value ? 'selected' : ''}>${esc(displayVersionDay(d.reportDate))}</option>`).join('')}</select></label>`;
         }).join('');
         status = state.scope !== 'all' ? 'Chưa có dữ liệu theo ngày cho phạm vi thủ tục này.' : !daily || daily.loading ? 'Đang tải lịch sử ngày…' : daily.error || (!pair.current || !pair.baseline ? 'Ngày được chọn chưa có dữ liệu.' : '');
-        const row = (day, date) => ({ label: displayVersionDay(date), chronology: Date.parse(date + 'T00:00:00Z'), total: day?.totalScore ?? null, rank: day?.rank != null ? day.rank + '/' + day.cohortSize : '—', groups: Object.fromEntries(data.groupOrder.map(g => [g, day?.groups[g]?.score ?? null])) });
+        const row = (day, date) => ({ periodId: state.periodId, reportDate: date, label: displayVersionDay(date), chronology: Date.parse(date + 'T00:00:00Z'), total: day?.totalScore ?? null, rank: day?.rank != null ? day.rank + '/' + day.cohortSize : '—', groups: Object.fromEntries(data.groupOrder.map(g => [g, day?.groups[g]?.score ?? null])) });
         current = row(pair.current, pair.currentDate);
         baseline = row(pair.baseline, pair.baselineDate);
     }
@@ -958,12 +1075,12 @@ function customTime() {
             const view = buildUnitView(data, id, state.scope, state.unitId), rank = rankFor(view, id, null);
             if (view.groups.every(g => g.score.value == null))
                 status = loading?.loading ? 'Đang tải dữ liệu…' : loading?.error || 'Kỳ được chọn chưa có dữ liệu của cơ quan này.';
-            return { label: selected?.label ?? id, chronology: selected ? periodOrder(selected) : NaN, total: view.totalScore, rank: rank ? rank.rank + '/' + rank.total : '—', groups: Object.fromEntries(view.groups.map(g => [g.id, g.score.value])), provisional: selected?.provisional ?? false };
+            return { periodId: id, label: selected?.label ?? id, chronology: selected ? periodOrder(selected) : NaN, total: view.totalScore, rank: rank ? rank.rank + '/' + rank.total : '—', groups: Object.fromEntries(view.groups.map(g => [g.id, g.score.value])), provisional: selected?.provisional ?? false };
         };
         current = row(choice.current);
         baseline = row(choice.baseline);
     }
-    return `<section class="panel"><div class="panel-head"><div><h2>So sánh tuỳ chỉnh</h2><p>Tăng/giảm = Điểm kỳ mới hơn − Điểm kỳ cũ hơn.${choice.kind === 'day' ? ' Các ngày thuộc ' + esc(period().label) + '.' : ''}</p></div></div><div class="custom-time-toolbar"><label><strong>So sánh theo</strong><select data-time-kind>${Object.entries(names).map(([id, label]) => `<option value="${id}" ${id === choice.kind ? 'selected' : ''} ${id === 'day' && state.scope !== 'all' ? 'disabled' : ''}>${label}</option>`).join('')}</select></label>${controls}</div>${status ? `<p class="collection-feedback" role="status">${esc(status)}</p>` : ''}${customComparisonTable(current, baseline, data.groupOrder, data.groupLabels)}</section>`;
+    return `<section class="panel"><div class="panel-head"><div><h2>So sánh tuỳ chỉnh</h2><p>Tăng/giảm = Điểm kỳ mới hơn − Điểm kỳ cũ hơn.${choice.kind === 'day' ? ' Các ngày thuộc ' + esc(period().label) + '.' : ''}</p></div></div><div class="custom-time-toolbar"><label><strong>So sánh theo</strong><select data-time-kind>${Object.entries(names).map(([id, label]) => `<option value="${id}" ${id === choice.kind ? 'selected' : ''} ${id === 'day' && state.scope !== 'all' ? 'disabled' : ''}>${label}</option>`).join('')}</select></label>${controls}</div>${status ? `<p class="collection-feedback" role="status">${esc(status)}</p>` : ''}${customComparisonTable(current, baseline, data.groupOrder, data.groupLabels, (row, group, value) => timeScore(value, row.periodId ?? state.periodId, group, row.reportDate ?? ''))}</section>`;
 }
 function time() {
     const daily = dailyHistoryCache.get(dailyContext().key);
@@ -977,7 +1094,7 @@ function time() {
         const prior = previous ? buildUnitView(data, previous.id, state.scope, state.unitId) : null;
         const delta = v.totalScore !== null && prior?.totalScore !== null && prior?.totalScore !== undefined ? v.totalScore - prior.totalScore : null;
         const rank = rankFor(v, p.id, null);
-        return `<tr><td>${esc(p.label)}${p.provisional ? ' <span class="badge warn">Tạm thời</span>' : ""}</td><td class="num">${n(v.totalScore)}</td><td class="num">${n(prior?.totalScore)}</td><td class="num ${changeTone(delta)}">${delta === null ? "—" : (delta >= 0 ? "+" : "") + n(delta)}</td><td class="num ${changeTone(rankImprovement(previous ? rankFor(prior, previous.id, null)?.rank : null, rank?.rank))}">${rank ? rank.rank + "/" + rank.total : "—"}</td>${v.groups.map(group => `<td class="num">${n(group.score.value)}</td>`).join("")}</tr>`;
+        return `<tr><td>${esc(p.label)}${p.provisional ? ' <span class="badge warn">Tạm thời</span>' : ""}</td><td class="num">${timeScore(v.totalScore, p.id)}</td><td class="num">${previous ? timeScore(prior?.totalScore, previous.id) : "—"}</td><td class="num ${changeTone(delta)}">${delta === null ? "—" : (delta >= 0 ? "+" : "") + n(delta)}</td><td class="num ${changeTone(rankImprovement(previous ? rankFor(prior, previous.id, null)?.rank : null, rank?.rank))}">${rank ? rank.rank + "/" + rank.total : "—"}</td>${v.groups.map(group => `<td class="num">${timeScore(group.score.value, p.id, group.id)}</td>`).join("")}</tr>`;
     }).join("");
     return `${title("So sánh theo thời gian", "Điểm các kỳ cùng loại và biến động so với kỳ liền trước.", period().provisional ? "Đây là dữ liệu tạm thời do chưa kết thúc kỳ báo cáo." : "")}${dailyComparison}<section class="panel"><div class="panel-head"><div><h2>Chuỗi điểm cùng loại kỳ</h2><p>Thiếu kỳ liền trước thì không tính biến động. Thứ hạng chỉ hiển thị khi đã đọc dữ liệu so sánh của kỳ đó.</p></div></div><div class="table-wrap"><table><thead><tr><th>Kỳ</th><th>Tổng điểm</th><th>Điểm kỳ trước</th><th>Tăng/giảm điểm</th><th>Thứ hạng</th>${data.groupOrder.map(group => `<th>${esc(data.groupLabels[group])}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></section>`;
 }
@@ -1181,11 +1298,13 @@ async function loadOperations() {
 }
 function briefModal() {
     const report = leadershipReport(), loading = benchmarkLoading.has(benchmarkCacheKey(state.periodId));
-    const point = (value) => value === null ? "—" : n(value);
-    return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Báo cáo xếp hạng cho lãnh đạo"><div class="modal ranking-modal"><div class="modal-top no-print"><strong>Báo cáo lãnh đạo · Xếp hạng cùng cấp</strong><div><button class="btn small primary" data-action="leadership-excel" ${report.rows.length ? "" : "disabled"}>Tải Excel</button> <button class="btn small" data-action="print" ${report.rows.length ? "" : "disabled"}>In / PDF</button> <button class="btn small" data-action="close-modal">Đóng</button></div></div><article class="ranking-report"><h1>XẾP HẠNG ĐÁNH GIÁ CHẤT LƯỢNG PHỤC VỤ</h1><p>${esc(report.period)} · ${esc(report.population)} · ${esc(report.scope)}</p><p class="muted">Cập nhật: ${esc(leadershipUpdatedLabel(report))}</p>${report.rows.length ? `<div class="ranking-scroll"><table class="leadership-table"><thead><tr><th>STT</th><th>${esc(report.nameHeader)}</th>${report.groupLabels.map((label, index) => `<th style="background:#${leadershipColors[index]}">${esc(label)}</th><th style="background:#${leadershipColors[index]}">Hạng</th>`).join("")}<th>Tổng điểm</th></tr></thead><tbody>${report.rows.map((row, index) => `<tr class="${row.id === report.selectedId ? "selected-agency" : ""}" ${row.id === report.selectedId ? 'aria-current="true"' : ""}><td>${index + 1}</td><td>${esc(row.name)}</td>${row.scores.map((score, i) => `<td>${point(score)}</td><td class="leadership-rank">${row.ranks[i] ?? "—"}</td>`).join("")}<td class="leadership-total">${point(row.total)}</td></tr>`).join("")}</tbody></table></div>` : `<p role="status">${loading ? "Đang đọc dữ liệu xếp hạng đã lưu…" : "Chưa có dữ liệu xếp hạng cho lựa chọn này. Không gửi yêu cầu lấy dữ liệu mới."}</p>`}<div class="ranking-notes"><p>Cơ quan đang chọn: <strong>${esc(report.selectedName)}</strong>. Dòng màu xanh là cơ quan đang chọn. STT là vị trí dòng theo tổng điểm giảm dần, không phải thứ hạng khi có đồng điểm.</p>${report.notes.map(note => `<p>${esc(note)}</p>`).join("")}</div></article></div></div>`;
+    const point = (value, unitId, group) => detailScore(value, { provinceId: report.nameHeader === 'Tỉnh/Thành phố' ? unitId : data.province.id, unitId, periodId: state.periodId, scope: state.scope, formalityId: data.formality.id, group, reportDate: historicalReportDate }, report.rows.find(row => row.id === unitId)?.name ?? report.selectedName);
+    return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Báo cáo xếp hạng cho lãnh đạo"><div class="modal ranking-modal"><div class="modal-top no-print"><strong>Báo cáo lãnh đạo · Xếp hạng cùng cấp</strong><div><button class="btn small primary" data-action="leadership-excel" ${report.rows.length ? "" : "disabled"}>Tải Excel</button> <button class="btn small" data-action="print" ${report.rows.length ? "" : "disabled"}>In / PDF</button> <button class="btn small" data-action="close-modal">Đóng</button></div></div><article class="ranking-report"><h1>XẾP HẠNG ĐÁNH GIÁ CHẤT LƯỢNG PHỤC VỤ</h1><p>${esc(report.period)} · ${esc(report.population)} · ${esc(report.scope)}</p><p class="muted">Cập nhật: ${esc(leadershipUpdatedLabel(report))}</p>${report.rows.length ? `<div class="ranking-scroll"><table class="leadership-table"><thead><tr><th>STT</th><th>${esc(report.nameHeader)}</th>${report.groupLabels.map((label, index) => `<th style="background:#${leadershipColors[index]}">${esc(label)}</th><th style="background:#${leadershipColors[index]}">Hạng</th>`).join("")}<th>Tổng điểm</th></tr></thead><tbody>${report.rows.map((row, index) => `<tr class="${row.id === report.selectedId ? "selected-agency" : ""}" ${row.id === report.selectedId ? 'aria-current="true"' : ""}><td>${index + 1}</td><td>${esc(row.name)}</td>${row.scores.map((score, i) => `<td>${point(score, row.id, data.groupOrder[i] ?? null)}</td><td class="leadership-rank">${row.ranks[i] ?? "—"}</td>`).join("")}<td class="leadership-total">${point(row.total, row.id, null)}</td></tr>`).join("")}</tbody></table></div>` : `<p role="status">${loading ? "Đang đọc dữ liệu xếp hạng đã lưu…" : "Chưa có dữ liệu xếp hạng cho lựa chọn này. Không gửi yêu cầu lấy dữ liệu mới."}</p>`}<div class="ranking-notes"><p>Cơ quan đang chọn: <strong>${esc(report.selectedName)}</strong>. Dòng màu xanh là cơ quan đang chọn. STT là vị trí dòng theo tổng điểm giảm dần, không phải thứ hạng khi có đồng điểm.</p>${report.notes.map(note => `<p>${esc(note)}</p>`).join("")}</div></article></div></div>`;
 }
 const leadershipReport = () => {
     const report = buildLeadershipReport(data, state.periodId, state.scope, state.unitId, provinceBenchmarks[benchmarkCacheKey(state.periodId)] ?? []);
+    if (historicalReportDate)
+        report.period += ' · Dữ liệu ngày ' + displayVersionDay(historicalReportDate);
     if (state.demo !== "normal") {
         report.rows = [];
         report.capturedAt = [];
@@ -1254,6 +1373,23 @@ async function downloadAnalysisExcel(kind) {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function bind() {
+    document.querySelectorAll('[data-indicator-detail-tab]').forEach(el => el.addEventListener('click', () => {
+        if (state.scope !== 'all' || state.selectedGroup === null)
+            return;
+        if (el.dataset.indicatorDetailTab === 'daily' && !supportsDailyIndicators(state.selectedGroup, unit().groups.find(g => g.id === state.selectedGroup)?.entity ?? null, data.province.id))
+            return;
+        indicatorDetailTab = el.dataset.indicatorDetailTab === 'daily' ? 'daily' : 'current';
+        if (indicatorDetailTab === 'daily')
+            dailyIndicatorPanel.open(indicatorContext());
+        render();
+    }));
+    if (indicatorActive())
+        dailyIndicatorPanel.bind(indicatorContext());
+    document.querySelectorAll('[data-score-detail]').forEach(button => {
+        const key = button.dataset.scoreDetail ?? '', target = scoreDetailTargets.get(key);
+        button.addEventListener('click', () => { if (target && scoreDetailTargets.get(key) === target)
+            void openScoreDetail(target); });
+    });
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
         window.requestAnimationFrame(() => centerPeerLists(document));
     else
@@ -1337,10 +1473,12 @@ function bind() {
             query.set('formality_id', data.formality.id);
         if (state.scope === 'formality' && historicalSnapshotId)
             query.set('snapshot_id', historicalSnapshotId);
+        if (state.scope === 'all' && historicalReportDate)
+            query.set('report_date', historicalReportDate);
         openGroupExport({ group, groupLabel: data.groupLabels[group], defaultAll: state.selectedGroup === null, agency: signedInUser?.accessTier === 'agency', query, WorkbookClass: ExcelJS.Workbook,
-            context: { name: signedInUser?.accessTier === 'agency' ? unit().name : data.province.name, period: current.label, scope: state.scope === 'all' ? 'Tất cả thủ tục hành chính' : data.formality.code + ' · ' + data.formality.name, snapshot: snapshot(), ...(group === 'provide-online-tree' && state.scope === 'all' && provinceOnlineViewKey === onlineProvinceKey() ? { provinceOnlineReference: { unitId: state.unitId, provinceName: data.province.name, parameters: unit().groups.find(g => g.id === group)?.dataset?.provinceOnlineParameters ?? unit().groups.find(g => g.id === group)?.dataset?.root.parameters ?? {} } } : {}) } });
+            context: { name: signedInUser?.accessTier === 'agency' ? unit().name : data.province.name, period: current.label + (historicalReportDate ? ' · Dữ liệu ngày ' + displayVersionDay(historicalReportDate) : ''), scope: state.scope === 'all' ? 'Tất cả thủ tục hành chính' : data.formality.code + ' · ' + data.formality.name, snapshot: snapshot(), ...(group === 'provide-online-tree' && state.scope === 'all' && provinceOnlineViewKey === onlineProvinceKey() ? { provinceOnlineReference: { unitId: state.unitId, provinceName: data.province.name, parameters: unit().groups.find(g => g.id === group)?.dataset?.provinceOnlineParameters ?? unit().groups.find(g => g.id === group)?.dataset?.root.parameters ?? {} } } : {}) } });
     }));
-    if (typeof data !== "undefined" && state?.demo === "normal" && ["overview", "time", "peers"].includes(state.screen)) {
+    if (typeof data !== "undefined" && state?.demo === "normal" && !indicatorActive() && ["overview", "time", "peers"].includes(state.screen)) {
         const snap = snapshot();
         bindComparisonExports({ organization: unit().name, period: period().label, snapshot: snap,
             scope: state.scope === "all" ? "Tất cả thủ tục hành chính" : data.formality.code + " · " + data.formality.name,
@@ -1472,7 +1610,8 @@ function bind() {
             window.alert("Chưa đăng xuất được. Vui lòng thử lại.");
     });
     document.querySelectorAll("[data-nav]").forEach(el => el.addEventListener("click", () => { const destination = el.dataset.nav; if (destination === "quality" && signedInUser?.role !== "admin")
-        return; state.screen = destination; if (destination === "overview")
+        return; const wasDaily = Boolean(historicalReportDate); clearDailyDetail(); if (wasDaily)
+        saveSelectionUrl(); state.screen = destination; if (destination === "overview")
         overviewTab = "overview"; if (destination === "procedure") {
         void openAcquisition();
         return;
@@ -1621,7 +1760,7 @@ function bind() {
     }));
     document.querySelectorAll("[data-group-detail]").forEach(el => el.addEventListener("click", () => {
         const id = el.dataset.groupDetail;
-        const update = () => { state.selectedGroup = id; state.selectedMetric = null; overviewTab = "details"; render(); };
+        const update = () => { indicatorDetailTab = 'current'; dailyIndicatorPanel.pause(); state.selectedGroup = id; state.selectedMetric = null; overviewTab = "details"; render(); };
         if (overviewTab === 'details')
             transitionDetail(update, id);
         else
@@ -1636,13 +1775,13 @@ function bind() {
     document.querySelector("#unit-select")?.addEventListener("change", e => { const id = e.target.value; if (!canSelectUnit(id)) {
         render();
         return;
-    } state.unitId = id; state.selectedGroup = null; state.selectedMetric = null; saveSelectionUrl(); render(); });
+    } clearDailyDetail(); state.unitId = id; state.selectedGroup = null; state.selectedMetric = null; saveSelectionUrl(); render(); });
     document.querySelector("#period-type")?.addEventListener("change", e => { const type = e.target.value; const currentYear = period().year; const matches = data.periods.filter(item => item.type === type && item.year === currentYear); const fallback = data.periods.filter(item => item.type === type); const match = latestPeriod(matches) ?? latestPeriod(fallback); if (match)
         void selectPeriod(match.id); });
     document.querySelector("#period-value")?.addEventListener("change", e => { void selectPeriod(e.target.value); });
     document.querySelector("#report-year")?.addEventListener("change", e => { const year = Number(e.target.value); const matches = data.periods.filter(item => item.type === period().type && item.year === year); const match = latestPeriod(matches); if (match)
         void selectPeriod(match.id); });
-    document.querySelector("#scope-select")?.addEventListener("change", e => { historicalSnapshotId = ''; completionMessage = ""; state.scope = e.target.value; state.selectedGroup = null; state.selectedMetric = null; if (state.scope === "formality") {
+    document.querySelector("#scope-select")?.addEventListener("change", e => { clearDailyDetail(); historicalSnapshotId = ''; completionMessage = ""; state.scope = e.target.value; state.selectedGroup = null; state.selectedMetric = null; if (state.scope === "formality") {
         data.formality = { id: "", code: "", name: "" };
         catalogPreview.selectedId = null;
         state.demo = "ready";
@@ -1732,6 +1871,7 @@ function mergeUnits(snapshot) {
     }
 }
 async function selectPeriod(periodId) {
+    clearDailyDetail();
     historicalSnapshotId = '';
     completionMessage = "";
     creditQuote = null;
@@ -1763,6 +1903,8 @@ async function selectPeriod(periodId) {
     void loadProvinceBenchmarks();
 }
 async function loadProvinceBenchmarks() {
+    if (historicalReportDate)
+        return; // Exact stored-day benchmarks come with its saved snapshot.
     if (paidRequestsEnabled && state.scope === "formality")
         return;
     const requestedPeriodId = state.periodId;
@@ -1943,11 +2085,11 @@ async function loadCatalogPreview() {
     if (state.screen === "procedure" || (state.scope === "formality" && state.demo === "ready"))
         render();
 }
-async function loadSelection() {
+async function loadSelection(readOnly = false) {
     const requestId = ++selectionRequest;
     const selected = period();
     const key = snapshotKey(selected.id, state.scope, data.formality.id);
-    if (!historicalSnapshotId && data.snapshots[key] && data.snapshots[key].detailsLoaded !== false) {
+    if (!historicalSnapshotId && !historicalReportDate && data.snapshots[key] && data.snapshots[key].detailsLoaded !== false) {
         state.demo = "normal";
         render();
         return;
@@ -1961,11 +2103,19 @@ async function loadSelection() {
         params.set("formality_id", data.formality.id);
     if (state.scope === "formality" && historicalSnapshotId)
         params.set('snapshot_id', historicalSnapshotId);
+    if (state.scope === 'all' && historicalReportDate)
+        params.set('report_date', historicalReportDate);
     try {
         const response = await fetch(`/api/v1/dashboard/selection?${params.toString()}`);
         if (response.status === 404) {
             if (requestId !== selectionRequest)
                 return;
+            if (readOnly || historicalReportDate) {
+                scoreDetailError = 'Chưa có dữ liệu chi tiết của lựa chọn này.';
+                state.demo = 'error';
+                render();
+                return;
+            }
             if (state.scope === "formality") {
                 pendingMessage = "";
                 state.demo = "ready";
@@ -1983,6 +2133,11 @@ async function loadSelection() {
         if (requestId !== selectionRequest)
             return;
         body.snapshot.delivery = body.metadata;
+        if (historicalReportDate) {
+            if (!dailyDetailOriginal)
+                dailyDetailOriginal = { data, key, snapshot: data.snapshots[key] };
+            provinceBenchmarks[benchmarkCacheKey(state.periodId)] = body.benchmarks ?? [];
+        }
         data.snapshots[key] = body.snapshot;
         mergeUnits(body.snapshot);
         state.demo = "normal";
@@ -1991,6 +2146,8 @@ async function loadSelection() {
         if (requestId !== selectionRequest)
             return;
         console.error(error);
+        if (readOnly || historicalReportDate)
+            scoreDetailError = error instanceof Error ? error.message : 'Chưa đọc được dữ liệu chi tiết.';
         state.demo = "error";
     }
     render();
@@ -2027,6 +2184,7 @@ async function openProvince(rootDepartmentId, requestId) {
 async function switchProvince(rootDepartmentId) {
     if (rootDepartmentId === data.province.id)
         return;
+    clearDailyDetail();
     historicalSnapshotId = '';
     creditQuote = null;
     confirmationToken = "";
@@ -2159,8 +2317,8 @@ async function start() {
         const rememberedUnit = remembered.get("unit");
         if (rememberedUnit && canSelectUnit(rememberedUnit))
             state.unitId = rememberedUnit;
-        if (data.snapshots[snapshotKey(state.periodId, "all", "")]?.detailsLoaded === false)
-            await loadSelection();
+        if (data.snapshots[snapshotKey(state.periodId, "all", "")]?.detailsLoaded === false || historicalReportDate)
+            await loadSelection(true);
         document.title = "Hệ thống phân tích Bộ chỉ số 766";
         render();
         rememberAdminProvince(signedInUser, data.province.id);
