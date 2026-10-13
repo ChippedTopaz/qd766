@@ -118,16 +118,15 @@ class TrialJourneyTests(unittest.TestCase):
         self.assertEqual(c.get("/api/v1/me/formalities?period_type=year&year=2026").json()["items"],[])
         self.assertEqual(self.submit(c,pc).json()["items"][0]["state"],"ready")
         self.assertEqual(self.wallet(c)["availableCredits"],95)
-        # Two pending requests, blocked third, failure refund and released slot.
-        self.assertEqual(self.submit(a,pa,8).status_code,202)
-        self.assertEqual(self.submit(a,pa,9).status_code,202)
-        self.assertEqual(self.submit(a,pa,7).status_code,409)
-        self.assertEqual((self.wallet(a)["availableCredits"],self.wallet(a)["reservedCredits"]),(85,10))
+        # Three pending requests, blocked fourth, failure refund and released slot.
+        for month in range(1,4):self.assertEqual(self.submit(a,pa,month).status_code,202)
+        self.assertEqual(self.submit(a,pa,4).status_code,409)
+        self.assertEqual((self.wallet(a)["availableCredits"],self.wallet(a)["reservedCredits"]),(80,15))
         def failure(job,request):raise RuntimeError("simulated source failure")
         outcome=run_one_job(self.factory,failure,worker_id="journey-mock",max_attempts=1)
         self.assertEqual(outcome.state,"failed")
-        self.assertEqual((self.wallet(a)["availableCredits"],self.wallet(a)["reservedCredits"]),(90,5))
-        self.assertEqual(self.submit(a,pa,7).status_code,202)
+        self.assertEqual((self.wallet(a)["availableCredits"],self.wallet(a)["reservedCredits"]),(85,10))
+        self.assertEqual(self.submit(a,pa,4).status_code,202)
         before=self.wallet(a)["availableCredits"]
         pa=self.login(a,"journey-a")
         self.assertEqual(pa["credits"],before)

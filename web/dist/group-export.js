@@ -71,7 +71,8 @@ export function buildGroupWorkbook(WorkbookClass, data, context) {
                 const entry = actual.get(descriptor.kind + ':' + descriptor.key);
                 if (descriptor.kind === 'metric') {
                     const m = entry?.kind === 'metric' ? entry.metric : null;
-                    row.push(m?.numerator ?? null, m?.denominator ?? null, m?.ratio == null ? null : m.ratio / 100, m?.apiScore ?? null, m?.apiMaxScore ?? null, m?.apiScore != null && m.apiMaxScore != null ? Math.round(Math.max(0, m.apiMaxScore - m.apiScore) * 100) / 100 : null);
+                    const na = group.id === 'formality-online-payment-tree' && context.snapshot.scope === 'formality' && ['3.5', '3.5b'].includes(descriptor.key);
+                    row.push(na ? 'N/A' : m?.numerator ?? null, na ? 'N/A' : m?.denominator ?? null, na ? 'N/A' : m?.ratio == null ? null : m.ratio / 100, m?.apiScore ?? null, m?.apiMaxScore ?? null, m?.apiScore != null && m.apiMaxScore != null ? Math.round(Math.max(0, m.apiMaxScore - m.apiScore) * 100) / 100 : null);
                 }
                 else {
                     const v = entry?.kind === 'parameter' ? entry.value : null;

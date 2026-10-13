@@ -1083,7 +1083,15 @@ def dashboard(
                 NationalSummarySnapshot.group_count == 6).order_by(NationalSummarySnapshot.captured_at.desc())):
             key = (summary.period_type, summary.year, summary.period_value)
             summaries.setdefault(key, summary)
-        return dashboard_payload(snapshots, formality, summaries, detail_snapshot_ids=detail_ids)
+        payload = dashboard_payload(snapshots, formality, summaries, detail_snapshot_ids=detail_ids)
+        from .dashboard import _period_id
+        from .payment_reference import attach_payment_reference
+        for source in snapshots:
+            if source.scope == 'formality' and (detail_ids is None or source.id in detail_ids):
+                item = payload['snapshots'].get(f'{_period_id(source)}:formality')
+                if item is not None:
+                    attach_payment_reference(session, source, item)
+        return payload
 
     payload, cache_result = request.app.state.dashboard_cache.get_or_load(
         cache_key,
@@ -1184,6 +1192,8 @@ def dashboard_selection(
                     return {"metadata": item["delivery"], "snapshot": item}
             raise HTTPException(status_code=404, detail="Snapshot not found")
         item = snapshot_payload(selected, national_summary)
+        from .payment_reference import attach_payment_reference
+        attach_payment_reference(session, selected, item)
         return {"metadata": item["delivery"], "snapshot": item}
 
     payload, cache_result = request.app.state.dashboard_cache.get_or_load(

@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {watchChoiceMatches} from '../dist/agency-watch.js';
+const choices=Array.from({length:100},(_,i)=>({departmentId:String(i),departmentName:'UBND Xã '+String(i).padStart(3,'0')}));
+choices.push({departmentId:'hoa',departmentName:'UBND xã Hòa Sơn – Đắk Lắk'});
+const before=JSON.stringify(choices);
+assert.equal(watchChoiceMatches(choices,'').length,101,'No arbitrary ten-result cap');
+assert.equal(watchChoiceMatches(choices,'099')[0].departmentId,'99','Last agency is reachable');
+assert.equal(watchChoiceMatches(choices,' HOA SON ')[0].departmentId,'hoa','Case-insensitive accent-free search');
+assert.equal(watchChoiceMatches(choices,'dak lak')[0].departmentId,'hoa');
+assert.equal(watchChoiceMatches(choices,'không có').length,0);
+assert.equal(JSON.stringify(choices),before,'Never reorder source inventory in place');
+console.log('WATCH_CHOICE_MATCHES_PASS: complete inventory, Vietnamese keyword search, empty query and source preservation');

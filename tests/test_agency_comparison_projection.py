@@ -3,10 +3,32 @@ import unittest
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-from qd766.backend.agency_scope import restrict_agency
+from qd766.backend.agency_scope import restrict_agency, comparison_points
 
 
 class AgencyComparisonProjectionTests(unittest.TestCase):
+    def test_payment_three_points_no_peer_counts_and_reference_scope(self):
+        parameters={'totalFeeDossierFormality':8,'totalFeeFormality':40,
+            'totalDossierOnlineFormalityPaymentSuccess':18,'totalFeeDossierFormalityDistinct':40,
+            'totalDossierOnlinePaymentSuccess':80,'totalDossierFinancialObligation':100}
+        expected={'payment:3.5':{'score':.5,'maximum':2},'payment:3.5b':{'score':1.13,'maximum':2},'payment:3.6':{'score':4.8,'maximum':6}}
+        peer={'departmentId':'other','departmentLevel':'COMMUNE','parameters':parameters,'metrics':[]}
+        own={**peer,'departmentId':'own'}
+        source={'snapshot':{'scope':'all','datasets':[{'group':'formality-online-payment-tree','root':{},'children':[own,peer]}]}}
+        before=copy.deepcopy(source)
+        result=restrict_agency(source,'own')['snapshot']['datasets'][0]['children'][1]
+        self.assertEqual(result['comparisonPoints'],expected);self.assertEqual(result['parameters'],{});self.assertEqual(result['metrics'],[])
+        self.assertEqual(source,before)
+        params={**parameters,'totalFeeDossierFormality':1,'totalFeeFormality':1,
+            'agencyPaymentProvidedNumerator':8,'agencyPaymentProvidedDenominator':40,
+            'agencyPaymentTransactionsNumerator':18,'agencyPaymentTransactionsDenominator':40}
+        self.assertEqual(comparison_points({'parameters':params},'formality-online-payment-tree','formality'),expected)
+        self.assertEqual(comparison_points({'parameters':parameters},'formality-online-payment-tree','formality'),{'payment:3.6':expected['payment:3.6']})
+        for value in (None,True,float('nan'),float('inf'),-1,41):
+            with self.subTest(value=value):
+                invalid={**parameters,'totalFeeDossierFormality':value}
+                self.assertNotIn('payment:3.5',comparison_points({'parameters':invalid},'formality-online-payment-tree'))
+        self.assertEqual(comparison_points({'parameters':{**parameters,'totalFeeDossierFormality':0}},'formality-online-payment-tree')['payment:3.5']['score'],0)
     def test_score_projection_preserves_comparison_without_business_data(self):
         peer={'departmentId':'other','departmentLevel':'COMMUNE','apiScore':8,'apiMaxScore':22,'metrics':[
             {'code':'digitized','name':'Số hóa','apiScore':.56,'apiMaxScore':4,

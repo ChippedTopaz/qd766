@@ -28,7 +28,10 @@ print('WORKER_IMPORTS=PASS')
 '@ | & $Python -
     if ($LASTEXITCODE -ne 0) { throw 'Worker imports failed; nothing stopped.' }
     $Health = (& $Python (Join-Path $PSScriptRoot 'check_collection_worker_health.py')) | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or $Health.status -ne 'IDLE' -or $null -ne $Health.leaseAgeSeconds) {
+    # A safely paused source can be restarted only with an empty queue/no lease.
+    # This does not reopen its circuit or retry provider requests.
+    if ($LASTEXITCODE -ne 0 -or $Health.status -notin @('IDLE','SAFETY_PAUSED') -or
+        $Health.queued -ne 0 -or $Health.running -ne 0 -or $null -ne $Health.leaseAgeSeconds) {
         throw 'Collection is not idle or another collector owns the lease. Retry after current work finishes.'
     }
     $BackupRoot = Join-Path $ProjectRoot ('.tmp-worker-task-backups\restart-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
@@ -51,7 +54,8 @@ print('WORKER_IMPORTS=PASS')
     Set-ScheduledTask -TaskName $TaskName -Settings $Settings | Out-Null
     # Check once more immediately before stop. Never intentionally interrupt a job.
     $Health = (& $Python (Join-Path $PSScriptRoot 'check_collection_worker_health.py')) | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or $Health.status -ne 'IDLE' -or $null -ne $Health.leaseAgeSeconds) {
+    if ($LASTEXITCODE -ne 0 -or $Health.status -notin @('IDLE','SAFETY_PAUSED') -or
+        $Health.queued -ne 0 -or $Health.running -ne 0 -or $null -ne $Health.leaseAgeSeconds) {
         throw 'Work arrived; restart deferred. Settings hardened, current work untouched.'
     }
     Stop-ScheduledTask -TaskName $TaskName

@@ -8,7 +8,7 @@ const metric = (code, name, numerator, denominator, ratio, score, maximum) => ({
 export function detailExportEntries(group, entity, scope) {
     const derived = (m) => ({ key: m.code, kind: 'metric', metric: m, derived: true });
     if (group === 'formality-online-payment-tree')
-        return paymentIndicators(entity.parameters).map(d => derived(metric(d.id, d.name, d.numerator, d.denominator, d.ratio, d.score, d.maximum)));
+        return paymentIndicators(entity.parameters, scope).map(d => derived(metric(d.id, d.name, d.numerator, d.denominator, d.ratio, d.score, d.maximum)));
     if (group === 'provide-online-tree')
         return onlineIndicators(entity.parameters).map((d, i) => derived(metric('online:' + i, d.name, d.numerator, d.denominator, d.ratio, null, null)));
     if (group === 'dvc-progress-tree') {

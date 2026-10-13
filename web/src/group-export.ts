@@ -54,7 +54,7 @@ export function buildGroupWorkbook(WorkbookClass:new()=>Workbook,data:GroupExpor
       const row:Array<string|number|boolean|null>= [index+1,unit.departmentName,level(unit.departmentLevel),entity?.apiScore??null,entity?.apiMaxScore??null,entity?.apiRatio==null?null:entity.apiRatio/100];
       const actual=new Map((projected.get(unit.departmentId)??[]).map(entry=>[entry.kind+':'+entry.key,entry]));
       for(const descriptor of entries){const entry=actual.get(descriptor.kind+':'+descriptor.key);
-        if(descriptor.kind==='metric'){const m=entry?.kind==='metric'?entry.metric:null;row.push(m?.numerator??null,m?.denominator??null,m?.ratio==null?null:m.ratio/100,m?.apiScore??null,m?.apiMaxScore??null,m?.apiScore!=null&&m.apiMaxScore!=null?Math.round(Math.max(0,m.apiMaxScore-m.apiScore)*100)/100:null);}
+        if(descriptor.kind==='metric'){const m=entry?.kind==='metric'?entry.metric:null;const na=group.id==='formality-online-payment-tree'&&context.snapshot.scope==='formality'&&['3.5','3.5b'].includes(descriptor.key);row.push(na?'N/A':m?.numerator??null,na?'N/A':m?.denominator??null,na?'N/A':m?.ratio==null?null:m.ratio/100,m?.apiScore??null,m?.apiMaxScore??null,m?.apiScore!=null&&m.apiMaxScore!=null?Math.round(Math.max(0,m.apiMaxScore-m.apiScore)*100)/100:null);}
         else{const v=entry?.kind==='parameter'?entry.value:null;row.push(typeof v==='number'||typeof v==='string'||typeof v==='boolean'?v:null);}
       }
       const detail=Boolean(entity?.metrics?.length||Object.keys(entity?.parameters??{}).some(key=>Boolean(parameterLabels[key])));

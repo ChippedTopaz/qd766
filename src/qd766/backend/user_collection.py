@@ -25,6 +25,7 @@ from .credit_wallet import balance, WalletError, utc
 from .collection_scope import selected_root
 
 router=APIRouter(prefix="/api/v1/me",tags=["user-collection"])
+MAX_PENDING_REQUESTS=3
 Db=Annotated[Session,Depends(get_session)]
 
 class Selection(BaseModel):
@@ -132,7 +133,7 @@ def personal_credits(request:Request,db:Db,offset:int=Query(0,ge=0),limit:int=Qu
         cost=300 if account.access_tier=="agency" else 600 if account.access_tier=="province" else None
         lots=db.scalars(select(CreditLot).where(CreditLot.account_id==account.id,
             CreditLot.source=="subscription",CreditLot.available>0,CreditLot.expires_at>now).order_by(CreditLot.expires_at))
-        return {"walletMode":"sources","availableCredits":values["available"],"reservedCredits":values["reserved"],
+        return {"accessTier":account.access_tier,"role":account.role,"walletMode":"sources","availableCredits":values["available"],"reservedCredits":values["reserved"],
             "subscriptionCredits":values["subscription"],"purchasedCredits":values["purchased"],
             "legacyCredits":account.credit_balance,"legacyReservedCredits":account.credit_reserved,
             "subscriptionEndsAt":utc(cycle.ends_at).isoformat() if cycle else None,
@@ -144,7 +145,7 @@ def personal_credits(request:Request,db:Db,offset:int=Query(0,ge=0),limit:int=Qu
     total=db.scalar(select(func.count()).select_from(CreditLedgerEntry).where(condition)) or 0
     rows=db.scalars(select(CreditLedgerEntry).where(condition).order_by(
         CreditLedgerEntry.created_at.desc(),CreditLedgerEntry.id.desc()).offset(offset).limit(limit))
-    return {"availableCredits":account.credit_balance,"reservedCredits":account.credit_reserved,
+    return {"accessTier":account.access_tier,"role":account.role,"availableCredits":account.credit_balance,"reservedCredits":account.credit_reserved,
             "total":total,"items":[{"type":row.entry_type,"amount":row.amount,
             "availableDelta":row.available_delta,"reservedDelta":row.reserved_delta,
             "availableAfter":row.available_after,"reservedAfter":row.reserved_after,
@@ -224,12 +225,12 @@ def create_requests(payload:Confirmation,request:Request,db:Db):
                 root_department_id=root.root_department_id,formality_id=uuid.UUID(item.id),period_type=selection.periodType,
                 year=selection.year,period_value=selection.periodValue,credit_cost=claims["unitCost"],
                 idempotency_token=f"{payload.token}:{item.id}",allow_trial=request.app.state.settings.trial_credits_enabled,
-                max_pending_requests=2)
+                max_pending_requests=MAX_PENDING_REQUESTS)
             rows.append(serialize_request(db,paid))
         db.commit()
     except PendingRequestLimit as error:
         db.rollback()
-        raise HTTPException(409,"Bạn đã có tối đa 2 yêu cầu đang chờ hoặc đang xử lý. Hãy chờ một yêu cầu hoàn thành, thất bại hoặc được hủy rồi gửi tiếp. Không giữ thêm Credit.") from error
+        raise HTTPException(409,f"Bạn đã có tối đa {MAX_PENDING_REQUESTS} yêu cầu đang chờ hoặc đang xử lý. Hãy chờ một yêu cầu hoàn thành, thất bại hoặc được hủy rồi gửi tiếp. Không giữ thêm Credit.") from error
     except InsufficientCredits as error:
         db.rollback()
         raise HTTPException(409,"Tài khoản của bạn không đủ Credit để thực hiện lượt tra cứu này.") from error
@@ -262,7 +263,7 @@ def history(request:Request,db:Db,limit:int=Query(default=100,ge=1,le=200),root_
         PaidDataRequest.account_id==account.id,PaidDataRequest.state.in_(("reserved","waiting")))) or 0
     available,reserved=credits(db,account)
     return {"items":[serialize_request(db,row) for row in rows],"availableCredits":available,"reservedCredits":reserved,"unreadNotifications":unread,
-            "pendingRequests":pending,"maximumPendingRequests":2}
+            "pendingRequests":pending,"maximumPendingRequests":MAX_PENDING_REQUESTS}
 
 @router.post("/notifications/read")
 def read_notifications(payload:NotificationRead,request:Request,db:Db):

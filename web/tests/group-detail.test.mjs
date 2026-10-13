@@ -6,7 +6,7 @@ const peers=Array.from({length:34},(_,i)=>({id:String(i),name:`Tỉnh ${i}`,scor
 const html=renderPeerList(peers,'17');
 assert.equal((html.match(/class="peer-row /g)||[]).length,34);
 assert.match(html,/tabindex="0"/);
-assert.match(html,/class="peer-row mine"><span>Tỉnh 17/);
+assert.match(html,/class="peer-row mine" aria-current="true"><span>Tỉnh 17/);
 assert.match(html,/Tỉnh 33/);
 assert.match(renderPeerList([{id:'a',name:'<script>',score:1},{id:'b',name:'B',score:1}],''),/&lt;script&gt;/);
 assert.equal((renderPeerList([{id:'a',name:'A',score:1},{id:'b',name:'B',score:1}], '').match(/Hạng 1/g)||[]).length,2);

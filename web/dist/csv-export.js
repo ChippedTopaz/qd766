@@ -50,7 +50,8 @@ export function buildAnalysisRows(view, snapshot, period, province, scopeLabel, 
         for (const entry of detailExportEntries(group.id, entity, snapshot.scope)) {
             if (entry.kind === 'metric') {
                 const m = entry.metric;
-                rows.push([...context, group.label, 'Chỉ tiêu', m.name, m.numerator, m.denominator, m.ratio, m.apiScore, m.apiMaxScore, '', entry.derived ? 'Điểm thành phần đối chiếu; điểm tổng giữ theo Cổng DVCQG' : 'Số liệu nguồn; ô trống không đồng nghĩa bằng 0', m.apiScore !== null && m.apiMaxScore !== null ? Math.round(Math.max(0, m.apiMaxScore - m.apiScore) * 100) / 100 : null]);
+                const na = group.id === 'formality-online-payment-tree' && snapshot.scope === 'formality' && ['3.5', '3.5b'].includes(m.code);
+                rows.push([...context, group.label, 'Chỉ tiêu', m.name, na ? 'N/A' : m.numerator, na ? 'N/A' : m.denominator, na ? 'N/A' : m.ratio, m.apiScore, m.apiMaxScore, '', entry.derived ? 'Điểm thành phần đối chiếu; điểm tổng giữ theo Cổng DVCQG' : 'Số liệu nguồn; ô trống không đồng nghĩa bằng 0', m.apiScore !== null && m.apiMaxScore !== null ? Math.round(Math.max(0, m.apiMaxScore - m.apiScore) * 100) / 100 : null]);
             }
             else {
                 const value = entry.value, scalar = value === null || typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean' ? value : JSON.stringify(value);

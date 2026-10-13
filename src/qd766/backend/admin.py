@@ -6,7 +6,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, func, or_
 
 from .auth import SESSION_COOKIE, current_session, digest, csrf_matches
 from .models import AccountCollectionPermission, AdminAudit, CreditLedgerEntry, Department, Dataset, Entity, LoginSession, Snapshot, TrialInvitation, UserAccount, SubscriptionCycle
@@ -90,15 +90,44 @@ def directory(request: Request, provinceId: uuid.UUID | None = None):
 
 
 @router.get("/accounts")
-def accounts(request: Request):
+def accounts(request: Request, page: int | None = Query(None, ge=1),
+             search: str = Query('', max_length=200), provinceId: uuid.UUID | None = None,
+             unitId: uuid.UUID | None = None, status: Literal['active','unadmitted','locked'] | None = None):
     with request.app.state.session_factory() as db:
         administrator(request, db)
         from .admin_accounts import account_projections
-        users = list(db.scalars(select(UserAccount).order_by(UserAccount.created_at.desc()).limit(500)))
+        statement = select(UserAccount)
+        if provinceId is not None: statement = statement.where(UserAccount.root_department_id == provinceId)
+        if unitId is not None: statement = statement.where(UserAccount.unit_department_id == unitId)
+        if status == 'active': statement = statement.where(UserAccount.active.is_(True), UserAccount.trial_admitted.is_(True))
+        elif status == 'unadmitted': statement = statement.where(UserAccount.active.is_(True), UserAccount.trial_admitted.is_(False))
+        elif status == 'locked': statement = statement.where(UserAccount.active.is_(False))
+        if search.strip():
+            pattern = '%' + search.strip().replace('\\','\\\\').replace('%','\\%').replace('_','\\_') + '%'
+            matching_department = select(Department.id).where(Department.name.ilike(pattern, escape='\\'))
+            statement = statement.where(or_(UserAccount.display_name.ilike(pattern, escape='\\'),
+                UserAccount.email.ilike(pattern, escape='\\'), UserAccount.root_department_id.in_(matching_department),
+                UserAccount.unit_department_id.in_(matching_department)))
+        total = total_all = None
+        units = []
+        if page is not None:
+            total = db.scalar(select(func.count()).select_from(statement.subquery())) or 0
+            total_all = db.scalar(select(func.count()).select_from(UserAccount)) or 0
+            page = min(page, max(1, (total + 9) // 10))
+            if provinceId is not None:
+                unit_rows = db.execute(select(Department.id, Department.name).join(UserAccount,
+                    UserAccount.unit_department_id == Department.id).where(UserAccount.root_department_id == provinceId)
+                    .distinct().order_by(Department.name, Department.id)).all()
+                units = [{'id':str(uid),'name':name} for uid,name in unit_rows]
+            statement = statement.offset((page - 1) * 10).limit(10)
+        else:
+            # Preserve the legacy array contract used by Credit management.
+            statement = statement.limit(500)
+        users = list(db.scalars(statement.order_by(UserAccount.created_at.desc(), UserAccount.id.desc())))
         department_ids = {value for a in users for value in (a.root_department_id, a.unit_department_id) if value}
         names = dict(db.execute(select(Department.id, Department.name).where(Department.id.in_(department_ids))).all())
         projections = account_projections(db, users)
-        return [{"id": str(a.id), "email": a.email, "name": a.display_name, "role": a.role,
+        items = [{"id": str(a.id), "email": a.email, "name": a.display_name, "role": a.role,
                  "admitted": a.trial_admitted, "active": a.active, "accessTier": a.access_tier,
                  **projections[a.id],
                  "canCollect": bool(request.app.state.settings.paid_requests_enabled and projections[a.id]["canCollect"]),
@@ -107,6 +136,8 @@ def accounts(request: Request):
                  "unitName": names.get(a.unit_department_id),
                  "unitId": str(a.unit_department_id) if a.unit_department_id else None}
                 for a in users]
+        if page is None: return items
+        return {'items':items,'page':page,'pageSize':10,'total':total,'totalAll':total_all,'units':units}
 
 
 @router.post("/accounts/{account_id}")

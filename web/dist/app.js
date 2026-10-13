@@ -4,13 +4,13 @@ import { analyzeProgressScore } from "./progress-scoring.js";
 import { analysisExcelFilename, buildAnalysisWorkbook } from "./excel-export.js";
 import { buildLeadershipReport, buildLeadershipWorkbook, leadershipColors, leadershipUpdatedLabel } from "./leadership-report.js";
 import { parameterLabels } from "./parameter-labels.js";
-import { paymentRows } from './payment-indicators.js';
+import { paymentRows, paymentComparisonPoint } from './payment-indicators.js';
 import { orderSatisfactionRows, detailMetricName } from './satisfaction-display-order.js';
 import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChart } from "./bento.js";
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
 import { loadFormulaConfiguration } from './formula-loader.js';
 import { openScoreSimulator } from './score-simulator.js';
-import { renderPeerList } from './peer-list.js';
+import { renderPeerList, centerPeerLists } from './peer-list.js';
 import { renderPaidAnalysis, bindPaidAnalysis, clearPaidAnalysis, stopPaidAnalysisPolling } from './paid-analysis.js';
 import { latestPeriod } from './period-choice.js';
 import { CollectionTracker } from "./collection-tracker.js";
@@ -30,7 +30,7 @@ import { presenceBadge, startPresence } from './presence.js';
 import { triviaMarkup, bindTrivia } from './trivia.js';
 import { challengeMarkup, bindChallenges, bindChallengeNotifications, openChallengeBoard } from './challenges.js';
 import { agencyComparison, agencyComparisonUnits, orderAgencies } from './agency-comparison.js';
-import { readWatch, saveWatch, similarReceived, watchTone, WATCH_LIMIT } from './agency-watch.js';
+import { readWatch, saveWatch, similarReceived, watchTone, watchChoiceMatches, WATCH_LIMIT } from './agency-watch.js';
 import { annualDailyComparison, annualGroupChange, annualObservationWindow, formatDay as displayVersionDay } from './annual-daily-comparison.js';
 import { compareDailyDates, historyWithinPeriod } from './daily-period-comparison.js';
 import { customComparisonTable } from './time-custom-comparison.js';
@@ -63,7 +63,7 @@ let state;
 let overviewTab = "overview";
 let agencyLevel = null;
 let agencyTab = 'default';
-let watchSimilar = false, watchQuery = '';
+let watchSimilar = false, watchQuery = '', watchPickerOpen = false, watchOutsideBound = false;
 let watchSortDimension = null, watchSortDirection = 'desc';
 const watchDrafts = new Map(), watchMessages = new Map();
 const dailyHistoryCache = new Map();
@@ -108,6 +108,7 @@ let collectionTab = "new";
 let myRequests = [];
 let historyError = "", historyLoading = false, historyTimer = 0;
 let pendingRequestCount = null;
+let maximumPendingRequests = 3;
 let acquisitionMessage = "";
 let creditQuote = null;
 let confirmationToken = "";
@@ -212,6 +213,8 @@ async function loadMyRequests(markRead = false) {
             if (data.province.id !== rootId)
                 return;
             pendingRequestCount = body.pendingRequests ?? null;
+            if (Number.isInteger(body.maximumPendingRequests) && body.maximumPendingRequests > 0)
+                maximumPendingRequests = body.maximumPendingRequests;
             unreadNotifications = body.unreadNotifications ?? 0;
             const previous = new Map(myRequests.map(item => [item.id, item.state]));
             myRequests = body.items;
@@ -277,7 +280,7 @@ function acquisitionPage() {
         return `<section class="panel"><div class="empty-state"><h2>Khai thác dữ liệu theo TTHC</h2><p>Đăng nhập tài khoản được cấp quyền để tạo yêu cầu khai thác.</p></div></section>`;
     const labels = { ready: "Hoàn thành", succeeded: "Hoàn thành", waiting: "Đang chờ", reserved: "Đang chờ", queued: "Đang chờ", running: "Đang xử lý", refunded: "Thất bại", failed: "Thất bại", halted: "Đã dừng" };
     const historyView = `<section class="panel"><div class="panel-head"><h2>${paidRequestsEnabled ? "Lịch sử tra cứu" : "Yêu cầu trên máy cơ quan"}</h2><button class="btn small" data-action="refresh-history">Làm mới</button></div>${historyError ? `<p class="collection-error">${esc(historyError)}</p>` : ""}<div class="table-wrap"><table><thead><tr><th>Thủ tục hành chính</th><th>Kỳ</th><th>Trạng thái</th><th>Credit</th><th></th></tr></thead><tbody>${myRequests.map(item => `<tr><td><b>${esc(item.code)}</b><span class="request-name" title="${esc(item.name)}">${esc(item.name)}</span></td><td>${esc(requestPeriod(item))}</td><td><span class="badge ${["ready", "succeeded"].includes(item.state) ? "good" : "neutral"}">${esc(labels[item.state] ?? item.state)}</span></td><td>${requestCreditDisplay(item.state, item.creditCost)}</td><td>${["ready", "succeeded"].includes(item.state) ? `<button class="btn small" data-view-request="${esc(item.id)}">Xem dữ liệu</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="5">${historyLoading ? "Đang đọc lịch sử…" : "Chưa có yêu cầu nào."}</td></tr>`}</tbody></table></div></section>`;
-    return `<header class="bento-heading"><h1>Khai thác dữ liệu TTHC</h1>${paidRequestsEnabled ? `<span class="badge ${pendingRequestCount !== null && pendingRequestCount >= 2 ? "warn" : "neutral"}">${pendingRequestCount === null ? "Tối đa 2 yêu cầu đang chờ / xử lý" : `${int(pendingRequestCount)}/2 yêu cầu đang chờ / xử lý`}</span>` : ""}<p>${esc(data.province.name)} · ${esc(period().label)}</p></header><div class="collection-tabs"><button class="btn ${collectionTab === "new" ? "primary" : ""}" data-collection-tab="new">Tạo yêu cầu</button><button class="btn ${collectionTab === "history" ? "primary" : ""}" data-collection-tab="history">${paidRequestsEnabled ? "Lịch sử tra cứu" : "Lịch sử quản trị"}</button></div>${acquisitionMessage ? `<p class="collection-feedback" role="status">${esc(acquisitionMessage)}</p>` : ""}${collectionTab === "new" ? catalogReady() : historyView}`;
+    return `<header class="bento-heading"><h1>Khai thác dữ liệu TTHC</h1>${paidRequestsEnabled ? `<span class="badge ${pendingRequestCount !== null && pendingRequestCount >= maximumPendingRequests ? "warn" : "neutral"}">${pendingRequestCount === null ? `Tối đa ${maximumPendingRequests} yêu cầu đang chờ / xử lý` : `${int(pendingRequestCount)}/${maximumPendingRequests} yêu cầu đang chờ / xử lý`}</span>` : ""}<p>${esc(data.province.name)} · ${esc(period().label)}</p></header><div class="collection-tabs"><button class="btn ${collectionTab === "new" ? "primary" : ""}" data-collection-tab="new">Tạo yêu cầu</button><button class="btn ${collectionTab === "history" ? "primary" : ""}" data-collection-tab="history">${paidRequestsEnabled ? "Lịch sử tra cứu" : "Lịch sử quản trị"}</button></div>${acquisitionMessage ? `<p class="collection-feedback" role="status">${esc(acquisitionMessage)}</p>` : ""}${collectionTab === "new" ? catalogReady() : historyView}`;
 }
 function collectionConfirmation() {
     const selected = catalogPreview.items.find(item => item.id === catalogPreview.selectedId);
@@ -742,6 +745,8 @@ function progressDetail(entity, showAverage = false) {
     return `<div class="progress-kpis"><article><span>Tổng hồ sơ tiếp nhận</span><strong class="num">${int(analysis.totalReceived)}</strong></article><article><span>Giải quyết đúng hạn</span><strong class="num positive">${int(analysis.totalOnTime)}</strong></article><article><span>Hồ sơ quá hạn giải quyết</span><strong class="num negative">${int(analysis.totalOverdue)}</strong></article>${showAverage ? `<article><span>Giải quyết trung bình</span><strong class="num">${averageDays}</strong></article>` : ""}</div><div class="table-wrap"><table class="metric-table progress-table"><thead><tr><th>Nội dung</th><th>Số lượng</th><th>Tỷ lệ</th><th>Công thức</th></tr></thead><tbody><tr class="selectable-row ${state.selectedMetric === "progress:on-time" ? "selected" : ""}" data-metric-detail="progress:on-time"><td><button class="row-link">Hồ sơ giải quyết đúng hạn</button></td><td class="num">${int(analysis.totalOnTime)} hồ sơ</td><td class="num positive">${progressPercent(analysis.onTimeRatio)}</td><td>Hồ sơ đúng hạn / Tổng hồ sơ tiếp nhận × 100%</td></tr><tr><td>Hồ sơ quá hạn giải quyết</td><td class="num">${int(analysis.totalOverdue)} hồ sơ</td><td class="num negative">${progressPercent(analysis.overdueRatio)}</td><td>Hồ sơ quá hạn / Tổng hồ sơ tiếp nhận × 100%</td></tr><tr><td>Tổng hồ sơ tiếp nhận</td><td class="num">${int(analysis.totalReceived)} hồ sơ</td><td class="num">—</td><td>—</td></tr>${showAverage ? `<tr><td>Thời gian giải quyết trung bình</td><td class="num">${averageDays}</td><td class="num">—</td><td>Theo số liệu Cổng DVCQG</td></tr>` : ""}</tbody><tfoot><tr><td>Điểm tính đối chiếu</td><td colspan="2" class="num">${n(analysis.calculatedScore)} / ${n(analysis.maxScore)} điểm</td><td>${esc(formula)}${difference}</td></tr></tfoot></table></div>`;
 }
 function metricPoint(entity, key) {
+    if (key.startsWith('payment:'))
+        return paymentComparisonPoint(entity, key, state.scope);
     const comparison = entity.comparisonPoints?.[key];
     if (comparison && Number.isFinite(comparison.score))
         return { label: key, ...comparison };
@@ -757,6 +762,8 @@ function metricPoint(entity, key) {
     return metric?.apiScore === null || metric?.apiScore === undefined ? null : { label: metric.name, score: metric.apiScore, maximum: metric.apiMaxScore };
 }
 function benchmarkMetricPoint(group, key) {
+    if (key.startsWith('payment:'))
+        return paymentComparisonPoint({ parameters: group.parameters }, key, state.scope);
     if (key === "progress:on-time") {
         const result = analyzeProgressScore({ parameters: group.parameters, apiScore: group.score, apiMaxScore: group.maximum });
         return result?.calculatedScore === null || result?.calculatedScore === undefined ? null : { label: "Tỷ lệ hồ sơ giải quyết đúng hạn", score: result.calculatedScore, maximum: result.maxScore };
@@ -798,7 +805,7 @@ function groupPeerComparison(group) {
         return `<aside class="comparison-card"><h3>So với tỉnh/thành phố khác</h3><div class="comparison-kpi"><span>Thứ hạng</span><strong class="num">${stats.rank}/${stats.total}</strong></div><div class="comparison-kpi"><span>Trung vị các tỉnh</span><strong class="num">${n(stats.median)}</strong></div>${renderPeerList(rows, state.unitId)}</aside>`;
     }
     const comparable = (group.dataset?.children ?? []).filter(item => item.departmentLevel === selected?.departmentLevel && item.apiScore !== null).sort((a, b) => (b.apiScore ?? 0) - (a.apiScore ?? 0));
-    return `<aside class="comparison-card"><h3>So với đơn vị cùng cấp</h3>${group.peer ? `<div class="comparison-kpi"><span>Trung vị</span><strong class="num">${n(group.peer.median)}</strong></div><div class="comparison-kpi"><span>Chênh lệch</span><strong class="num ${(group.peer.gapToMedian) >= 0 ? "positive" : "negative"}">${group.peer.gapToMedian >= 0 ? "+" : ""}${n(group.peer.gapToMedian)}</strong></div>${renderPeerList(comparable.map(item => ({ id: item.departmentId, name: item.departmentName, score: item.apiScore })), state.unitId)}` : `<div class="empty-state"><h2>Chưa đủ đơn vị cùng cấp</h2></div>`}</aside>`;
+    return `<aside class="comparison-card"><h3>So với đơn vị cùng cấp</h3>${group.peer ? `<div class="comparison-kpi"><span>Thứ hạng trong tỉnh</span><strong class="num">${group.peer.rank}/${group.peer.total}${group.peer.tiedCount > 1 ? ' · đồng hạng' : ''}</strong></div><div class="comparison-kpi"><span>Trung vị</span><strong class="num">${n(group.peer.median)}</strong></div><div class="comparison-kpi"><span>Chênh lệch</span><strong class="num ${(group.peer.gapToMedian) >= 0 ? "positive" : "negative"}">${group.peer.gapToMedian >= 0 ? "+" : ""}${n(group.peer.gapToMedian)}</strong></div>${renderPeerList(comparable.map(item => ({ id: item.departmentId, name: item.departmentName, score: item.apiScore })), state.unitId)}` : `<div class="empty-state"><h2>Chưa đủ đơn vị cùng cấp</h2></div>`}</aside>`;
 }
 let provinceOnlineViewKey = null;
 const onlineProvinceKey = () => [data.province.id, state.periodId, state.scope, state.unitId].join(':');
@@ -820,7 +827,7 @@ function overviewGroupDetail(view) {
     const provinceNotice = provinceMode ? `<p class="online-province-context">Chi tiết DVC trực tuyến của ${esc(data.province.name)} · ${esc(period().label)}. Tổng điểm bên dưới vẫn là của ${esc(view.name)}.</p>` : '';
     const progress = group.id === "dvc-progress-tree" ? progressDetail(entity, state.scope === "formality" && catalogPreview.mode === "single") : null;
     const metricRows = entity.metrics.map(m => m.apiScore === null ? `<tr><td>${esc(detailMetricName(group.id, m))}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">N/A</td></tr>` : `<tr class="selectable-row ${state.selectedMetric === `raw:${m.code}` ? "selected" : ""}" data-metric-detail="raw:${esc(m.code)}"><td><button class="row-link">${esc(detailMetricName(group.id, m))}</button></td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiMaxScore !== null ? n(Math.max(0, m.apiMaxScore - m.apiScore)) : "N/A"}</td></tr>`);
-    const valueRows = group.id === 'formality-online-payment-tree' ? paymentRows(entity.parameters) : calculated ? calculated.rows : group.id === 'provide-online-tree' ? [] : Object.entries(entity.parameters).filter(([, value]) => value !== null).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Số liệu nghiệp vụ thành phần")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td colspan="3">Được sử dụng để theo dõi và phân tích kết quả</td></tr>`);
+    const valueRows = group.id === 'formality-online-payment-tree' ? paymentRows(entity.parameters, state.scope, state.selectedMetric) : calculated ? calculated.rows : group.id === 'provide-online-tree' ? [] : Object.entries(entity.parameters).filter(([, value]) => value !== null).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Số liệu nghiệp vụ thành phần")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td colspan="3">Được sử dụng để theo dõi và phân tích kết quả</td></tr>`);
     const parameterKeys = Object.entries(entity.parameters).filter(([, value]) => value !== null).map(([key]) => key);
     const rows = orderSatisfactionRows(group.id, [...metricRows.map((html, index) => ({ key: entity.metrics[index].code, html })), ...valueRows.map((html, index) => ({ key: parameterKeys[index] ?? '', html }))]).map(row => row.html);
     const lost = entity.apiScore !== null && entity.apiMaxScore !== null ? Math.max(0, entity.apiMaxScore - entity.apiScore) : null;
@@ -1011,10 +1018,7 @@ function agencyWatch() {
     const ownLevel = data.units.find(u => u.departmentId === ownId)?.departmentLevel;
     const available = options.filter(u => u.departmentId !== ownId && u.departmentLevel === ownLevel && (u.departmentLevel === 'PROVINCE' || u.departmentLevel === 'COMMUNE'));
     const comparable = available.filter(u => !watchSimilar || similarReceived(snap, ownId, u.departmentId) === true);
-    const plain = (text) => text.toLocaleLowerCase('vi').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
-    const needle = plain(watchQuery.trim());
-    const found = needle ? comparable.filter(u => plain(u.departmentName).includes(needle)).sort((a, b) => alphabet.compare(a.departmentName, b.departmentName)) : [];
-    const matches = found.slice(0, 10);
+    const matches = watchChoiceMatches(comparable, watchQuery);
     const visible = ids.map(id => rows.find(r => r.id === id)).filter((r) => Boolean(r) && comparable.some(u => u.departmentId === r.id));
     const ownRow = { id: ownId, name: own.name, level: ownLevel === 'COMMUNE' ? 'COMMUNE' : 'PROVINCE',
         total: own.totalScore, scores: Object.fromEntries(own.groups.filter(g => g.score.value !== null).map(g => [g.id, g.score.value])),
@@ -1027,7 +1031,7 @@ function agencyWatch() {
     const cell = (value, base, isOwn = false) => `<td class="num ${isOwn ? 'watch-equal' : watchTone(value, base)}">${n(value)}</td>`;
     const heading = (key, label) => `<th aria-sort="${watchSortDimension === key ? (watchSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}"><button type="button" class="agency-sort ${watchSortDimension === key ? 'active' : ''}" data-watch-sort="${key}" data-sort-direction="${watchSortDimension === key ? watchSortDirection : 'desc'}" aria-label="Sắp xếp ${watchSortDimension === key && watchSortDirection === 'desc' ? 'tăng' : 'giảm'} dần theo ${esc(label)}">${esc(label)}</button></th>`;
     const hidden = ids.length - visible.length;
-    return `<section class="panel agency-watch"><div class="panel-head"><div><h2>Theo dõi cơ quan</h2><p>${esc(own.name)} · ${esc(period().label)}</p></div></div><div class="watch-toolbar"><input data-watch-search type="search" value="${esc(watchQuery)}" placeholder="Tìm cơ quan để theo dõi…" aria-label="Tìm cơ quan để theo dõi"><label><input data-watch-similar type="checkbox" ${watchSimilar ? 'checked' : ''}> Cùng hạng cân (±20% HS)</label><span>${ids.length}/${WATCH_LIMIT} cơ quan</span></div><p class="watch-status">${esc(filterNote)}</p>${needle ? `<div class="watch-choices">${matches.map(u => `<label><input data-watch-unit="${esc(u.departmentId)}" type="checkbox" ${ids.includes(u.departmentId) ? 'checked' : ''} ${ids.length >= WATCH_LIMIT && !ids.includes(u.departmentId) ? 'disabled' : ''}><span>${esc(u.departmentName)}</span></label>`).join('') || '<p>Không có cơ quan phù hợp với từ khóa và bộ lọc.</p>'}${found.length > 10 ? '<p>Hiển thị 10 kết quả. Nhập từ khóa cụ thể hơn để thu hẹp danh sách.</p>' : ''}</div>` : ''}<div class="watch-selected">${ids.map(id => `<button class="btn small" data-watch-remove="${esc(id)}" aria-label="Bỏ theo dõi ${esc(available.find(u => u.departmentId === id)?.departmentName ?? id)}">${esc(available.find(u => u.departmentId === id)?.departmentName ?? 'Cơ quan chưa có dữ liệu kỳ này')} ×</button>`).join('')}</div>${watchMessages.get(key) || hidden ? `<p class="watch-status" role="status">${esc(watchMessages.get(key) ?? '')}${hidden ? ' ' + hidden + ' cơ quan đang không có dữ liệu hoặc không phù hợp bộ lọc; danh sách đã lưu vẫn được giữ.' : ''}</p>` : ''}<div class="table-wrap"><table><thead><tr><th>Cơ quan, đơn vị</th>${heading('total', 'Tổng điểm')}${data.groupOrder.map(g => heading(g, data.groupLabels[g])).join('')}</tr></thead><tbody>${ordered.map(row => `<tr class="${row.id === ownId ? 'mine' : ''}"><td>${row.id === ownId ? `<strong>${esc(row.name)}</strong>` : esc(row.name)}</td>${cell(row.total, own.totalScore, row.id === ownId)}${data.groupOrder.map(g => cell(row.scores[g], own.groups.find(x => x.id === g)?.score.value, row.id === ownId)).join('')}</tr>`).join('')}</tbody></table></div><div class="watch-actions"><button class="btn primary small" data-watch-save>Lưu danh sách</button></div></section>`;
+    return `<section class="panel agency-watch"><div class="panel-head"><div><h2>Theo dõi cơ quan</h2><p>${esc(own.name)} · ${esc(period().label)}</p></div></div><div class="watch-toolbar"><div class="watch-picker" data-watch-picker><div class="watch-picker-field"><input data-watch-search type="search" value="${esc(watchQuery)}" placeholder="Tìm hoặc chọn cơ quan để theo dõi…" aria-label="Tìm cơ quan để theo dõi" aria-expanded="${watchPickerOpen}" aria-controls="watch-choice-list"><button type="button" class="watch-picker-toggle" data-watch-toggle aria-label="${watchPickerOpen ? 'Đóng danh sách cơ quan' : 'Mở danh sách cơ quan'}" aria-expanded="${watchPickerOpen}" aria-controls="watch-choice-list"><span aria-hidden="true">${watchPickerOpen ? '▴' : '▾'}</span></button></div>${watchPickerOpen ? `<div class="watch-dropdown" id="watch-choice-list"><div class="watch-dropdown-heading">${matches.length} cơ quan phù hợp</div><div class="watch-choices" role="group" aria-label="Chọn tối đa 5 cơ quan">${matches.map(u => `<label><input data-watch-unit="${esc(u.departmentId)}" type="checkbox" ${ids.includes(u.departmentId) ? 'checked' : ''} ${ids.length >= WATCH_LIMIT && !ids.includes(u.departmentId) ? 'disabled' : ''}><span>${esc(u.departmentName)}</span></label>`).join('') || '<p>Không có cơ quan phù hợp với từ khóa và bộ lọc.</p>'}</div></div>` : ''}</div><label data-watch-filter><input data-watch-similar type="checkbox" ${watchSimilar ? 'checked' : ''}> Cùng hạng cân (±20% HS)</label><span>${ids.length}/${WATCH_LIMIT} cơ quan</span></div><p class="watch-status">${esc(filterNote)}</p><div class="watch-selected">${ids.map(id => `<button class="btn small" data-watch-remove="${esc(id)}" aria-label="Bỏ theo dõi ${esc(available.find(u => u.departmentId === id)?.departmentName ?? id)}">${esc(available.find(u => u.departmentId === id)?.departmentName ?? 'Cơ quan chưa có dữ liệu kỳ này')} ×</button>`).join('')}</div>${watchMessages.get(key) || hidden ? `<p class="watch-status" role="status">${esc(watchMessages.get(key) ?? '')}${hidden ? ' ' + hidden + ' cơ quan đang không có dữ liệu hoặc không phù hợp bộ lọc; danh sách đã lưu vẫn được giữ.' : ''}</p>` : ''}<div class="table-wrap"><table><thead><tr><th>Cơ quan, đơn vị</th>${heading('total', 'Tổng điểm')}${data.groupOrder.map(g => heading(g, data.groupLabels[g])).join('')}</tr></thead><tbody>${ordered.map(row => `<tr class="${row.id === ownId ? 'mine' : ''}"><td>${row.id === ownId ? `<strong>${esc(row.name)}</strong>` : esc(row.name)}</td>${cell(row.total, own.totalScore, row.id === ownId)}${data.groupOrder.map(g => cell(row.scores[g], own.groups.find(x => x.id === g)?.score.value, row.id === ownId)).join('')}</tr>`).join('')}</tbody></table></div><div class="watch-actions"><button class="btn primary small" data-watch-save>Lưu danh sách</button></div></section>`;
 }
 function peers() {
     const pageHeading = `<header class="page-head"><div><h1>So sánh theo cơ quan</h1><p>${esc(data.province.name)} · ${esc(period().label)}</p></div></header>`;
@@ -1079,7 +1083,7 @@ function diagnostic(group) {
     if (progress)
         return `<section class="panel" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>Tính điểm từ tỷ lệ hồ sơ giải quyết đúng hạn; tỷ lệ quá hạn và thời gian xử lý được hiển thị để phân tích.</p></div><span class="badge good">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div><div class="panel-body progress-detail"><h3>Kết quả và công thức tính điểm</h3>${referenceNotice(group.id)}${progress}</div></section>`;
     const calculated = group.id === "provide-online-tree" ? onlineAnalysis(entity) : null;
-    const rows = group.id === 'formality-online-payment-tree' ? paymentRows(entity.parameters).join('') : calculated ? calculated.rows.join("") : entity.metrics.length ? entity.metrics.map(m => `<tr><td>${esc(m.name)}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiScore !== null && m.apiMaxScore !== null ? n(Math.max(0, m.apiMaxScore - m.apiScore)) : "N/A"}</td></tr>`).join("") : Object.entries(entity.parameters).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Chỉ số nghiệp vụ")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`).join("");
+    const rows = group.id === 'formality-online-payment-tree' ? paymentRows(entity.parameters, state.scope, state.selectedMetric).join('') : calculated ? calculated.rows.join("") : entity.metrics.length ? entity.metrics.map(m => `<tr><td>${esc(m.name)}</td><td class="num">${int(m.numerator)}</td><td class="num">${int(m.denominator)}</td><td class="num">${pct(m.ratio)}</td><td class="num">${n(m.apiScore)}</td><td class="num">${n(m.apiMaxScore)}</td><td class="num lost">${m.apiScore !== null && m.apiMaxScore !== null ? n(Math.max(0, m.apiMaxScore - m.apiScore)) : "N/A"}</td></tr>`).join("") : Object.entries(entity.parameters).map(([key, value]) => `<tr><td>${esc(parameterLabels[key] ?? "Chỉ số nghiệp vụ")}</td><td colspan="3" class="num">${esc(typeof value === "number" ? int(value) : value)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`).join("");
     const lost = entity.apiScore !== null && entity.apiMaxScore !== null ? Math.max(0, entity.apiMaxScore - entity.apiScore) : null;
     const description = calculated || group.id === 'formality-online-payment-tree' ? "Ba chỉ tiêu thành phần được tính lại để giải thích điểm; điểm Cổng công bố vẫn là giá trị chính thức." : group.dataset?.schemaKind === "parameters" ? "Hiển thị các số liệu nghiệp vụ thành phần; chưa có đủ dữ liệu để phân rã điểm." : "Kết quả chi tiết theo chỉ tiêu thành phần.";
     return `<section class="panel${group.id === 'provide-online-tree' ? ' online-detail-full' : ''}" style="margin-bottom:12px"><div class="panel-head"><div><h2>${esc(group.label)}</h2><p>${description}</p></div><span class="badge ${calculated ? "good" : "info"}">${n(entity.apiScore)} / ${n(entity.apiMaxScore)}</span></div>${referenceNotice(group.id)}<div class="table-wrap"><table class="metric-table"><thead><tr><th>Chỉ tiêu hoặc số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm ghi nhận</th><th>Điểm tối đa</th><th>Điểm chưa đạt</th></tr></thead><tbody>${rows || `<tr><td colspan="7">Chưa có số liệu chi tiết.</td></tr>`}</tbody><tfoot><tr><td colspan="4">Tổng điểm</td><td class="num">${n(entity.apiScore)}</td><td class="num">${n(entity.apiMaxScore)}</td><td class="num lost">${n(lost)}</td></tr></tfoot></table></div></section>`;
@@ -1250,11 +1254,15 @@ async function downloadAnalysisExcel(kind) {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function bind() {
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+        window.requestAnimationFrame(() => centerPeerLists(document));
+    else
+        centerPeerLists(document);
     if (state)
         loadWatch();
     document.querySelector('[data-watch-retry]')?.addEventListener('click', () => { watchLoads.delete(watchContext().key); render(); });
     if (state?.screen === 'overview' && !document.querySelector('[data-challenge-board]')) {
-        root.insertAdjacentHTML?.('beforeend', '<button type="button" class="btn primary challenge-floating" data-challenge-board>BXH thách đấu</button>');
+        root.insertAdjacentHTML?.('beforeend', '<button type="button" class="btn primary challenge-floating" data-challenge-board hidden>BXH thách đấu</button>');
     }
     if (state?.screen === 'overview' && overviewTab === 'analysis')
         bindPaidAnalysis(analysisSelection(), signedInUser?.csrfToken ?? '', render, id => { if (data.groupOrder.includes(id)) {
@@ -1496,10 +1504,42 @@ function bind() {
         bindChallengeNotifications(signedInUser.id + ':' + data.province.id, signedInUser.csrfToken, () => { state.screen = 'peers'; agencyTab = 'challenge'; render(); scrollTo(0, 0); });
     if (state?.screen === 'peers' && agencyTab === 'challenge')
         bindChallenges(String(signedInUser?.id ?? 'preview') + ':' + data.province.id, signedInUser?.csrfToken ?? '', render);
-    document.querySelector('[data-watch-similar]')?.addEventListener('change', event => { watchSimilar = event.target.checked; render(); });
-    document.querySelector('[data-watch-search]')?.addEventListener('input', event => { const input = event.target, pos = input.selectionStart; watchQuery = input.value; render(); const next = document.querySelector('[data-watch-search]'); next?.focus(); if (next && pos != null)
+    if (!watchOutsideBound && typeof document.addEventListener === 'function') {
+        watchOutsideBound = true;
+        document.addEventListener('click', event => {
+            const target = event.target;
+            if (watchPickerOpen && state.screen === 'peers' && agencyTab === 'watch' && !target?.closest('[data-watch-picker]') && !target?.closest('[data-watch-filter]')) {
+                watchPickerOpen = false;
+                render();
+            }
+        });
+    }
+    document.querySelector('[data-watch-toggle]')?.addEventListener('click', () => { watchPickerOpen = !watchPickerOpen; render(); if (watchPickerOpen)
+        document.querySelector('[data-watch-search]')?.focus();
+    else
+        document.querySelector('[data-watch-toggle]')?.focus(); });
+    document.querySelector('[data-watch-similar]')?.addEventListener('change', event => { watchSimilar = event.target.checked; watchQuery = ''; watchPickerOpen = true; render(); });
+    document.querySelector('[data-watch-search]')?.addEventListener('focus', () => { if (!watchPickerOpen) {
+        watchPickerOpen = true;
+        render();
+        document.querySelector('[data-watch-search]')?.focus();
+    } });
+    document.querySelector('[data-watch-search]')?.addEventListener('input', event => { const input = event.target, pos = input.selectionStart; watchQuery = input.value; watchPickerOpen = true; render(); const next = document.querySelector('[data-watch-search]'); next?.focus(); if (next && pos != null)
         next.setSelectionRange(pos, pos); });
+    document.querySelector('[data-watch-picker]')?.addEventListener('keydown', event => { const e = event; if (e.key === 'Escape') {
+        e.preventDefault();
+        watchPickerOpen = false;
+        render();
+        document.querySelector('[data-watch-toggle]')?.focus();
+    }
+    else if (e.key === 'ArrowDown' && e.target === document.querySelector('[data-watch-search]')) {
+        e.preventDefault();
+        watchPickerOpen = true;
+        render();
+        document.querySelector('[data-watch-unit]')?.focus();
+    } });
     document.querySelectorAll('[data-watch-unit]').forEach(el => el.addEventListener('change', () => {
+        const scrollTop = document.querySelector('.watch-dropdown .watch-choices')?.scrollTop ?? 0;
         const { key, ids, ownId } = watchContext(), id = el.dataset.watchUnit;
         const allowed = agencyRestricted() ? agencyComparisonUnits(snapshot()) : data.units;
         const ownLevel = data.units.find(u => u.departmentId === ownId)?.departmentLevel;
@@ -1516,6 +1556,11 @@ function bind() {
         }
         watchMessages.set(key, 'Danh sách đã thay đổi. Bấm Lưu danh sách để giữ lựa chọn.');
         render();
+        const list = document.querySelector('.watch-dropdown .watch-choices');
+        if (list)
+            list.scrollTop = scrollTop;
+        document.querySelectorAll('[data-watch-unit]').forEach(input => { if (input.dataset.watchUnit === id)
+            input.focus(); });
     }));
     document.querySelectorAll('[data-watch-remove]').forEach(el => el.addEventListener('click', () => { const { key, ids } = watchContext(); watchDrafts.set(key, ids.filter(id => id !== el.dataset.watchRemove)); watchMessages.set(key, 'Danh sách đã thay đổi. Bấm Lưu danh sách để giữ lựa chọn.'); render(); }));
     document.querySelector('[data-watch-save]')?.addEventListener('click', async () => {

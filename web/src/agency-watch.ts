@@ -1,5 +1,10 @@
 import type {Snapshot} from './types.js';
 export const WATCH_LIMIT=5;
+export function watchChoiceMatches<T extends {departmentName:string}>(units:T[],query:string):T[]{
+ const plain=(text:string)=>text.toLocaleLowerCase('vi').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d');
+ const needle=plain(query.trim());
+ return units.filter(u=>plain(u.departmentName).includes(needle)).sort((a,b)=>a.departmentName.localeCompare(b.departmentName,'vi'));
+}
 const valid=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>=0;
 export function similarReceived(snapshot:Snapshot,ownId:string,peerId:string):boolean|null{
  if(snapshot.scope!=='all')return null;

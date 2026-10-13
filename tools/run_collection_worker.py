@@ -80,6 +80,8 @@ def main() -> int:
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     previous_idle_state: str | None = None
     database_failures = 0
+    print(json.dumps({'event':'worker-started','pid':os.getpid(),'controlled':arguments.controlled,
+                      'at':datetime.now(timezone.utc).isoformat()}),flush=True)
     try:
         while True:
             started = time.monotonic()
@@ -115,6 +117,11 @@ def main() -> int:
     except KeyboardInterrupt:
         print(_event("stopped"), flush=True)
         return 0
+    except Exception as error:
+        # Fail nonzero so the supervisor restarts; never expose credentials.
+        print(json.dumps({'event':'worker-fatal','errorType':type(error).__name__,
+                          'at':datetime.now(timezone.utc).isoformat()}),flush=True)
+        return 1
     finally:
         if arguments.controlled:
             transport.close()
@@ -122,4 +129,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        exit_code = main()
+    except Exception as error:
+        print(json.dumps({'event':'worker-startup-fatal','errorType':type(error).__name__,
+                          'at':datetime.now(timezone.utc).isoformat()}),flush=True)
+        exit_code = 1
+    raise SystemExit(exit_code)

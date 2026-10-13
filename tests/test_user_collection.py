@@ -127,6 +127,27 @@ class UserCollectionTest(unittest.TestCase):
         for n,c in enumerate(self.clients):c.cookies.set('qd766_session',f'session-{n}')
         self.selection={'periodType':'year','year':2026,'periodValue':None,'formalityIds':[str(self.formality)]}
     def tearDown(self):self.app.state.engine.dispose()
+    def test_three_pending_api_fourth_blocked_no_extra_credit_hold(self):
+        from dataclasses import replace
+        from qd766.backend.credit_wallet import balance
+        self.app.state.settings=replace(self.app.state.settings,formality_credit_cost=5)
+        self.source_wallet()
+        for year in range(2020,2023):
+            quote=self.quote(selection={**self.selection,'year':year})
+            self.assertEqual(quote.status_code,200,quote.text)
+            result=self.submit(quote=quote.json()['quote'])
+            self.assertEqual(result.status_code,202,result.text)
+        history=self.clients[0].get('/api/v1/me/formality-requests').json()
+        self.assertEqual(history['pendingRequests'],3)
+        self.assertEqual(history['maximumPendingRequests'],3)
+        with self.factory() as db:before=balance(db,self.ids[0],now=datetime.now(timezone.utc))
+        quote=self.quote(selection={**self.selection,'year':2023})
+        result=self.submit(quote=quote.json()['quote'])
+        self.assertEqual(result.status_code,409)
+        self.assertIn('tối đa 3 yêu cầu',result.json()['detail'])
+        with self.factory() as db:
+            self.assertEqual(balance(db,self.ids[0],now=datetime.now(timezone.utc)),before)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),3)
     def test_pause_blocks_quote_and_previously_signed_confirmation_without_hold(self):
         headers={'X-QD766-CSRF':'csrf-0'}
         quote=self.clients[0].post('/api/v1/me/collection-quote',json=self.selection,headers=headers)

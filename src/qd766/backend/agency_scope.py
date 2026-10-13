@@ -3,7 +3,7 @@ from copy import deepcopy
 import math
 
 
-def comparison_points(entity, group):
+def comparison_points(entity, group, scope='all'):
     """Only score labels/maxima: never dossier counts, ratios or raw parameters."""
     def numeric(value):
         return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
@@ -22,6 +22,20 @@ def comparison_points(entity, group):
             overdue = overdue if overdue is not None else max(0, received - on_time)
             if numeric(overdue) and received > 0 and on_time >= 0 and overdue >= 0 and received == on_time + overdue:
                 points['progress:on-time'] = {'score': on_time / received * maximum, 'maximum': maximum}
+    if group == 'formality-online-payment-tree':
+        params = entity.get('parameters', {})
+        definitions = [
+            ('3.5','totalFeeDossierFormality','totalFeeFormality',2,80),
+            ('3.5b','totalDossierOnlineFormalityPaymentSuccess','totalFeeDossierFormalityDistinct',2,80),
+            ('3.6','totalDossierOnlinePaymentSuccess','totalDossierFinancialObligation',6,100),
+        ]
+        for code,numerator,denominator,maximum,target in definitions:
+            if scope == 'formality' and code != '3.6':
+                numerator,denominator = ('agencyPaymentProvidedNumerator','agencyPaymentProvidedDenominator') if code == '3.5' else ('agencyPaymentTransactionsNumerator','agencyPaymentTransactionsDenominator')
+            a,b=params.get(numerator),params.get(denominator)
+            if numeric(a) and numeric(b) and b>0 and 0<=a<=b:
+                score=math.floor(min(maximum,a/b*100/target*maximum)*100+.5+1e-9)/100
+                points['payment:'+code]={'score':score,'maximum':maximum}
     return points
 
 
@@ -67,7 +81,7 @@ def restrict_agency(payload: dict, unit_id) -> dict:
                 root[key] = None
             for child in dataset.get("children", []):
                 if child.get("departmentId") != unit_id:
-                    child['comparisonPoints'] = comparison_points(child, dataset.get('group')) if (
+                    child['comparisonPoints'] = comparison_points(child, dataset.get('group'), item.get('scope','all')) if (
                         level is not None and child.get('departmentLevel') == level) else {}
                     score_only(child)
     if "snapshots" in result:

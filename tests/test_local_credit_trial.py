@@ -252,34 +252,37 @@ class LocalCreditTrialTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
             self.assertEqual(db.scalar(select(func.count()).select_from(CreditLedgerEntry).where(CreditLedgerEntry.entry_type=="reserve")),0)
 
-    def test_two_pending_requests_per_account_and_terminal_outcome_frees_slot(self):
+    def test_three_pending_requests_per_account_and_terminal_outcome_frees_slot(self):
         for outcome in ("success","failure","cancel"):
             with self.subTest(outcome=outcome):
-                month={"success":1,"failure":4,"cancel":7}[outcome]
+                year={"success":2023,"failure":2024,"cancel":2025}[outcome]
                 def submit_month(value,key="a"):
-                    selection=dict(self.selection,periodType="month",periodValue=value)
+                    selection=dict(self.selection,periodType="month",periodValue=value,year=year)
                     return self.submit(key,quote=self.quote(key,selection).json()["quote"])
-                self.assertEqual(submit_month(month).status_code,202)
-                self.assertEqual(submit_month(month+1).status_code,202)
-                rejected=submit_month(month+2)
+                for month in range(1,4):self.assertEqual(submit_month(month).status_code,202)
+                rejected=submit_month(4)
                 self.assertEqual(rejected.status_code,409)
-                self.assertIn("tối đa 2",rejected.json()["detail"])
+                self.assertIn("tối đa 3",rejected.json()["detail"])
                 history=self.clients["a"].get("/api/v1/me/formality-requests").json()
-                self.assertEqual(history["pendingRequests"],2)
+                self.assertEqual(history["pendingRequests"],3)
+                self.assertEqual(history["maximumPendingRequests"],3)
                 # Another account can attach to a shared job; its limit is independent.
-                self.assertEqual(submit_month(month,"b").status_code,202)
+                self.assertEqual(submit_month(1,"b").status_code,202)
                 self.assertEqual(self.outcome(outcome).status_code,200)
-                self.assertEqual(submit_month(month+2).status_code,202)
-                self.outcome("failure");self.outcome("failure")
+                self.assertEqual(submit_month(4).status_code,202)
+                for _ in range(3):self.outcome("failure")
 
     def test_batch_exceeding_pending_limit_rolls_back_all_holds_and_jobs(self):
+        for month in range(1,4):
+            existing=dict(self.selection,periodType='month',periodValue=month)
+            self.assertEqual(self.submit(quote=self.quote(selection=existing).json()['quote']).status_code,202)
         selection=dict(self.selection,formalityIds=[item.id for item in mock_catalog().formalities])
         response=self.submit(quote=self.quote(selection=selection).json()["quote"])
         self.assertEqual(response.status_code,409)
         with self.app.state.session_factory() as db:
-            self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)),0)
-            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
-            self.assertEqual(db.get(UserAccount,identifier("account:a")).credit_balance,30)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)),3)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),3)
+            self.assertEqual(db.get(UserAccount,identifier("account:a")).credit_balance,21)
 
     def test_revoke_new_collection_permission_does_not_drop_pending_request(self):
         self.assertEqual(self.submit().status_code,202)

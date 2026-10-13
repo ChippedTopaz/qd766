@@ -17,11 +17,23 @@ $BackupRoot = Join-Path $ProjectRoot '.tmp-worker-task-backups'
 New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
 $BackupFile = Join-Path $BackupRoot ('worker-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.xml')
 Export-ScheduledTask -TaskName $TaskName | Out-File -LiteralPath $BackupFile -Encoding utf8
+$PreviousRun = Get-ScheduledTaskInfo -TaskName $TaskName
+Write-Output ('WORKER_PREVIOUS_RUN=' + $PreviousRun.LastRunTime.ToString('o') + ' RESULT=' + $PreviousRun.LastTaskResult + ' STATE=' + $Task.State)
 $Settings = $Task.Settings
 $Settings.ExecutionTimeLimit = 'PT0S'
 $Settings.RestartCount = 10
 $Settings.RestartInterval = 'PT1M'
-Set-ScheduledTask -TaskName $TaskName -Settings $Settings | Out-Null
+$Settings.MultipleInstances = 2 # IgnoreNew: a keep-alive trigger never interrupts a running worker.
+$Settings.StartWhenAvailable = $true
+$Settings.DisallowStartIfOnBatteries = $false
+$Settings.StopIfGoingOnBatteries = $false
+$Triggers = @($Task.Triggers)
+if (-not ($Triggers | Where-Object { $_.Id -eq 'QD766WorkerKeepAlive' })) {
+    $KeepAlive = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(2)) -RepetitionInterval (New-TimeSpan -Minutes 2)
+    $KeepAlive.Id = 'QD766WorkerKeepAlive'
+    $Triggers += $KeepAlive
+}
+Set-ScheduledTask -TaskName $TaskName -Settings $Settings -Trigger $Triggers | Out-Null
 Write-Output ('TASK_BACKUP=' + $BackupFile)
-Write-Output 'WORKER_SETTINGS=PASS; unlimited runtime; 10 failure restarts at 1-minute intervals.'
-Write-Output 'Actions/principal/triggers unchanged. No task started/stopped; no database changes.'
+Write-Output 'WORKER_SETTINGS=PASS; unlimited runtime; 10 failure restarts; 2-minute keep-alive; IgnoreNew; battery stop disabled.'
+Write-Output 'Actions/principal/existing triggers unchanged; one keep-alive trigger added. No task started/stopped; no database changes.'
