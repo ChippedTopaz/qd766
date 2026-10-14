@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from .dashboard import GROUP_LABELS, NATIONAL_GROUP_CODES, _entity
 from .daily_history import FIRST_VALID_REPORT_DATE
-from .models import DailyObservation, Dataset, Department, Entity, Snapshot
+from .models import DailyObservation, Dataset, Department, Entity, Snapshot, NationalSummarySnapshot
 
 
 def in_period(day, period):
@@ -66,6 +66,14 @@ def comparison_payload(db, root_id, unit_id, period, group, current_date=None, b
             and isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)}
         return payload
 
+    def summary_score(payload, summary):
+        if payload is not None and isinstance(summary, dict):
+            row = next((r for r in summary.get('evaluation', []) if r.get('departmentId') == str(root_id)), None)
+            score = row.get('groupScores', {}).get(NATIONAL_GROUP_CODES[group]) if row else None
+            if score is not None:
+                payload['apiScore'], payload['scoreSource'] = score, 'dvcqg-national-summary'
+        return payload
+
     def saved_day(day):
         empty = {'reportDate': day.isoformat() if day else None, 'entity': None,
                  'capturedAt': None, 'state': 'missing'}
@@ -88,27 +96,31 @@ def comparison_payload(db, root_id, unit_id, period, group, current_date=None, b
             return empty
         payload = sanitized_entity(entity)
         if unit_id == root_id:
-            summary = record.national_summary
-            row = next((r for r in summary.response_data.get('evaluation', [])
-                if r.get('departmentId') == str(root_id)), None)
-            score = row.get('groupScores', {}).get(NATIONAL_GROUP_CODES[group]) if row else None
-            if score is not None:
-                payload['apiScore'] = score
-                payload['scoreSource'] = 'dvcqg-national-summary'
+            summary_score(payload, record.national_summary.response_data)
         return {'reportDate': day.isoformat(), 'capturedAt': record.captured_at.isoformat(),
                 'entity': payload, 'state': 'available'}
 
     current_body, baseline_body = saved_day(current), saved_day(baseline)
     series = []
+    preceding = None
     if baseline is not None and current is not None:
-        # One period caps the calendar interval at 366 days. Batch the intermediate
-        # days rather than issuing one SQL/API request per bar.
-        ranked = select(DailyObservation.report_date.label('day'), DailyObservation.snapshot_id,
+        # One extra saved day anchors the first column's daily delta. Batch it
+        # with intermediate days; never fetch another unit or reporting period.
+        prior_day = baseline - timedelta(days=1)
+        ranked = select(DailyObservation.report_date.label('day'), DailyObservation.snapshot_id, DailyObservation.national_summary_id,
             func.row_number().over(partition_by=DailyObservation.report_date,
                 order_by=(DailyObservation.captured_at.desc(), DailyObservation.id.desc())).label('position')).where(
-            *conditions, DailyObservation.report_date > baseline, DailyObservation.report_date < current,
+            *conditions, DailyObservation.report_date >= prior_day, DailyObservation.report_date < current,
+            DailyObservation.report_date != baseline,
             DailyObservation.report_date >= FIRST_VALID_REPORT_DATE).subquery()
         records = dict(db.execute(select(ranked.c.day, ranked.c.snapshot_id).where(ranked.c.position == 1)).all()) if table_available else {}
+        summaries = {}
+        if records and unit_id == root_id:
+            # Batch national group-score provenance too, so a fallback score line
+            # uses the same source policy as the selected endpoints (no N+1).
+            summaries = dict(db.execute(select(NationalSummarySnapshot.id, NationalSummarySnapshot.response_data).where(
+                NationalSummarySnapshot.id.in_(select(ranked.c.national_summary_id).where(ranked.c.position == 1)))).all())
+            summary_ids = dict(db.execute(select(ranked.c.snapshot_id, ranked.c.national_summary_id).where(ranked.c.position == 1)).all())
         entities = {}
         if records:
             rows = db.execute(select(Entity, Dataset.snapshot_id).join(Dataset).join(Snapshot).where(
@@ -119,6 +131,12 @@ def comparison_payload(db, root_id, unit_id, period, group, current_date=None, b
                 Entity.entity_kind == ('root' if unit_id == root_id else 'child'))
                 .options(joinedload(Entity.department), selectinload(Entity.metrics))).all()
             entities = {snapshot_id: sanitized_entity(entity) for entity, snapshot_id in rows}
+            if unit_id == root_id:
+                for snapshot_id, payload in entities.items():
+                    summary_score(payload, summaries.get(summary_ids.get(snapshot_id)))
+        prior_entity = entities.get(records.get(prior_day)) if in_period(prior_day, period) and prior_day in dates else None
+        preceding = {'reportDate': prior_day.isoformat(), 'capturedAt': None, 'entity': prior_entity,
+            'state': 'outside-period' if not in_period(prior_day, period) else 'available' if prior_entity is not None else 'missing'}
         day = baseline
         while day <= current:
             if day == baseline:
@@ -133,4 +151,4 @@ def comparison_payload(db, root_id, unit_id, period, group, current_date=None, b
 
     return {'scope': 'all', 'group': group, 'unitId': str(unit_id), 'unitName': department.name,
             'availableDates': [d.isoformat() for d in dates],
-            'current': current_body, 'baseline': baseline_body, 'series': series}
+            'current': current_body, 'baseline': baseline_body, 'series': series, 'preceding': preceding}

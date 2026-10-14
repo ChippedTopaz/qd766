@@ -78,6 +78,16 @@ def main():
             if not control or control.circuit_state!='closed' or control.lease_locked_by!=owner:
                 raise SafetyStop('Collection control changed')
     transport=PooledHttpTransport(max_workers=3,spacing=.4,guard=guard)
+    from qd766.backend.source_monitor import observe_profile,national_profile,observe_daily_structure,ready as monitor_ready
+    def watch_national(data,period):
+        with factory.begin() as db:
+            if monitor_ready(db):
+                seed=db.scalar(select(NationalSummarySnapshot).where(NationalSummarySnapshot.period_type==period.type,
+                    NationalSummarySnapshot.year==period.year,NationalSummarySnapshot.period_value==period.value)
+                    .order_by(NationalSummarySnapshot.captured_at.desc()).limit(1))
+                observe_profile(db,'national:'+period.type,national_profile(data),
+                    {'rootId':'national','rootName':'Cả nước','periodType':period.type,'year':period.year,'value':period.value,'group':'national','reportDate':str(report_date)},
+                    seed=national_profile(seed.response_data) if seed else None)
     failed=0;completed=0
     try:
         mark('run-status','RUNNING',{'completed':0,'expected':102,'reportDate':str(report_date),'startedAt':datetime.now(timezone.utc).isoformat()})
@@ -97,7 +107,7 @@ def main():
                     lease();mark(national_key,'RUNNING',{})
                     capture=None
                     for attempt in range(5):
-                        try:capture=collect_national_summary(period,transport);break
+                        try:capture=collect_national_summary(period,transport,on_data=lambda data:watch_national(data,period));break
                         except SafetyStop:raise
                         except Exception:
                             if attempt==4:raise
@@ -124,6 +134,11 @@ def main():
                     captured_at=max(datetime.fromisoformat(c['capturedAt']) for c in manifest['captures'])
                     if any(datetime.fromisoformat(c['capturedAt'])<boundary for c in manifest['captures']):
                         raise ValueError('Cached group predates daily capture boundary')
+                    # Observe declared raw structure before normalization; otherwise
+                    # a newly added/removed field could be lost or rejected by the parser.
+                    with factory.begin() as db:
+                        observe_daily_structure(db,root.root_department_id,period,report_date,capture_dir,manifest,
+                            capture_root=ROOT/'data'/'daily-collection',root_name=root.province_name)
                     payload=build_collected_snapshot(capture_dir).to_dict()
                     with factory.begin() as db:
                         snapshot=store_normalized_snapshot(db,payload,observation_id=key)

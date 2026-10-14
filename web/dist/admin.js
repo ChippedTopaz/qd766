@@ -8,6 +8,7 @@ import { installFormulaConfiguration } from './admin-formula-configuration.js';
 import { installCollectionMonitor } from "./admin-collection.js";
 import { installRegistrationAdmin } from "./admin-registration.js";
 import { adminSubscriptionCell } from "./admin-subscription.js";
+import { installSourceMonitor } from './admin-source-monitor.js';
 let layout = null;
 let creditManager = null;
 const root = document.querySelector("#admin");
@@ -176,6 +177,7 @@ async function start() {
         installAnalysisConfiguration(root, api);
         installFormulaConfiguration(root, api);
         installTriviaBank(root, api);
+        installSourceMonitor(root, api);
         layout = installAdminLayout(root);
         root.addEventListener("click", event => { const key = event.target.closest("[data-admin-section]")?.dataset.adminSection; if (key === "invitations")
             void run(loadInvitations); if (key === "audit")

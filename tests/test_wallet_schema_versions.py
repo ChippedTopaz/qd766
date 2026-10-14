@@ -43,6 +43,14 @@ class WalletSchemaVersionsTest(unittest.TestCase):
             with self.subTest(table=table), self.assertRaises(ValueError):
                 self.verify('20261008_0024',table)
 
+    def test_source_monitor_upgrade_requires_all_four_and_previous_tables(self):
+        self.verify('20261014_0028',shared_registration=True)
+        for table in ('source_monitor_baselines','source_monitor_samples','source_monitor_alerts',
+                      'source_monitor_runs','agency_challenges','agency_watch_preferences',
+                      'credit_lots','trivia_answers','formula_config_head','login_attempts'):
+            with self.subTest(table=table), self.assertRaises(ValueError):
+                self.verify('20261014_0028',table)
+
     def test_public_registration_requires_new_profile_and_previous_tables(self):
         self.verify('20261009_0025',shared_registration=True)
         for table in ('login_attempts','trial_registrations','formula_config_head',

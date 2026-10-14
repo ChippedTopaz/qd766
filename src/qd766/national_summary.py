@@ -51,6 +51,7 @@ def collect_national_summary(
     transport: Transport,
     *,
     captured_at: datetime | None = None,
+    on_data=None,
 ) -> NationalSummaryCapture:
     payload = build_national_summary_payload(period)
     response = transport.post_json(SERVICE_RESULTS_URL, payload)
@@ -66,6 +67,8 @@ def collect_national_summary(
         or not isinstance(data, dict)
     ):
         raise CollectionError("Unexpected national summary response envelope")
+    if on_data is not None:
+        on_data(data)  # Record a changed source structure before a strict parser rejects it.
     _validate_data(data)
     return NationalSummaryCapture(
         period=period,

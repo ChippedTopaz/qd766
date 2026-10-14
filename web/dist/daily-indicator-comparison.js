@@ -2,6 +2,8 @@ import { detailExportEntries } from './detail-export.js';
 import { orderSatisfactionRows } from './satisfaction-display-order.js';
 import { paymentDefinitions } from './payment-indicators.js';
 import { changeTone } from './change-tone.js';
+import { renderComboChart, bindComboCharts } from './daily-combo-chart.js';
+import { renderDatePicker, bindDatePickers } from './daily-date-picker.js';
 const escape = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const numeric = (v) => typeof v === 'number' && Number.isFinite(v) ? v : null;
 const round = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
@@ -72,46 +74,50 @@ function cell(before, after, delta, label, tone = 'change-neutral', digits = 2, 
         return '<span class="daily-value-unavailable">—</span>';
     return `<div class="daily-value-pair"><span>${number(before ?? null, digits)}${before == null ? '' : suffix}</span><span aria-hidden="true">→</span><strong class="${tone}">${number(after ?? null, digits)}${after == null ? '' : suffix}</strong></div>${delta === null ? '' : `<small class="${tone}">${escape(deltaText(delta, digits, label, unchanged))}</small>`}`;
 }
-function countChart(body, row) {
+export function dailyComboModel(body, row) {
     const count = (value) => value != null && value >= 0 ? value : null;
-    const before = count(row?.before?.numerator), after = count(row?.after?.numerator);
     const daily = new Map((body.series ?? []).map(day => [day.reportDate, day]));
     daily.set(body.baseline.reportDate, body.baseline);
     daily.set(body.current.reportDate, body.current);
-    const bars = [];
+    const points = [];
     const start = body.baseline.reportDate, end = body.current.reportDate;
     if (start && end) {
         const cursor = new Date(start + 'T00:00:00Z');
-        let previous = null;
+        const priorDay = new Date(cursor);
+        priorDay.setUTCDate(priorDay.getUTCDate() - 1);
+        const prior = body.preceding?.reportDate === priorDay.toISOString().slice(0, 10) && body.preceding.state === 'available' ? indicatorValues(body.group, body.preceding.entity).find(v => v.key === row?.key) : null;
+        let previous = count(prior?.numerator);
         // Reporting periods contain at most 366 calendar days. Never join across a gap.
         for (let i = 0; i < 366 && cursor.toISOString().slice(0, 10) <= end; i++, cursor.setUTCDate(cursor.getUTCDate() + 1)) {
             const day = cursor.toISOString().slice(0, 10), record = daily.get(day);
             const item = record?.state === 'available' ? indicatorValues(body.group, record.entity).find(v => v.key === row?.key) : null;
             const value = count(item?.numerator);
-            bars.push({ day, value, role: day === start ? 'baseline' : 'current', change: difference(previous, value) });
+            points.push({ day, delta: difference(previous, value), ratio: item?.ratio ?? null, score: item?.score ?? null, maximum: item?.maximum ?? null });
             previous = value;
         }
     }
-    const maximum = Math.max(0, ...bars.map(bar => bar.value ?? 0)), scale = Math.max(maximum, 1), delta = difference(before, after);
+    return { points, mode: points.some(p => p.ratio !== null) || !points.some(p => p.score !== null) ? 'ratio' : 'score', name: row?.name ?? 'Chọn chỉ tiêu trong bảng' };
+}
+function countChart(body, row) {
+    const model = dailyComboModel(body, row), delta = difference(row?.before?.numerator, row?.after?.numerator);
     const tone = changeTone(row?.before?.lowerBetter || row?.after?.lowerBetter ? delta === null ? null : -delta : delta);
-    return `<aside class="daily-indicator-chart" id="daily-indicator-chart" aria-label="Biểu đồ số lượng đạt theo ngày"><h3>Số lượng đạt theo ngày</h3><p class="daily-chart-indicator">${escape(row?.name ?? 'Chọn chỉ tiêu trong bảng')}</p>
- ${!bars.length ? '<div class="daily-chart-empty">—</div>' : `<div class="daily-count-bars" role="img" aria-label="${escape(bars.map(b => `${dayLabel(b.day)}: ${b.value === null ? 'Chưa có dữ liệu' : number(b.value, 0)}`).join('; '))}">${bars.map(bar => {
-        const barTone = changeTone(row?.before?.lowerBetter || row?.after?.lowerBetter ? bar.change === null ? null : -bar.change : bar.change);
-        const label = `${dayLabel(bar.day)}: ${bar.value === null ? 'Chưa có dữ liệu' : number(bar.value, 0)}${bar.change === null ? '' : ` · ${deltaText(bar.change, 0, '', true)} so với ngày trước`}`;
-        return `<div class="daily-count-bar-row" data-daily-bar-date="${escape(bar.day)}" title="${escape(label)}"><span class="daily-count-bar-date">${dayLabel(bar.day)}</span><div class="daily-count-bar-track">${bar.value === null ? '<span class="daily-chart-missing" aria-hidden="true"></span>' : `<div class="daily-count-bar-fill daily-count-bar-${bar.role} ${bar.role === 'current' ? barTone : ''}" data-daily-bar-value="${bar.value}" style="width:${round(bar.value / scale * 100)}%"></div>`}</div><strong class="daily-count-bar-value">${number(bar.value, 0)}</strong></div>`;
-    }).join('')}</div><div class="daily-count-bar-axis" aria-hidden="true"><span>0</span><span>${number(maximum, 0)}</span></div>`}
- ${delta === null ? '' : `<div class="daily-chart-change"><span>Thay đổi số lượng đạt</span><strong class="${tone}">${deltaText(delta, 0, '', true)}</strong></div>`}</aside>`;
+    return `<aside class="daily-indicator-chart" id="daily-indicator-chart" aria-label="Biểu đồ phát sinh và tỷ lệ theo ngày"><h3>Biến động theo ngày</h3><p class="daily-chart-indicator">${escape(model.name)}</p>
+ ${model.points.length ? renderComboChart(model) : '<div class="daily-chart-empty">—</div>'}
+ ${delta === null ? '' : `<div class="daily-chart-change"><span>Biến động</span><strong class="${tone}">${deltaText(delta, 0, '', true)}</strong></div>`}</aside>`;
+}
+// Native name buttons retain keyboard activation; separate controls in a row
+// must keep their own action instead of also selecting the indicator.
+export function indicatorRowClick(event) {
+    const target = event?.target;
+    const control = target?.closest?.('button,a,input,select,textarea,label,summary,[role="button"],[contenteditable]:not([contenteditable="false"])');
+    return !control || control.matches('button.row-link,button.daily-indicator-name');
 }
 export function renderIndicatorComparison(body, selected = null) {
     const rows = indicatorChanges(body.group, body.baseline.entity, body.current.entity);
     const selectedRow = rows.find(row => row.key === selected) ?? rows.find(row => row.before?.numerator != null && row.after?.numerator != null) ?? rows[0];
     const warnings = [body.current.state !== 'available' ? `Chưa có dữ liệu chi tiết ngày đánh giá ${dayLabel(body.current.reportDate)}.` : '',
         body.baseline.state !== 'available' ? body.baseline.state === 'outside-period' ? 'Ngày liền trước nằm ngoài kỳ báo cáo. Hãy chọn ngày làm mốc trong cùng kỳ.' : `Chưa có dữ liệu chi tiết ngày làm mốc ${dayLabel(body.baseline.reportDate)}. Không dùng ngày khác thay thế.` : ''].filter(Boolean);
-    const select = (role, selected) => {
-        const dates = body.availableDates.filter(d => role === 'baseline' ? d < (body.current.reportDate ?? '') : d !== (body.baseline.reportDate ?? ''));
-        const missing = selected && !dates.includes(selected);
-        return `<label><strong>Ngày ${role === 'baseline' ? 'làm mốc' : 'đánh giá'}</strong><select data-daily-indicator-date="${role}" aria-label="Ngày ${role === 'baseline' ? 'làm mốc' : 'đánh giá'}" ${!dates.length ? 'disabled' : ''}>${missing ? `<option selected disabled value="${escape(selected)}">${dayLabel(selected)} · Chưa có dữ liệu</option>` : ''}${!selected ? '<option value="" disabled selected>Chọn ngày</option>' : ''}${dates.map(d => `<option value="${d}" ${d === selected ? 'selected' : ''}>${dayLabel(d)}</option>`).join('')}</select></label>`;
-    };
+    const select = (role, selected) => renderDatePicker(role, selected, body.availableDates, role === 'baseline' ? body.current.reportDate : body.baseline.reportDate);
     const groupDelta = difference(body.baseline.entity?.apiScore, body.current.entity?.apiScore);
     const content = `<div class="daily-indicator-toolbar">${select('baseline', body.baseline.reportDate)}${select('current', body.current.reportDate)}<div class="daily-group-change"><span>Điểm nhóm · theo nguồn</span><strong class="${changeTone(groupDelta)}">${deltaText(groupDelta, 2, ' điểm', true)}</strong>${body.baseline.entity?.apiScore != null || body.current.entity?.apiScore != null ? `<small>${number(body.baseline.entity?.apiScore ?? null)} → ${number(body.current.entity?.apiScore ?? null)}</small>` : ''}</div></div>
  <p class="daily-indicator-context">${dayLabel(body.current.reportDate)} so với ${dayLabel(body.baseline.reportDate)} · Dữ liệu lũy kế trong cùng kỳ báo cáo.</p>
@@ -119,7 +125,7 @@ export function renderIndicatorComparison(body, selected = null) {
  ${rows.length ? `<table class="daily-indicator-table"><thead><tr><th>Chỉ tiêu / số liệu nghiệp vụ</th><th>Số lượng đạt</th><th>Tổng số</th><th>Tỷ lệ</th><th>Điểm</th></tr></thead><tbody>${rows.map(row => {
         const metric = row.after ?? row.before;
         const ratioTone = changeTone(metric?.lowerBetter && row.ratio !== null ? -row.ratio : row.ratio);
-        return `<tr class="${selectedRow?.key === row.key ? 'daily-selected' : ''}"><td><button type="button" class="daily-indicator-name" data-daily-indicator-row="${escape(row.key)}" aria-pressed="${selectedRow?.key === row.key}" aria-controls="daily-indicator-chart">${escape(row.name)}</button></td>
+        return `<tr class="daily-selectable-row${selectedRow?.key === row.key ? ' daily-selected' : ''}" data-daily-indicator-row="${escape(row.key)}"><td><button type="button" class="daily-indicator-name" aria-pressed="${selectedRow?.key === row.key}" aria-controls="daily-indicator-chart">${escape(row.name)}</button></td>
   <td class="daily-count" data-label="Số lượng đạt">${cell(row.before?.numerator, row.after?.numerator, row.achieved, '', 'change-neutral', 0)}</td>
   <td class="daily-count" data-label="Tổng số">${cell(row.before?.denominator, row.after?.denominator, row.total, '', 'change-neutral', 0)}</td>
   <td data-label="Tỷ lệ">${cell(row.before?.ratio, row.after?.ratio, row.ratio, ' điểm %', ratioTone, 2, '%', true)}</td>
@@ -134,6 +140,7 @@ export class DailyIndicatorPanel {
     activeKey = '';
     revision = 0;
     controller = null;
+    cleanWidgets = () => { };
     // Native Window.fetch must not be invoked as a method of this panel instance.
     constructor(changed, read = (input, init) => globalThis.fetch(input, init)) {
         this.changed = changed;
@@ -145,7 +152,7 @@ export class DailyIndicatorPanel {
         e.html = null;
         e.error = '';
     } }
-    pause() { const entry = this.entries.get(this.activeKey); if (entry?.loading) {
+    pause() { this.cleanWidgets(); const entry = this.entries.get(this.activeKey); if (entry?.loading) {
         entry.loading = false;
         entry.request = ++this.revision;
     } this.activeKey = ''; this.controller?.abort(); this.controller = null; }
@@ -202,6 +209,12 @@ export class DailyIndicatorPanel {
                 throw new Error('Dữ liệu trả về không đúng cơ quan hoặc nhóm chỉ tiêu.');
             if (body.series !== undefined && (!Array.isArray(body.series) || body.series.length > 366 || !body.series.every((v) => validRecord(v) && v.reportDate !== null && v.reportDate >= body.baseline.reportDate && v.reportDate <= body.current.reportDate && (v.state === 'outside-period' || inPeriod(v.reportDate))) || new Set(body.series.map((v) => v.reportDate)).size !== body.series.length))
                 throw new Error('Dữ liệu theo ngày trả về không đúng kỳ báo cáo hoặc cơ quan.');
+            if (body.preceding != null) {
+                const previous = new Date(body.baseline.reportDate + 'T00:00:00Z');
+                previous.setUTCDate(previous.getUTCDate() - 1);
+                if (!validRecord(body.preceding) || body.preceding.reportDate !== previous.toISOString().slice(0, 10) || body.preceding.state === 'available' && !inPeriod(body.preceding.reportDate))
+                    throw new Error('Dữ liệu ngày trước mốc không đúng kỳ báo cáo hoặc cơ quan.');
+            }
             if (entry.request === revision && !controller.signal.aborted) {
                 entry.body = body;
                 entry.html = null;
@@ -222,11 +235,13 @@ export class DailyIndicatorPanel {
         }
     }
     bind(c, doc = document) {
+        this.cleanWidgets();
+        this.cleanWidgets = () => { };
         const key = this.key(c), entry = this.entries.get(key);
         if (!entry || this.activeKey !== key)
             return;
         doc.querySelector('[data-daily-indicator-retry]')?.addEventListener('click', () => { void this.load(c, entry); this.changed(); });
-        doc.querySelectorAll('[data-daily-indicator-row]').forEach(el => el.addEventListener('click', () => { if (this.activeKey !== key)
+        doc.querySelectorAll('[data-daily-indicator-row]').forEach(el => el.addEventListener('click', event => { if (this.activeKey !== key || !indicatorRowClick(event))
             return; const selected = el.dataset.dailyIndicatorRow ?? null; if (entry.selected === selected)
             return; entry.selected = selected; entry.html = null; this.changed(); }));
         doc.querySelectorAll('[data-daily-indicator-date]').forEach(el => el.addEventListener('change', () => {
@@ -235,13 +250,9 @@ export class DailyIndicatorPanel {
                 return;
             let current = body.current.reportDate ?? '', baseline = body.baseline.reportDate ?? '';
             if (el.dataset.dailyIndicatorDate === 'current') {
-                if (el.value === baseline)
+                if (baseline && el.value <= baseline)
                     return;
                 current = el.value;
-                // Let the server choose the literal previous day. It can explicitly mark
-                // a month/quarter/year boundary instead of rejecting an out-of-period date.
-                if (baseline >= current)
-                    baseline = '';
             }
             else {
                 if (el.value >= current)
@@ -251,6 +262,8 @@ export class DailyIndicatorPanel {
             void this.load(c, entry, current, baseline);
             this.changed();
         }));
+        const calendarCleanup = bindDatePickers(doc), chartCleanup = bindComboCharts(doc);
+        this.cleanWidgets = () => { calendarCleanup(); chartCleanup(); };
     }
 }
 //# sourceMappingURL=daily-indicator-comparison.js.map

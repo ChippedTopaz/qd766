@@ -14,6 +14,9 @@ export function installAdminLayout(root) {
     if (formulas)
         items.push(['formulas', 'Công thức tính']);
     const trivia = sections.find(s => s.dataset.triviaBank === 'true');
+    const sourceMonitor = sections.find(s => s.dataset.sourceMonitor === 'true');
+    if (sourceMonitor)
+        items.push(['source-monitor', 'Cảnh báo nguồn dữ liệu']);
     if (trivia)
         items.push(['trivia', 'Hỏi đáp nhanh']);
     if (registration)
@@ -56,6 +59,8 @@ export function installAdminLayout(root) {
         panels.formulas.append(formulas);
     if (trivia)
         panels.trivia.append(trivia);
+    if (sourceMonitor)
+        panels['source-monitor'].append(sourceMonitor);
     const inviteHeading = document.createElement("div");
     inviteHeading.className = "actions";
     inviteHeading.innerHTML = '<h2 style="margin-right:auto">Mời dùng thử</h2><button type="button" class="primary" data-new-invite>Tạo link mời</button>';

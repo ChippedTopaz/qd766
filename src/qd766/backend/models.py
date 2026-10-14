@@ -965,3 +965,47 @@ class CollectionControl(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class SourceMonitorBaseline(Base):
+    __tablename__ = 'source_monitor_baselines'
+    key: Mapped[str] = mapped_column(String(240), primary_key=True)
+    profile: Mapped[dict] = mapped_column(JsonDocument)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SourceMonitorSample(Base):
+    """Latest draft only; deliberately not a NationalSummarySnapshot."""
+    __tablename__ = 'source_monitor_samples'
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    year: Mapped[int] = mapped_column(Integer)
+    month: Mapped[int] = mapped_column(Integer)
+    baseline_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('national_summary_snapshots.id', ondelete='RESTRICT'))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict] = mapped_column(JsonDocument)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SourceMonitorAlert(Base):
+    __tablename__ = 'source_monitor_alerts'
+    __table_args__ = (Index('ix_source_alert_state_time','resolved_at','created_at'),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    dedupe_key: Mapped[str] = mapped_column(String(64), unique=True)
+    kind: Mapped[str] = mapped_column(String(24))
+    title: Mapped[str] = mapped_column(String(240))
+    details: Mapped[dict] = mapped_column(JsonDocument)
+    occurrences: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('user_accounts.id', ondelete='RESTRICT'))
+
+
+class SourceMonitorRun(Base):
+    __tablename__ = 'source_monitor_runs'
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    state: Mapped[str] = mapped_column(String(24))
+    details: Mapped[dict] = mapped_column(JsonDocument)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

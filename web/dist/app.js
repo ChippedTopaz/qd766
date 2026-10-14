@@ -12,7 +12,7 @@ import { loadFormulaConfiguration } from './formula-loader.js';
 import { openScoreSimulator } from './score-simulator.js';
 import { renderPeerList, centerPeerLists } from './peer-list.js';
 import { scoreDetailAllowed, renderScoreDetailLink } from './score-drilldown.js';
-import { DailyIndicatorPanel, supportsDailyIndicators } from './daily-indicator-comparison.js';
+import { DailyIndicatorPanel, supportsDailyIndicators, indicatorRowClick } from './daily-indicator-comparison.js';
 import { renderPaidAnalysis, bindPaidAnalysis, clearPaidAnalysis, stopPaidAnalysisPolling } from './paid-analysis.js';
 import { latestPeriod } from './period-choice.js';
 import { CollectionTracker } from "./collection-tracker.js";
@@ -1767,7 +1767,8 @@ function bind() {
             transitionOverview(update);
         document.querySelector(`.overview-score-strip [data-group-detail="${id}"]`)?.focus({ preventScroll: true });
     }));
-    document.querySelectorAll("[data-metric-detail]").forEach(el => el.addEventListener("click", () => { state.selectedMetric = el.dataset.metricDetail ?? null; render(); document.querySelector(".comparison-card")?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }));
+    document.querySelectorAll("[data-metric-detail]").forEach(el => el.addEventListener("click", event => { if (!indicatorRowClick(event))
+        return; state.selectedMetric = el.dataset.metricDetail ?? null; render(); document.querySelector(".comparison-card")?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }));
     document.querySelector("[data-action=clear-metric-detail]")?.addEventListener("click", () => { state.selectedMetric = null; render(); });
     document.querySelector('[data-action=toggle-online-province]')?.addEventListener('click', () => { provinceOnlineViewKey = provinceOnlineViewKey === onlineProvinceKey() ? null : onlineProvinceKey(); render(); });
     document.querySelector("[data-action=close-group-detail]")?.addEventListener("click", () => { transitionDetail(() => { state.selectedGroup = null; state.selectedMetric = null; render(); }, 'total'); document.querySelector('[data-score-total]')?.focus({ preventScroll: true }); });

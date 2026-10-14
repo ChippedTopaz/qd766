@@ -10,6 +10,8 @@ export function installAdminLayout(root:HTMLElement):{edit:()=>void;invite:()=>v
   const formulas=sections.find(s=>s.dataset.formulaConfiguration==='true');
   if(formulas)items.push(['formulas','Công thức tính']);
   const trivia=sections.find(s=>s.dataset.triviaBank==='true');
+  const sourceMonitor=sections.find(s=>s.dataset.sourceMonitor==='true');
+  if(sourceMonitor)items.push(['source-monitor','Cảnh báo nguồn dữ liệu']);
   if(trivia)items.push(['trivia','Hỏi đáp nhanh']);
   if(registration)items.splice(3,0,["registrations","Đăng ký chờ duyệt"]);
   sidebar.innerHTML=`<a class="admin-brand" href="/"><span class="admin-logo"><img class="cchc-logo" src="/assets/logo-cchc.png" alt="Cải cách hành chính" width="44" height="44"></span> <span>Quản trị</span></a><nav aria-label="Quản trị">${items.map(([key,label])=>`<button data-admin-section="${key}">${label}</button>`).join("")}</nav><a class="button admin-back" href="/">Về Tổng quan</a>`;
@@ -35,6 +37,7 @@ export function installAdminLayout(root:HTMLElement):{edit:()=>void;invite:()=>v
   if(aiConfiguration)panels['ai-configuration']!.append(aiConfiguration);
   if(formulas)panels.formulas!.append(formulas);
   if(trivia)panels.trivia!.append(trivia);
+  if(sourceMonitor)panels['source-monitor']!.append(sourceMonitor);
   const inviteHeading=document.createElement("div");
   inviteHeading.className="actions";
   inviteHeading.innerHTML='<h2 style="margin-right:auto">Mời dùng thử</h2><button type="button" class="primary" data-new-invite>Tạo link mời</button>';

@@ -8,6 +8,7 @@ import {installFormulaConfiguration} from './admin-formula-configuration.js';
 import {installCollectionMonitor} from "./admin-collection.js";
 import {installRegistrationAdmin} from "./admin-registration.js";
 import {adminSubscriptionCell,type SubscriptionSummary} from "./admin-subscription.js";
+import {installSourceMonitor} from './admin-source-monitor.js';
 let layout:ReturnType<typeof installAdminLayout>|null=null;
 let creditManager:Awaited<ReturnType<typeof installTrialCreditManager>>=null;
 type Account={id:string;email:string|null;name:string;role:string;admitted:boolean;active:boolean;accessTier:string;provinceId:string|null;unitId:string|null;provinceName?:string|null;unitName?:string|null;credits:number;reservedCredits:number;subscription?:SubscriptionSummary|null;canActivateTrial?:boolean};
@@ -106,7 +107,7 @@ root.innerHTML=`<header><div><h1>Quản trị hệ thống</h1><p>${esc(me.name)
     installTrialCreditManager(root,initialApi,refresh,true).then(manager=>{creditManager=manager;}),
     installRegistrationAdmin(root,initialApi,async()=>{await refresh();filterUnits();},true)
   ]);
-  filterUnits();showAccounts();installCollectionMonitor(root,api);installAnalysisConfiguration(root,api);installFormulaConfiguration(root,api);installTriviaBank(root,api);layout=installAdminLayout(root);
+  filterUnits();showAccounts();installCollectionMonitor(root,api);installAnalysisConfiguration(root,api);installFormulaConfiguration(root,api);installTriviaBank(root,api);installSourceMonitor(root,api);layout=installAdminLayout(root);
   root.addEventListener("click",event=>{const key=(event.target as HTMLElement).closest<HTMLElement>("[data-admin-section]")?.dataset.adminSection;if(key==="invitations")void run(loadInvitations);if(key==="audit")void run(loadAudit);});
   // Agency choices belong to the invitation form, not the initial account screen.
   get("unit").innerHTML='<option value="">Chọn cơ quan</option>';

@@ -58,6 +58,30 @@ class DailyIndicatorComparisonTests(unittest.TestCase):
   response=self.get(current_date='2026-10-10',baseline_date='2026-10-07');self.assertEqual(response.status_code,200,response.text)
   rows=response.json()['series'];self.assertEqual([r['reportDate'] for r in rows],['2026-10-07','2026-10-08','2026-10-09','2026-10-10'])
   self.assertEqual(rows[2]['state'],'missing');self.assertIsNone(rows[2]['entity'])
+ def test_preceding_day_anchors_first_delta_same_period_unit(self):
+  with self.factory.begin() as db:self.add_day(db,6,800)
+  self.agency();body=self.get(current_date='2026-10-08',baseline_date='2026-10-07').json()
+  self.assertEqual(body['preceding']['reportDate'],'2026-10-06')
+  self.assertEqual(body['preceding']['state'],'available')
+  self.assertEqual(body['preceding']['entity']['departmentId'],CHILD_ID)
+  self.assertEqual(body['preceding']['entity']['parameters']['totalDossierOnlinePaymentSuccess'],800)
+  self.assertEqual([r['reportDate'] for r in body['series']],['2026-10-07','2026-10-08'])
+  self.assertNotIn('privateNote',str(body));self.assertNotIn('Peer',str(body))
+ def test_preceding_missing_and_before_supported_history_remains_missing(self):
+  body=self.get().json();self.assertEqual(body['preceding']['reportDate'],'2026-10-06')
+  self.assertEqual(body['preceding']['state'],'missing');self.assertIsNone(body['preceding']['entity'])
+  with self.factory.begin() as db:self.add_day(db,6,800)
+  body=self.get(baseline_date='2026-10-06').json()
+  self.assertEqual(body['preceding']['reportDate'],'2026-10-05');self.assertIsNone(body['preceding']['entity'])
+ def test_provincial_middle_and_preceding_score_use_linked_national_source(self):
+  with self.factory.begin() as db:
+   self.add_day(db,6,800);self.add_day(db,9,1300)
+   for entity in db.scalars(select(Entity).join(Dataset).where(Dataset.group_name=='transparency',Entity.entity_kind=='root')):
+    entity.api_score=99
+  body=self.get(unit_id=ROOT_ID,group='transparency',baseline_date='2026-10-07',current_date='2026-10-09').json()
+  self.assertEqual(body['preceding']['entity']['apiScore'],2)
+  self.assertEqual(body['series'][1]['entity']['apiScore'],2)
+  self.assertEqual(body['series'][1]['entity']['scoreSource'],'dvcqg-national-summary')
  def test_leap_year_range_is_bounded_without_data(self):
   from qd766.backend.daily_indicators import comparison_payload
   from qd766.periods import PeriodSelection

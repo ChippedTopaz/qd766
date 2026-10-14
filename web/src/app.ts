@@ -12,7 +12,7 @@ import {loadFormulaConfiguration} from './formula-loader.js';
 import {openScoreSimulator} from './score-simulator.js';
 import {renderPeerList,centerPeerLists} from './peer-list.js';
 import {scoreDetailAllowed,renderScoreDetailLink,type ScoreDetailTarget} from './score-drilldown.js';
-import {DailyIndicatorPanel,supportsDailyIndicators,type IndicatorContext} from './daily-indicator-comparison.js';
+import {DailyIndicatorPanel,supportsDailyIndicators,indicatorRowClick,type IndicatorContext} from './daily-indicator-comparison.js';
 import {renderPaidAnalysis,bindPaidAnalysis,clearPaidAnalysis,stopPaidAnalysisPolling} from './paid-analysis.js';
 import {latestPeriod} from './period-choice.js';
 import { CollectionTracker, type TrackedCollection } from "./collection-tracker.js";
@@ -1357,7 +1357,7 @@ function bind(): void {
     if(overviewTab==='details')transitionDetail(update,id);else transitionOverview(update);
     document.querySelector<HTMLElement>(`.overview-score-strip [data-group-detail="${id}"]`)?.focus({preventScroll:true});
   }));
-  document.querySelectorAll<HTMLElement>("[data-metric-detail]").forEach(el=>el.addEventListener("click",()=>{state.selectedMetric=el.dataset.metricDetail??null;render();document.querySelector(".comparison-card")?.scrollIntoView({behavior:"smooth",block:"nearest"})}));
+  document.querySelectorAll<HTMLElement>("[data-metric-detail]").forEach(el=>el.addEventListener("click",event=>{if(!indicatorRowClick(event))return;state.selectedMetric=el.dataset.metricDetail??null;render();document.querySelector(".comparison-card")?.scrollIntoView({behavior:"smooth",block:"nearest"})}));
   document.querySelector<HTMLElement>("[data-action=clear-metric-detail]")?.addEventListener("click",()=>{state.selectedMetric=null;render()});
   document.querySelector<HTMLElement>('[data-action=toggle-online-province]')?.addEventListener('click',()=>{provinceOnlineViewKey=provinceOnlineViewKey===onlineProvinceKey()?null:onlineProvinceKey();render();});
   document.querySelector<HTMLElement>("[data-action=close-group-detail]")?.addEventListener("click",()=>{transitionDetail(()=>{state.selectedGroup=null;state.selectedMetric=null;render();},'total');document.querySelector<HTMLElement>('[data-score-total]')?.focus({preventScroll:true});});

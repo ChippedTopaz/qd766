@@ -42,7 +42,12 @@ for(const scope of ['all','formality']){
  assert.match(initialComparison,/Thứ hạng trong tỉnh/,'Initial group panel shows provincial same-level rank');
  assert.match(initialComparison,/aria-current="true"/,'Selected agency is marked for local centering');
  for(const key of keys){
-  const row=metrics.find(m=>m.dataset.metricDetail===key);assert(row,'Scored payment row is bound');row.handlers.click();
+  const row=metrics.find(m=>m.dataset.metricDetail===key);assert(row,'Scored payment row is bound');
+  assert.match(app.innerHTML,new RegExp('<tr[^>]*data-metric-detail="'+key.replace('.','\\.')+'"'),'Click handler belongs to the row, not only the name');
+  const before=app.innerHTML;
+  row.handlers.click({target:{closest(){return {matches(){return false}}}}});
+  assert.equal(app.innerHTML,before,'An independent control in the row keeps its own action');
+  row.handlers.click({target:{closest(){return null}}});
   assert.match(app.innerHTML,/metric-comparison/,'Click switches right-side comparison to component score');
   assert.match(app.innerHTML,/So sánh chỉ tiêu với đơn vị cùng cấp/);
   assert.match(app.innerHTML,new RegExp('class="selectable-row selected" data-metric-detail="'+key.replace('.','\\.')+'"'));

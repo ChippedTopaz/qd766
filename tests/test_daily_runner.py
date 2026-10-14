@@ -1,5 +1,5 @@
 """End-to-end runner on isolated SQLite, with every HTTP/source call mocked."""
-import sys,unittest,tempfile,uuid,copy,io
+import sys,unittest,tempfile,uuid,copy,io,json,hashlib
 from pathlib import Path
 from datetime import datetime,timezone
 from types import SimpleNamespace
@@ -57,9 +57,11 @@ class DailyRunnerTest(unittest.TestCase):
             roots=[SimpleNamespace(root_department_id=uuid.UUID(int=100+i),province_name='Tỉnh '+str(i)) for i in range(34)]
             with Session(engine) as db:db.add(CollectionControl(key='dvcqg',circuit_state='closed'));db.commit()
             captures={};first_failure=[3]
-            def national(period,transport):
-                return NationalSummaryCapture(period,{}, {'evaluation':[{'departmentId':str(r.root_department_id),
-                    'totalScore':30,'groupScores':{code:5 for code in NATIONAL_GROUP_CODES.values()}} for r in roots]},'a'*64,datetime.now(timezone.utc))
+            def national(period,transport,*,on_data=None):
+                data={'evaluation':[{'departmentId':str(r.root_department_id),
+                    'totalScore':30,'groupScores':{code:5 for code in NATIONAL_GROUP_CODES.values()}} for r in roots]}
+                if on_data:on_data(data)
+                return NationalSummaryCapture(period,{},data,'a'*64,datetime.now(timezone.utc))
             def collect(plan,*,period,output_dir,**kwargs):
                 if first_failure[0]:
                     first_failure[0]-=1
@@ -73,7 +75,14 @@ class DailyRunnerTest(unittest.TestCase):
                 payload['datasets']=[dict(copy.deepcopy(dataset),group=group,period=key) for group in NATIONAL_GROUP_CODES]
                 payload['status'].update(requiredGroups=list(NATIONAL_GROUP_CODES),loadedGroups=list(NATIONAL_GROUP_CODES))
                 captures[output_dir]=payload
-                return {'captures':[{'capturedAt':datetime.now(timezone.utc).isoformat()} for _ in NATIONAL_GROUP_CODES]}
+                output_dir.mkdir(parents=True,exist_ok=True);manifest={'captures':[]}
+                for group in NATIONAL_GROUP_CODES:
+                    raw=json.dumps({'code':'OK','data':{'overview':{'departmentId':str(root_id),'totalMaxScore':10,'metrics':[]},'evaluation':[]}}).encode()
+                    filename=group+'.json';(output_dir/filename).write_bytes(raw)
+                    manifest['captures'].append({'group':group,'file':filename,'sha256':hashlib.sha256(raw).hexdigest(),
+                                                'capturedAt':datetime.now(timezone.utc).isoformat()})
+                (output_dir/'manifest.json').write_text(json.dumps(manifest),encoding='utf-8')
+                return manifest
             with patch.object(runner,'ROOT',root),patch.object(runner,'load_province_roots',return_value={str(i):r for i,r in enumerate(roots)}),\
                  patch.object(runner,'load_environment_file'),patch.object(runner,'create_database_engine',return_value=engine),\
                  patch.object(runner,'PooledHttpTransport',return_value=SimpleNamespace(close=lambda:None)),\

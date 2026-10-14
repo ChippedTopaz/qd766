@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {renderSourceMonitorReport,renderSourceMonitorDetail} from '../dist/admin-source-monitor.js';
+const item={id:'id',kind:'structure',title:'<script>alert(1)</script>',updatedAt:'2026-10-14T00:00:00Z',createdAt:'2026-10-14T00:00:00Z',read:false,resolved:false,occurrences:2,changeCount:1,confirmed:true};
+const report=renderSourceMonitorReport({items:[item],total:21,unread:3,page:1,pageSize:20,runs:[]});
+assert.match(report,/3 cảnh báo chưa đọc/);assert.match(report,/Trang 1\/2/);
+assert.match(report,/&lt;script&gt;/);assert.doesNotMatch(report,/<script>/);
+assert.match(report,/Không đồng nghĩa nguồn không thay đổi/);
+const detail=renderSourceMonitorDetail({...item,details:{changes:[{field:'x',before:'<img src=x>',after:8,change:'changed'}],note:'<b>source</b>'},recrawlPlan:{periods:[{type:'month',year:2026,value:9}],note:'Chưa chạy'}});
+assert.match(detail,/&lt;img src=x&gt;/);assert.doesNotMatch(detail,/<img/);
+assert.match(detail,/Tháng 9\/2026/);assert.match(detail,/Không công bố bản nháp/);
+const source=readFileSync(new URL('../src/admin-source-monitor.ts',import.meta.url),'utf8');
+assert.doesNotMatch(source,/setInterval|confirm\(/);assert.match(source,/showModal\(\)/);
+assert.match(source,/source-monitor\?page=/);
+assert.match(readFileSync(new URL('../src/admin-layout.ts',import.meta.url),'utf8'),/source-monitor/);
+console.log('SOURCE_MONITOR_UI=PASS escaping, pagination, custom dialog, no polling');
