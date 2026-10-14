@@ -19,6 +19,7 @@ assert.equal(indicatorValues('transparency',{...raw,metrics:[{...raw.metrics[0],
 const body={scope:'all',group,unitId:'own',unitName:'Agency',availableDates:['2026-10-12','2026-10-11','2026-10-09'],baseline:{reportDate:'2026-10-11',capturedAt:null,entity:before,state:'available'},current:{reportDate:'2026-10-12',capturedAt:null,entity:after,state:'available'}};
 let html=renderIndicatorComparison(body,'3.6');assert.match(html,/\+200/);assert.match(html,/\+8,79 điểm %/);assert.match(html,/\+0,52 điểm/);assert.match(html,/12\/10\/2026/);assert.match(html,/Điểm tính đối chiếu/);
 const summaryHtml=renderIndicatorComparison(body);
+assert.doesNotMatch(summaryHtml,/Chênh lệch là thay đổi của số liệu lũy kế|daily-indicator-footnote/,'Removed cumulative-change footnote');
 assert.doesNotMatch(summaryHtml,/<small>(?:Số liệu tham khảo|Điểm nguồn|Điểm tính đối chiếu)<\/small>/,'No under-name source captions');
 assert.match(summaryHtml,/<td class="daily-count" data-label="Số lượng đạt">/);
 assert.match(summaryHtml,/<strong class="change-positive">85,71%<\/strong>/,'Improved ratio value uses existing positive tone');

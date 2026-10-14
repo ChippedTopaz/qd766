@@ -115,8 +115,7 @@ export function renderIndicatorComparison(body:DailyIndicatorBody,selected:strin
   <td class="daily-count" data-label="Tổng số">${cell(row.before?.denominator,row.after?.denominator,row.total,'','change-neutral',0)}</td>
   <td data-label="Tỷ lệ">${cell(row.before?.ratio,row.after?.ratio,row.ratio,' điểm %',ratioTone,2,'%',true)}</td>
   <td data-label="Điểm"${metric?.source==='calculated'?' title="Điểm tính đối chiếu theo công thức hiển thị; không thay điểm nhóm nguồn công bố."':''}>${cell(row.before?.score,row.after?.score,row.score,' điểm',changeTone(row.score),2,'',true)}</td></tr>`;
- }).join('')}</tbody></table>`:'<p class="daily-indicator-empty">Chưa có chỉ tiêu chi tiết để so sánh ở hai ngày được chọn.</p>'}
- <p class="daily-indicator-footnote">Chênh lệch là thay đổi của số liệu lũy kế, có thể bao gồm cập nhật hồ sơ cũ. Không tự kết luận nguyên nhân là biện pháp cải thiện. Ngày dữ liệu không phải ngày cào.</p>`;
+ }).join('')}</tbody></table>`:'<p class="daily-indicator-empty">Chưa có chỉ tiêu chi tiết để so sánh ở hai ngày được chọn.</p>'}`;
  return `<div class="daily-indicator-columns"><div class="daily-indicator-metrics">${content}</div>${countChart(body,selectedRow)}</div>`;
 }
 

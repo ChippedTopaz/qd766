@@ -40,7 +40,7 @@ export function registrationBirthDate(value:string,today=new Date()):string{
 export function registrationFieldError(field:string,value:string|boolean):string{
   const text=typeof value==='string'?value.trim():'';
   switch(field){
-    case 'fullName':return !text?'Vui lòng nhập họ và tên.':text.length<2?'Họ và tên phải có ít nhất 2 ký tự.':text.length>160?'Họ và tên không được quá 160 ký tự.':/[\x00-\x1f]/.test(text)?'Họ và tên không hợp lệ.':'';
+    case 'fullName':return !text?'Vui lòng nhập họ và tên.':text.length<2?'Họ và tên phải có ít nhất 2 ký tự.':text.length>160?'Họ và tên không được quá 160 ký tự.':!/^\p{L}[\p{L}\p{M} .\-'\u2019\u2010\u2011]*$/u.test(text.normalize('NFC'))?'Họ và tên chỉ được chứa chữ cái, dấu cách, dấu chấm, gạch nối hoặc dấu nháy trong tên.':'';
     case 'birthDate':if(!text)return 'Vui lòng nhập hoặc chọn ngày sinh.';try{registrationBirthDate(text);return '';}catch(error){return error instanceof Error?error.message:'Ngày sinh không hợp lệ.';}
     case 'gender':return ['male','female'].includes(text)?'':'Vui lòng chọn giới tính.';
     case 'workplace':return text.length>240?'Đơn vị công tác không được quá 240 ký tự.':text&&text.length<2?'Đơn vị công tác phải có ít nhất 2 ký tự.':/[\x00-\x1f]/.test(text)?'Đơn vị công tác không hợp lệ.':'';

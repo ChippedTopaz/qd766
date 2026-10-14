@@ -16,6 +16,8 @@ assert.equal(registrationFieldError('unit',''),'Vui lòng chọn cơ quan, đơn
 assert.equal(registrationFieldError('declarationAccepted',false),'Vui lòng tích xác nhận cam đoan thông tin đăng ký.');
 assert.equal(registrationFieldError('workplace',''),'');
 assert.equal(registrationFieldError('fullName','Nguyễn Văn A'),'');
+for(const name of ["'and 1=1",'Nguyễn OR 1=1 --','<script>alert(1)</script>','12345','Nguyễn\u200bVăn A','Nguyễn😀'])assert.notEqual(registrationFieldError('fullName',name),'');
+for(const name of ["Nguyễn O'Connor","D'Artagnan",'Đặng Thị Hồng','Jean-Luc','O’Connor','J. Nguyễn','Nguyễn Văn A'.normalize('NFD'),'李明'])assert.equal(registrationFieldError('fullName',name),'');
 console.log('REGISTRATION_VIETNAMESE_VALIDATION_OK');
 let typed='';
 for(const digit of '17051990')typed=registrationBirthMask(typed+digit).value;

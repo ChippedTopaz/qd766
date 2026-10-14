@@ -4,8 +4,8 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 import unittest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, func
-from qd766.backend.models import TrialRegistration, UserAccount, SubscriptionCycle, CreditWalletEvent
+from sqlalchemy import select, func, event, delete
+from qd766.backend.models import TrialRegistration, UserAccount, SubscriptionCycle, CreditWalletEvent, LoginSession
 import test_shared_registration as shared_registration
 from test_backend import ROOT_ID, CHILD_ID, TAY_NINH_ROOT_ID, TAY_NINH_CHILD_ID
 
@@ -103,6 +103,72 @@ class PublicRegistrationTests(unittest.TestCase):
         self.assertEqual(self.client.post(path,json=data,headers=self.headers).status_code,200)
         self.assertEqual(self.review([row['id']]).status_code,200)
         self.assertEqual(client.get('/api/v1/auth/me').json()['accessTier'],'province')
+
+    def test_name_validation_rejects_probe_markup_and_controls_without_writes(self):
+        client=self.join_public('name-validation')
+        for name in ("'and 1=1", "Nguyễn OR 1=1 --", "A; DROP TABLE user_accounts", '<script>alert(1)</script>',
+                     'Nguyễn\x00Văn A', 'Nguyễn\u200bVăn A', '12345', ' -- ', 'Nguyễn😀'):
+            with self.subTest(name=name):
+                self.assertEqual(self.submit(client,{**self.payload(),'fullName':name}).status_code,422)
+        with self.app.state.session_factory() as db:
+            registration=db.scalar(select(TrialRegistration))
+            self.assertEqual(registration.state,'draft');self.assertIsNone(registration.full_name)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CreditWalletEvent)),0)
+        self.assertEqual(self.submit(client,{**self.payload(),'fullName':"Nguyễn O'Connor"}).status_code,200)
+
+    def test_name_allowlist_preserves_international_letters_and_apostrophes(self):
+        import unicodedata
+        from qd766.backend.trial_registration import PublicSelection
+        for name in ('Đặng Thị Hồng',"D'Artagnan",'O’Connor','Jean-Luc','J. Nguyễn','李明',
+                     unicodedata.normalize('NFD','Nguyễn Văn A')):
+            with self.subTest(name=name):
+                profile=PublicSelection.model_validate({**self.payload(),'fullName':name})
+                self.assertEqual(profile.fullName,unicodedata.normalize('NFC',name))
+
+    def test_profile_strings_are_bound_data_not_executable_sql(self):
+        client=self.join_public('bound-data');statements=[]
+        probe="Office ' OR 1=1; DROP TABLE user_accounts; --"
+        def capture(connection,cursor,statement,parameters,context,executemany):
+            statements.append((statement,parameters))
+        event.listen(self.app.state.engine,'before_cursor_execute',capture)
+        try:
+            response=self.submit(client,{**self.payload(),'fullName':"D'Artagnan",'workplace':probe})
+        finally:
+            event.remove(self.app.state.engine,'before_cursor_execute',capture)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertTrue(statements)
+        self.assertTrue(all(probe not in sql and "D'Artagnan" not in sql for sql,_ in statements))
+        self.assertTrue(any(probe in str(parameters) for _,parameters in statements))
+        with self.app.state.session_factory() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(UserAccount)),2)
+            self.assertEqual(db.scalar(select(TrialRegistration)).workplace,probe)
+            self.assertEqual(db.get(UserAccount,self.admin_id).role,'admin')
+            self.assertEqual(db.scalar(select(func.count()).select_from(CreditWalletEvent)),0)
+
+    def test_invalid_legacy_name_cannot_be_approved_but_can_be_rejected(self):
+        client=self.join_public('legacy-name');self.submit(client,self.payload())
+        row=self.client.get('/api/v1/admin/registrations').json()[0]
+        with self.app.state.session_factory.begin() as db:
+            item=db.scalar(select(TrialRegistration));item.full_name="'and 1=1"
+        self.assertEqual(self.review([row['id']]).status_code,422)
+        with self.app.state.session_factory() as db:
+            item=db.scalar(select(TrialRegistration))
+            self.assertEqual(item.state,'pending');self.assertFalse(db.get(UserAccount,item.account_id).trial_admitted)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CreditWalletEvent)),0)
+        self.assertEqual(self.review([row['id']],'reject').status_code,200)
+
+    def test_disabled_applicant_cannot_login_again_or_use_old_session(self):
+        client=self.join_public('blocked-applicant');self.submit(client,self.payload())
+        with self.app.state.session_factory.begin() as db:
+            item=db.scalar(select(TrialRegistration));account=db.get(UserAccount,item.account_id)
+            item.state='rejected';account.active=False
+            db.execute(delete(LoginSession).where(LoginSession.account_id==account.id))
+        self.assertEqual(client.get('/api/v1/auth/registration').status_code,401)
+        self.assertEqual(client.get('/api/v1/dashboard').status_code,401)
+        returning,result=self.redeem(sub='blocked-applicant',email='blocked-applicant@example.com')
+        self.addCleanup(returning.close)
+        self.assertEqual(result.headers['location'],'/?login=failed')
+        self.assertEqual(returning.get('/api/v1/auth/registration').status_code,401)
 
 
 if __name__=='__main__':unittest.main()

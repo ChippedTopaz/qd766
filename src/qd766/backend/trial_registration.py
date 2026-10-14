@@ -1,6 +1,7 @@
 """Shared agency-only invitation. Pending accounts cannot read dashboard data."""
 import secrets
 import uuid
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
@@ -89,6 +90,21 @@ class AgencySelection(BaseModel):
     unitId: uuid.UUID
 
 
+def validated_full_name(value: str) -> str:
+    """Profile validation, not an SQL filter: ORM parameters remain the SQL boundary.
+
+    Preserve Vietnamese/international letters, combining marks, initials and
+    apostrophes (e.g. O'Connor); reject numbers, markup and control characters.
+    Never rewrite previously stored submissions during review.
+    """
+    value = unicodedata.normalize('NFC', value)
+    punctuation = " .-'\u2019\u2010\u2011"
+    if (not 2 <= len(value) <= 160 or not unicodedata.category(value[0]).startswith('L')
+            or any(not (unicodedata.category(c)[0] in {'L', 'M'} or c in punctuation) for c in value)):
+        raise ValueError("Họ và tên chỉ được chứa chữ cái, dấu cách, dấu chấm, gạch nối hoặc dấu nháy trong tên.")
+    return value
+
+
 class PublicSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     fullName: str = Field(min_length=2, max_length=160)
@@ -106,6 +122,11 @@ class PublicSelection(BaseModel):
         if not isinstance(value, str) or any(ord(c) < 32 for c in value):
             raise ValueError("Thông tin không hợp lệ.")
         return value.strip()
+
+    @field_validator("fullName")
+    @classmethod
+    def valid_name(cls, value):
+        return validated_full_name(value)
 
     @field_validator("birthDate")
     @classmethod
@@ -279,6 +300,11 @@ def review_registrations(payload: ReviewBatch, request: Request):
                 raise HTTPException(409, "Tài khoản đã thay đổi; hãy tải lại danh sách.")
             now = datetime.now(timezone.utc)
             if payload.decision == "approve":
+                if item.full_name is not None:
+                    try:
+                        validated_full_name(item.full_name)
+                    except ValueError:
+                        raise HTTPException(422, "Họ và tên trong hồ sơ không hợp lệ. Vui lòng kiểm tra hoặc từ chối đăng ký.")
                 if item.requested_tier not in {"province", "agency"}:
                     raise HTTPException(422, "Loại tài khoản không hợp lệ.")
                 validate_registration(db, item.root_department_id, item.unit_department_id, item.requested_tier)
