@@ -1,0 +1,109 @@
+/* Scoped log tokens and controls; dashboard, accounts and formulas are unchanged. */
+.admin-log-hub,.admin-log-dialog{--log-ink:#243454;--log-muted:#738099;--log-line:#e7ebf3;--log-accent:#5145cd;font-family:inherit;font-size:13px;line-height:1.5;color:var(--log-ink);font-variant-numeric:tabular-nums}
+.admin-log-hub{min-width:0;margin-top:20px;background:#fff;border:1px solid var(--log-line);border-radius:18px;box-shadow:0 5px 24px #24345404}
+.admin-log-hub>.log-tabs{display:flex;align-items:center;flex-wrap:wrap;gap:28px;margin:0;padding:0 24px;border:0;border-bottom:1px solid var(--log-line);background:transparent;border-radius:0}
+.admin-log-hub button,.admin-log-dialog button,.log-filter-more summary{font-family:inherit;font-size:12px;font-weight:600;line-height:1.4;border:1px solid #dfe5ef;border-radius:8px;background:#fff;color:#4f5e78;padding:8px 12px;min-height:34px;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.admin-log-hub button:hover,.admin-log-dialog button:hover,.log-filter-more summary:hover{background:#f6f7fc;border-color:#cbd3e4;color:var(--log-accent)}
+.admin-log-hub button:disabled,.admin-log-dialog button:disabled{opacity:.4;cursor:default}
+.admin-log-hub .log-tabs button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:55px;padding:16px 0 14px;border:0;border-bottom:2px solid transparent;border-radius:0;background:none;color:var(--log-muted);font-size:13px;font-weight:600;white-space:nowrap}
+.admin-log-hub .log-tabs button.active{color:var(--log-accent);border-bottom-color:var(--log-accent);background:none}
+.admin-log-hub .log-tabs button:hover{color:var(--log-accent);background:none}
+[data-source-count],[data-log-filter-count]{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:6px;font-size:11px;background:#eef0fb;color:var(--log-accent);font-weight:600}
+.admin-log-hub>section[data-log-view]{margin:0;padding:24px;min-width:0;border-radius:0;background:transparent;box-shadow:none}
+.admin-log-hub [hidden],.log-tabs [hidden],.admin-log-dialog [hidden]{display:none!important}
+.admin-log-hub h2,.admin-log-dialog h2{font-size:17px;line-height:1.4;font-weight:650;letter-spacing:-.2px}
+.admin-log-hub h3,.admin-log-dialog h3{font-size:13px;line-height:1.5;font-weight:600}
+.admin-log-hub p,.admin-log-hub small,.admin-log-dialog p,.admin-log-dialog small{font-size:12px;line-height:1.5;color:var(--log-muted)}
+.admin-log-hub [role=status]:empty{display:none}
+.log-title-row,.log-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.log-title-row{margin-bottom:20px;min-height:34px}
+.log-title-row h2,.log-title-row h3{margin:0}
+.log-title-row>button{flex-shrink:0}
+.log-context{margin:-8px 0 20px}
+.log-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:24px}
+.log-summary article{min-width:0;padding:18px;border:1px solid var(--log-line);border-radius:12px;background:#fafbfe;display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+.log-summary h3{margin:0;color:var(--log-muted)}
+.log-summary strong{font-size:19px;font-weight:650;letter-spacing:-.3px}
+.log-summary small{overflow-wrap:anywhere}
+.log-summary button{margin-top:auto}
+.log-warning{padding:12px 16px;background:#fff7ed;color:#9a3412!important;border-radius:10px}
+.log-updated{margin-bottom:0}
+.log-filters.log-toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:0 0 20px;padding:0 0 20px;border-bottom:1px solid var(--log-line)}
+.log-filter-primary{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px;min-width:0}
+.log-filters label{display:grid;gap:6px;min-width:0;color:var(--log-muted);font-size:12px;font-weight:500;line-height:1.4}
+.log-filters .log-field-source{width:128px}.log-filters .log-field-kind{width:198px}.log-filters .log-field-state{width:140px}.log-filters .log-field-actor{width:160px}.log-filters .log-field-action{width:186px}.log-filters .log-search{width:210px}
+.log-filters input,.log-filters select{display:block;width:100%;height:36px;min-width:0;margin:0;padding:7px 10px;border:1px solid #dfe5ef;border-radius:8px;background:#fff;color:var(--log-ink);font-family:inherit;font-size:12px;line-height:1.4;font-weight:400;box-shadow:none;outline-offset:2px}
+.log-filters input::placeholder{color:#9aa5b5}
+.log-filters input:focus,.log-filters select:focus{border-color:#a6a0e9;outline:2px solid #eeecfc}
+.log-filter-actions{display:flex;align-items:center;gap:10px;flex-shrink:0;height:36px}
+.log-filter-more{position:relative;margin:0}
+.log-filter-more summary{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;list-style:none;white-space:nowrap;user-select:none}
+.log-filter-more summary::-webkit-details-marker{display:none}
+.log-filter-more[open]>summary{color:var(--log-accent);border-color:#c5c0ee;background:#f8f7ff}
+.log-filter-popover{position:absolute;top:calc(100% + 12px);right:0;z-index:15;width:420px;max-width:calc(100vw - 48px);padding:20px;background:#fff;border:1px solid var(--log-line);border-radius:12px;box-shadow:0 12px 40px #2434541a}
+.log-filter-caption{padding-bottom:14px;margin-bottom:16px;border-bottom:1px solid var(--log-line);font-size:12px;font-weight:600;color:var(--log-ink)}
+.log-filter-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 12px}
+.log-filter-grid .log-field-wide,.log-filter-grid .log-check{grid-column:1/-1}
+.log-filters .log-check{display:flex;align-items:center;gap:8px;min-height:28px;line-height:1.5;color:var(--log-ink)}
+.log-filters .log-check input{appearance:auto;width:15px;height:15px;margin:0;padding:0;flex-shrink:0;accent-color:var(--log-accent)}
+.admin-log-hub .log-reset{height:36px;background:transparent;border-color:transparent;color:var(--log-muted);padding:7px 4px}
+.log-table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;min-width:0!important;border:1px solid var(--log-line);border-radius:10px;overflow:hidden}
+.log-table th,.log-table td{padding:13px 12px;white-space:normal!important;overflow-wrap:anywhere;vertical-align:middle;text-align:left;font-size:12px;line-height:1.5;border-bottom:1px solid #edf0f8}
+.log-table thead th{position:static;background:#f8f9fc;font-size:12px;color:var(--log-muted);font-weight:600}
+.log-table tbody tr:last-child>*{border-bottom:0}
+.log-table td small{display:block;font-size:12px;margin-top:4px;color:var(--log-muted)}
+.log-table .log-number{text-align:right;font-variant-numeric:tabular-nums}
+.admin-log-hub .log-table button,.admin-log-dialog .log-table button{font-size:12px;padding:4px 0;min-height:28px;max-width:100%;white-space:normal;background:none;border:0;color:var(--log-accent)}
+.log-table .log-ellipsis{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log-pager{margin-top:20px;padding-top:4px;font-size:12px;color:var(--log-muted)}
+.log-pager>div{display:flex;gap:10px}
+.admin-log-dialog{width:min(1050px,94vw);max-height:88dvh;overflow:auto;border:1px solid var(--log-line);border-radius:16px;padding:24px;background:#fff}
+.admin-log-dialog::backdrop{background:#17234266}
+.admin-log-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}
+.admin-log-dialog header h2{margin:0;overflow-wrap:anywhere}
+.admin-log-dialog header button{flex-shrink:0}
+.admin-log-dialog .log-title-row{margin-top:22px}
+.log-fields{display:grid;grid-template-columns:minmax(130px,1fr) minmax(0,3fr);gap:10px 18px;font-size:13px;line-height:1.6}
+.log-fields dt{font-weight:600;color:var(--log-muted)}
+.log-fields dd{margin:0;overflow-wrap:anywhere;min-width:0}
+.log-fields .log-fields{margin:0;padding:12px;background:#f8faff;border-radius:10px}
+.admin-log-hub .collection-state,.admin-log-dialog .collection-state{font-size:11px;font-weight:500;padding:4px 8px;border-radius:6px;display:inline-flex;align-items:center}
+.state-not_started,.state-not-started,.state-needs_check,.state-incomplete,.state-not-checked,.state-unreadable,.state-unavailable{background:#fff7ed;color:#9a3412}
+.state-complete,.state-success{background:#ecfdf5;color:#047857}
+.state-not_due,.state-not-due{background:#f1f5f9;color:#475569}
+.state-running,.state-retrying,.state-waiting{background:#eff6ff;color:#1d4ed8}
+.log-tabs button:focus-visible,.admin-log-hub button:focus-visible,.log-filter-more summary:focus-visible{outline:3px solid #a5b4fc;outline-offset:2px}
+.admin-log-hub .source-monitor-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;background:#fafbfe;border:1px solid var(--log-line);border-radius:10px;font-size:12px}
+.admin-log-hub .source-monitor-summary strong{font-size:13px;font-weight:600}
+.admin-log-hub .source-monitor-list article{padding:16px;border-radius:10px;margin:10px 0}
+.admin-log-hub .source-monitor-list strong{font-size:13px;font-weight:600}
+.admin-log-hub .source-monitor-pager{padding-top:6px}
+@media(max-width:1100px){.log-filters.log-toolbar{flex-wrap:wrap}.log-filter-primary{gap:12px}.log-filters .log-search{width:190px}.log-filters .log-field-action{width:176px}}
+@media(max-width:1000px){.log-summary{grid-template-columns:1fr}.log-summary article{display:grid;grid-template-columns:1fr 1fr}.log-summary h3,.log-summary small{grid-column:1/-1}.log-summary strong{font-size:18px}}
+@media(max-width:760px){.admin-log-hub>.log-tabs{gap:20px;padding:0 18px}.admin-log-hub .log-tabs button{font-size:12px;min-height:48px}.admin-log-hub>section[data-log-view]{padding:18px}.log-filter-popover{width:360px}.log-filters .log-field-kind{width:182px}.log-filters .log-search{width:180px}}
+@media(max-width:600px){.admin-log-hub>.log-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}.admin-log-hub .log-tabs button{white-space:normal;min-height:44px;padding:12px 0}.log-filter-primary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.log-filter-primary label{width:auto!important}.log-filter-primary .log-search{grid-column:1/-1}.log-filter-actions{margin-left:auto}.log-filter-popover{width:330px}.log-table th,.log-table td{padding:10px 6px;font-size:12px}.log-fields{grid-template-columns:1fr;gap:4px}.log-fields dd{margin-bottom:10px}.admin-log-dialog{padding:16px}.log-pager button{min-height:36px}.admin-log-hub .source-monitor-summary{align-items:flex-start;flex-direction:column;gap:6px}}
+.source-alert-groups b{font-weight:600;color:var(--log-ink)}
+.source-alert-subjects{padding-left:10px;border-left:2px solid #e7e5fa;margin:8px 0}
+.source-alert-subjects p{margin:4px 0!important;color:#4f5e78!important;line-height:1.5}
+.source-alert-subjects p span{color:#738099}
+.source-monitor-dialog .source-change-table th:first-child{width:21%}
+.source-monitor-dialog .source-change-table th:nth-child(2){width:43%}
+.source-monitor-dialog .source-change-table th:nth-child(3),.source-monitor-dialog .source-change-table th:nth-child(4){width:18%}
+.source-monitor-dialog .source-change-table th,.source-monitor-dialog .source-change-table td{padding:14px 12px;vertical-align:top;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.source-monitor-dialog .source-change-table tbody th{text-align:left;font-weight:600;position:static;background:#fafbfe}
+.source-monitor-dialog .source-change-table strong{font-size:13px;font-weight:600}
+.source-monitor-dialog .source-change-table small{display:block;margin-top:6px;font-size:11px;font-weight:400;color:#738099}
+.source-change-parameter{display:block;margin-top:6px;color:#5145cd;font-weight:600}
+.source-monitor-dialog .source-change-table tbody td:nth-child(2){text-align:left}
+.source-monitor-batch-dialog .source-monitor-list article{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px;border:1px solid #e7ebf5;border-radius:10px;margin:10px 0}
+.source-monitor-batch-dialog .source-monitor-list article>div{min-width:0;overflow-wrap:anywhere}
+.source-monitor-batch-dialog .source-monitor-list article button{flex-shrink:0;font-size:12px}
+.source-monitor-batch-dialog .source-monitor-list p{margin:6px 0;font-size:12px;color:#738099}
+.source-monitor-batch-dialog .source-monitor-list strong{font-size:13px}
+.source-monitor-batch-dialog h3{font-size:14px;margin:20px 0 12px}
+.source-monitor-batch-dialog .source-monitor-pager{display:flex;justify-content:space-between;gap:12px;margin:20px 0;font-size:12px;flex-wrap:wrap}
+.source-monitor-batch-dialog .source-monitor-pager>div{display:flex;gap:10px}
+.source-change-code{margin-top:8px;color:#738099;font-size:11px;font-weight:400}
+.source-change-code summary{cursor:pointer;overflow-wrap:anywhere}
+.source-change-code code{display:block;white-space:normal;font-size:11px;overflow-wrap:anywhere;margin-top:6px}
+@media(max-width:640px){.source-monitor-dialog .source-change-table th,.source-monitor-dialog .source-change-table td{padding:10px 6px;font-size:11px}.source-monitor-dialog .source-change-table strong{font-size:12px}}

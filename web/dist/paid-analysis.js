@@ -1,3 +1,4 @@
+import { userFacingError } from './service-feedback.js';
 const groups = [['transparency', 'Công khai, minh bạch'], ['dvc-progress-tree', 'Tiến độ giải quyết'], ['provide-online-tree', 'Dịch vụ công trực tuyến'], ['dossier-digitized', 'Số hóa hồ sơ'], ['handling-satisfaction', 'Mức độ hài lòng'], ['formality-online-payment-tree', 'Thanh toán trực tuyến']];
 const groupColors = { 'transparency': '#2563eb', 'dvc-progress-tree': '#059669', 'provide-online-tree': '#ec4899', 'dossier-digitized': '#8b5cf6', 'handling-satisfaction': '#d97706', 'formality-online-payment-tree': '#0891b2' };
 const findingHeading = (card) => { const label = groups.find(([id]) => id === card.groupId)?.[1]; const title = card.title.trim(); return title && title !== label && title !== `Đánh giá ${label}` && !/^Nhận định mẫu\s*[·–-]/.test(title) ? `<h4>${esc(title)}</h4>` : ''; };
@@ -53,7 +54,7 @@ export function bindPaidAnalysis(selection, csrf, onChange, onGroup, onWallet) {
             update(value);
         }
         catch (error) {
-            local.error = error instanceof Error ? error.message : 'Chưa xác nhận được kết quả. Xem kết quả đã lưu trước khi gửi lại.';
+            local.error = userFacingError(error, 'Chưa xác nhận được kết quả. Xem kết quả đã lưu trước khi gửi lại.');
         }
         finally {
             local.busy = false;
@@ -82,7 +83,7 @@ export function bindPaidAnalysis(selection, csrf, onChange, onGroup, onWallet) {
                 local.confirming = true;
             }
             catch (error) {
-                local.error = error instanceof Error ? error.message : 'Không kiểm tra được trạng thái phân tích.';
+                local.error = userFacingError(error, 'Chưa thể kiểm tra trạng thái phân tích. Vui lòng thử lại.');
             }
             finally {
                 local.busy = false;
@@ -152,7 +153,7 @@ export function bindPaidAnalysis(selection, csrf, onChange, onGroup, onWallet) {
                 local.error = 'Chưa có kết quả phân tích đã lưu cho lựa chọn này.';
         }
         catch (error) {
-            local.error = error instanceof Error ? error.message : 'Không tải được kết quả.';
+            local.error = userFacingError(error, 'Chưa thể tải kết quả. Vui lòng thử lại.');
         }
         finally {
             local.busy = false;
@@ -175,7 +176,7 @@ export function bindPaidAnalysis(selection, csrf, onChange, onGroup, onWallet) {
             update(value);
         }
         catch (error) {
-            local.error = error instanceof Error ? error.message : 'Không hủy được lượt chờ.';
+            local.error = userFacingError(error, 'Chưa thể hủy lượt chờ. Vui lòng kiểm tra lại trạng thái.');
         }
         finally {
             local.busy = false;
@@ -205,7 +206,7 @@ export function bindPaidAnalysis(selection, csrf, onChange, onGroup, onWallet) {
             catch (error) {
                 if (version !== pollVersion)
                     return;
-                local.error = error instanceof Error ? error.message : 'Chưa đọc được trạng thái.';
+                local.error = userFacingError(error, 'Chưa thể kiểm tra trạng thái. Vui lòng thử lại.');
             }
             onChange();
         };

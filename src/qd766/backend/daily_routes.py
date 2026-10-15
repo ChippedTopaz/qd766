@@ -11,6 +11,27 @@ from .daily_history import history_payload
 from .models import Department
 router=APIRouter(prefix='/api/v1/dashboard')
 
+@router.get('/ranking-history')
+def daily_ranking_history(request:Request, root_department_id:uuid.UUID, unit_id:uuid.UUID,
+        year:int=Query(ge=2026,le=2100), report_date:date|None=None, baseline_date:date|None=None,
+        db:Session=Depends(get_session)):
+    root=getattr(request.state,'authorized_root_id',None)
+    unit=getattr(request.state,'authorized_unit_id',None)
+    if root is not None and root!=root_department_id:
+        raise HTTPException(403,'Tỉnh không thuộc phạm vi được phép xem.')
+    if unit is not None and unit!=unit_id:
+        raise HTTPException(403,'Cơ quan không thuộc phạm vi được phép xem.')
+    if any(day is not None and day.year!=year for day in (report_date,baseline_date)):
+        raise HTTPException(422,'Ngày dữ liệu không thuộc năm báo cáo được chọn.')
+    from .daily_indicators import authorize_unit
+    authorize_unit(db,root_department_id,unit_id)
+    from .ranking_history import ranking_history
+    key=f'ranking-history:{root_department_id}:{unit_id}:{year}:{report_date}:{baseline_date}'
+    payload,_=request.app.state.daily_indicator_cache.get_or_load(key,lambda:ranking_history(
+        db,root_department_id,unit_id,PeriodSelection('year',year,None),report_date,baseline_date))
+    # Same-level public aggregate scores only, as in the existing ranking table.
+    return payload
+
 @router.get('/daily-indicator-comparison')
 def daily_indicator_comparison(request:Request,root_department_id:uuid.UUID,unit_id:uuid.UUID,
         group:str,period_type:Literal['month','quarter','year'],year:int=Query(ge=2026,le=2100),

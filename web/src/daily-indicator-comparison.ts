@@ -5,6 +5,7 @@ import {paymentDefinitions} from './payment-indicators.js';
 import {changeTone} from './change-tone.js';
 import {renderComboChart,bindComboCharts,type ComboModel} from './daily-combo-chart.js';
 import {renderDatePicker,bindDatePickers} from './daily-date-picker.js';
+import {userFacingError} from './service-feedback.js';
 
 export interface IndicatorDay {reportDate:string|null;capturedAt:string|null;entity:Entity|null;state:'available'|'missing'|'outside-period'}
 export interface DailyIndicatorBody {scope:'all';group:GroupId;unitId:string;unitName:string;availableDates:string[];current:IndicatorDay;baseline:IndicatorDay;series?:IndicatorDay[];preceding?:IndicatorDay|null}
@@ -162,7 +163,7 @@ export class DailyIndicatorPanel {
    if(body.preceding!=null){const previous=new Date(body.baseline.reportDate+'T00:00:00Z');previous.setUTCDate(previous.getUTCDate()-1);
     if(!validRecord(body.preceding)||body.preceding.reportDate!==previous.toISOString().slice(0,10)||body.preceding.state==='available'&&!inPeriod(body.preceding.reportDate))throw new Error('Dữ liệu ngày trước mốc không đúng kỳ báo cáo hoặc cơ quan.');}
    if(entry.request===revision&&!controller.signal.aborted){entry.body=body as DailyIndicatorBody;entry.html=null;entry.loadedAt=Date.now();}
-  }catch(e){if(entry.request===revision&&!controller.signal.aborted)entry.error=e instanceof Error?e.message:'Chưa đọc được dữ liệu đã lưu.';}
+  }catch(e){if(entry.request===revision&&!controller.signal.aborted)entry.error=userFacingError(e,'Chưa thể tải dữ liệu đã lưu. Vui lòng thử lại.');}
   finally{if(entry.request===revision)entry.loading=false;if(this.controller===controller)this.controller=null;if(this.activeKey===key&&!controller.signal.aborted)this.changed();}
  }
  bind(c:IndicatorContext,doc:Document=document){

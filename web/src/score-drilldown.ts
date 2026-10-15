@@ -1,5 +1,5 @@
 import type {GroupId,Scope} from './types.js';
-export interface ScoreDetailTarget {provinceId:string;unitId:string;periodId:string;scope:Scope;formalityId:string;group:GroupId|null;reportDate?:string}
+export interface ScoreDetailTarget {provinceId:string;unitId:string;periodId:string;scope:Scope;formalityId:string;group:GroupId|null;reportDate?:string;view?:'overview'}
 export interface ScoreAccess {provinceId:string;unitIds:string[];groupIds:GroupId[];role?:string|undefined;accessTier?:string|undefined;assignedUnitId?:string|null|undefined;availableProvinceIds:string[]}
 export function scoreDetailAllowed(target:ScoreDetailTarget,access:ScoreAccess):boolean{
  if(target.group!==null&&!access.groupIds.includes(target.group))return false;

@@ -3,6 +3,7 @@ import {installTrialCreditManager} from '../dist/trial-credit-admin.js';
 const nodes=new Map();
 function node(id){
  const result={id,value:'',hidden:false,disabled:false,handlers:{},textContent:'',_html:'',
+  insertAdjacentHTML(where,html){parse(html);},
   addEventListener(type,fn){this.handlers[type]=fn;},
   set innerHTML(html){this._html=html;if(id==='credit-account'){this.value=html.match(/value="([^"]+)"/)?.[1]??'';}},
   get innerHTML(){return this._html;}};
@@ -18,7 +19,11 @@ const users=[{id:'a',name:'A',email:null,active:true,admitted:true,canCollect:tr
  {id:'b',name:'B',email:null,active:true,admitted:true,canCollect:true,credits:100,reservedCredits:0,walletMode:'sources'}];
 const api=async(path,body)=>{requests.push({path,body});
  if(path==='access-policy')return {trialCreditManagement:true,defaultCollectionAccess:true};
- if(path==='admin/accounts')return users;
+ if(path.startsWith('admin/accounts?')){
+  const q=new URLSearchParams(path.split('?')[1]);
+  const items=q.has('accountId')?users.filter(a=>a.id===q.get('accountId')):users.filter(a=>!q.get('search')||a.name===q.get('search'));
+  return {items,page:1,pageSize:10,total:items.length};
+ }
  if(path.endsWith('/credits'))return {availableCredits:100,reservedCredits:0,items:[]};
  if(path.endsWith('/trial-credit')){grants++;await new Promise(resolve=>{releaseGrant=resolve;});return {};}
  throw new Error('Unexpected path '+path);
@@ -40,8 +45,9 @@ await assert.rejects(()=>manager.openAccount('a'),/chờ giao dịch/);
 releaseGrant();for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
 assert.equal(changed,1);assert.equal(nodes.get('credit-account').value,'b');
 assert.equal(nodes.get('credit-save').disabled,false);
-await assert.rejects(()=>manager.openAccount('unknown'),/chưa hoạt động/);
-assert.equal(nodes.get('credit-account').value,'b');
+await assert.rejects(()=>manager.openAccount('unknown'),/Không tìm thấy tài khoản/);
+assert.equal(nodes.get('credit-account').value,'');
+assert.equal(nodes.get('credit-save').disabled,true,'Failed target lookup must not allow granting another account');
 const beforeDeferred=requests.length;let onNavigate;
 const deferred=await installTrialCreditManager({append(){},addEventListener(type,handler){onNavigate=handler;}},api,undefined,true);
 assert.deepEqual(requests.slice(beforeDeferred).map(r=>r.path),['access-policy'],'Hidden Credit panel must not fetch accounts or ledger at startup');

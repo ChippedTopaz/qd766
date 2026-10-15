@@ -1,6 +1,6 @@
 """Source signatures and closed-month drafts. No publication, collection job or Credit mutation."""
 import hashlib,json,math,uuid
-from datetime import datetime,timezone
+from datetime import date,datetime,timezone,timedelta
 from decimal import Decimal
 from pathlib import Path
 from sqlalchemy import select,inspect
@@ -29,7 +29,20 @@ def differences(before,after):
              'change':'added' if key not in before else 'removed' if key not in after else 'changed'}
             for key in sorted(before.keys()|after.keys()) if key not in before or key not in after or before[key]!=after[key]]
 def alert(db,kind,title,key,details,*,now=None):
-    now=now or datetime.now(timezone.utc);digest=fingerprint([kind,key])
+    now=now or datetime.now(timezone.utc)
+    # Stable logical runs survive retry/resume; 05:00 and 06:00 never share a run.
+    batch=details.get('batch')
+    if not batch:
+        context=next(iter(details.get('contexts',[])),{})
+        if context.get('reportDate'):
+            report_day=date.fromisoformat(context['reportDate'])
+            batch={'id':'daily:'+str(report_day),'day':str(report_day+timedelta(days=1)),
+                   'label':'Cào dữ liệu · 05:00','source':'daily'}
+        elif context.get('checkDate') or details.get('scheduledAt'):
+            day=context.get('checkDate') or str(now.astimezone(VIETNAM).date())
+            batch={'id':'monitor:'+day,'day':day,'label':'Đối chiếu nguồn · 06:00','source':'monitor'}
+    if batch:details={**details,'batch':batch}
+    digest=fingerprint([kind,key,batch['id']] if batch else [kind,key])
     item=db.scalar(select(SourceMonitorAlert).where(SourceMonitorAlert.dedupe_key==digest).with_for_update())
     if item is None:
         item=SourceMonitorAlert(dedupe_key=digest,kind=kind,title=title,details=details,created_at=now,updated_at=now,occurrences=1)
@@ -76,10 +89,12 @@ def observe_profile(db,key,profile,context,*,seed=None):
     changes=differences(before,after)
     item=None
     if changes:
+        from .source_monitor_labels import describe_changes
+        labelled_changes=describe_changes(changes,[context],profiles=[old.profile,profile])
         group_name=GROUP_LABELS.get(context['group'],'Cơ cấu nhóm chỉ tiêu')
         item=alert(db,'structure','Thay đổi cơ cấu điểm/chỉ tiêu: '+group_name,
             [context['periodType'],context['group'],fingerprint(before),fingerprint(after)],
-            {'changes':changes[:200],'changeCount':len(changes),'contexts':[context],
+            {'changes':labelled_changes[:200],'changeCount':len(changes),'contexts':[context],
              'requiresRecrawl':True,'confirmed':False,'note':'Đối chiếu cơ cấu; không tự sửa công thức hoặc xoá lịch sử.'})
         roots={c.get('rootId') for c in item.details['contexts']}
         item.details={**item.details,'confirmed':len(roots)>1}
@@ -160,6 +175,7 @@ def record_month_sample(db,baseline,capture,*,now=None):
     if changes:
         alert(db,'closed-period',f'Điểm tháng {baseline.period_value}/{baseline.year} khác dữ liệu đang lưu',
             [key,str(baseline.id),digest],{'period':key,'baselineId':str(baseline.id),'changes':changes[:240],
+                'batch':{'id':'monitor:'+str(now.astimezone(VIETNAM).date()),'day':str(now.astimezone(VIETNAM).date()),'label':'Đối chiếu nguồn · 06:00','source':'monitor'},
                 'changeCount':len(changes),'confirmed':verified,'sampleOnly':True,'requiresRecrawl':True,
                 'provinceNames':{str(row['departmentId']):row.get('departmentName','') for row in baseline.response_data['evaluation']},
                 'note':'Mẫu điểm tỉnh, không bảo đảm phát hiện mọi thay đổi chi tiết cơ quan.'},now=now)

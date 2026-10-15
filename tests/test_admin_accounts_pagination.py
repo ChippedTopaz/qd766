@@ -47,12 +47,37 @@ class AdminAccountPaginationTests(unittest.TestCase):
   self.assertGreater(self.get(page=1,search='Văn phòng UBND',provinceId=ROOT_ID).json()['total'],100,'Search agency names across all pages')
   self.assertEqual(self.get(page=1,provinceId=ROOT_ID,unitId=TAY_NINH_CHILD_ID).json()['total'],0)
  def test_validation_and_admin_only(self):
-  for params in ({'page':0},{'status':'unknown','page':1},{'page':1,'search':'x'*201},{'page':1,'provinceId':'bad'}):
+  for params in ({'page':0},{'status':'unknown','page':1},{'page':1,'search':'x'*201},{'page':1,'provinceId':'bad'},{'page':1,'accountId':'bad'}):
    self.assertEqual(self.get(**params).status_code,422)
   self.f.client.cookies.clear();self.assertEqual(self.get(page=1).status_code,401)
+  self.assertEqual(self.get(page=1,accountId=str(self.f.admin_id)).status_code,401)
   self.f.client.cookies.set('qd766_session','owner-token')
   with self.f.app.state.session_factory.begin() as db:db.get(UserAccount,self.f.admin_id).role='user'
   self.assertEqual(self.get(page=1,status='locked').status_code,403)
+  self.assertEqual(self.get(page=1,accountId=str(self.f.admin_id)).status_code,403)
+ def test_credit_shortcut_finds_old_account_without_scanning_500(self):
+  with self.f.app.state.session_factory() as db:
+   old=db.scalar(select(UserAccount).where(UserAccount.external_subject=='page-user-0'))
+   old_id=str(old.id)
+  self.assertNotIn(old_id,[a['id'] for a in self.get().json()])
+  sql=[];engine=self.f.app.state.engine;counter=lambda *a:sql.append(a[2]);event.listen(engine,'before_cursor_execute',counter)
+  try:
+   body=self.get(page=1,accountId=old_id).json()
+   self.assertEqual(body['total'],1);self.assertEqual(body['items'][0]['id'],old_id)
+   self.assertTrue(body['items'][0]['active']);self.assertTrue(body['items'][0]['admitted'])
+   self.assertEqual(body['items'][0]['credits'],37)
+   self.assertLessEqual(len(sql),12)
+   self.assertFalse(any(s.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for s in sql))
+  finally:event.remove(engine,'before_cursor_execute',counter)
+  self.assertEqual(self.get(page=1,status='active',search='user0000@example.test').json()['items'][0]['id'],old_id)
+  self.assertEqual(self.get(page=1,accountId=str(uuid.uuid4())).json()['items'],[])
+  for i in (1,2):
+   with self.f.app.state.session_factory() as db:
+    account=db.scalar(select(UserAccount).where(UserAccount.external_subject==f'page-user-{i}'))
+    account_id=str(account.id)
+   row=self.get(page=1,accountId=account_id).json()['items'][0]
+   self.assertFalse(row['active'] and row['admitted'],'Exact lookup exposes actual status, not an incorrect missing-account error')
+   self.assertEqual(self.get(page=1,accountId=account_id,status='active').json()['items'],[])
  def test_read_only_bounded_queries_and_existing_actions_fields(self):
   sql=[];engine=self.f.app.state.engine;counter=lambda *a:sql.append(a[2]);event.listen(engine,'before_cursor_execute',counter)
   try:

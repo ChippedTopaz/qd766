@@ -2,7 +2,7 @@ import { allUnitTotals, peerStats, buildSuggestions, buildUnitView, previousAvai
 import { analyzeOnlineScore } from "./online-scoring.js";
 import { analyzeProgressScore } from "./progress-scoring.js";
 import { analysisExcelFilename, buildAnalysisWorkbook } from "./excel-export.js";
-import { buildLeadershipReport, buildLeadershipWorkbook, leadershipColors, leadershipUpdatedLabel } from "./leadership-report.js";
+import { buildLeadershipReport, buildLeadershipWorkbook, leadershipUpdatedLabel, applyRankingHistory, renderRankingTable, sortRankingReport, nextRankingSort, rankingPeriodControl, resolveRankingPeriod, type RankingHistory, type RankingSort } from "./leadership-report.js";
 import { parameterLabels } from "./parameter-labels.js";
 import {paymentRows,paymentComparisonPoint} from './payment-indicators.js';
 import {orderSatisfactionRows,detailMetricName} from './satisfaction-display-order.js';
@@ -10,7 +10,7 @@ import { composition, gauge, gaugeLevel, groupColors, groupIcon, icon, trendChar
 import { referenceNotice, renderFormulaReference } from "./formula-reference.js";
 import {loadFormulaConfiguration} from './formula-loader.js';
 import {openScoreSimulator} from './score-simulator.js';
-import {renderPeerList,centerPeerLists} from './peer-list.js';
+import {renderPeerList,centerPeerLists,peerComparisonContext,type PeerListItem,type PeerBaseline} from './peer-list.js';
 import {scoreDetailAllowed,renderScoreDetailLink,type ScoreDetailTarget} from './score-drilldown.js';
 import {DailyIndicatorPanel,supportsDailyIndicators,indicatorRowClick,type IndicatorContext} from './daily-indicator-comparison.js';
 import {renderPaidAnalysis,bindPaidAnalysis,clearPaidAnalysis,stopPaidAnalysisPolling} from './paid-analysis.js';
@@ -28,6 +28,7 @@ import { bindComparisonExports } from "./comparison-export.js";
 import {openGroupExport} from './group-export.js';
 import {mountTrialRegistration} from './trial-registration.js';
 import {pageLoader} from './page-loader.js';
+import {ServiceError,readServiceJson,userFacingError,renderServiceState,bindServiceRetry} from './service-feedback.js';
 import {presenceBadge,startPresence} from './presence.js';
 import {triviaMarkup,bindTrivia} from './trivia.js';
 import {challengeMarkup,bindChallenges,bindChallengeNotifications,openChallengeBoard} from './challenges.js';
@@ -166,7 +167,7 @@ async function openScoreDetail(target:ScoreDetailTarget):Promise<void>{
   state.periodId=target.periodId;state.scope=target.scope;state.unitId=target.unitId;
   if(target.scope==='formality'&&target.formalityId!==data.formality.id)return;
   historicalReportDate=target.reportDate??'';
-  state.screen='overview';state.selectedGroup=target.group;state.selectedMetric=null;overviewTab='details';
+  state.screen='overview';state.selectedGroup=target.group;state.selectedMetric=null;overviewTab=target.view==='overview'?'overview':'details';
   pendingMessage='';saveSelectionUrl();const pending=loadSelection(true),requestId=selectionRequest;await pending;
   if(requestId!==selectionRequest)return;
   if(!historicalReportDate)void loadProvinceBenchmarks();
@@ -238,7 +239,7 @@ async function loadLibrary():Promise<void>{
     const body=await response.json() as {items:LibraryItem[]};
     if(revision!==libraryRequest||state.periodId!==periodId||data.province.id!==rootId)return;
     library=body.items;
-  }catch(error){if(revision===libraryRequest)libraryError=error instanceof Error?error.message:String(error)}
+  }catch(error){if(revision===libraryRequest)libraryError=userFacingError(error)}
   finally{if(revision===libraryRequest){libraryLoading=false;render()}}
 }
 async function openAcquisition(tab:"new"|"history"="new"):Promise<void>{
@@ -272,7 +273,7 @@ async function loadMyRequests(markRead=false):Promise<void>{
       const rows=await response.json() as OperationJob[];
       myRequests=rows.filter(job=>job.request.scope==="formality"&&job.request.rootDepartmentId===data.province.id).map(job=>({id:job.id,state:job.state,formalityId:job.request.formalityId??"",code:job.formalityCode??"",name:job.formalityName??"",periodType:job.request.period?.type??"year",year:job.request.period?.year??0,periodValue:job.request.period?.month??job.request.period?.quarter??null,creditCost:null,createdAt:job.createdAt,error:null}));
     }
-  }catch(error){historyError=error instanceof Error?error.message:String(error)}
+  }catch(error){historyError=userFacingError(error)}
   finally{
     historyLoading=false;render();
     if((paidRequestsEnabled||(state.screen==="procedure"&&collectionTab==="history"))&&myRequests.some(r=>["waiting","reserved","queued","running"].includes(r.state)))historyTimer=window.setTimeout(()=>{void loadMyRequests()},10000);
@@ -336,7 +337,7 @@ async function prepareCollection():Promise<void>{
       const result=body as CreditQuote;
       if(quotedContext!==data.province.id+":"+state.periodId){acquisitionMessage="Kỳ hoặc tỉnh đã thay đổi; vui lòng xác nhận lại yêu cầu tra cứu.";return;}
       creditQuote=result;confirmationToken=crypto.randomUUID();
-    }catch(error){acquisitionMessage=error instanceof Error?error.message:String(error);return;}
+    }catch(error){acquisitionMessage=userFacingError(error);return;}
     finally{submittingQuote=false;render();}
   }
   state.modal="collection";render();
@@ -360,7 +361,7 @@ async function confirmCollection():Promise<void>{
     state.modal="none";collectionTab="history";catalogPreview.selectedId=null;
     acquisitionMessage="Yêu cầu đã được lưu. Dữ liệu hoàn tất sẽ xuất hiện trong Thủ tục đã khai thác.";
     void loadLibrary();await loadMyRequests();
-  }catch(error){acquisitionMessage=error instanceof Error?error.message:String(error)}
+  }catch(error){acquisitionMessage=userFacingError(error)}
   finally{submittingCollection=false;render();}
 }
 
@@ -479,7 +480,7 @@ function context(): string {
   const canSubmit=!publicReadOnly&&!submittingCollection&&!collectionTracker.hasActive(selectionKey())&&state.scope==="formality"&&["ready","normal"].includes(state.demo)&&(catalogPreview.mode==="filtered"?catalogPreview.selected>0:Boolean(catalogPreview.selectedId));
   const selectedProvinceId=pendingProvinceId||data.province.id;
   const provinceItems=(provinceOptions.length?provinceOptions:[{id:data.province.id,name:data.province.name,departmentCode:null,provinceCode:data.province.code??null,snapshotCount:0,latestSnapshotAt:null,available:true}]).slice().sort((left,right)=>alphabet.compare(displayProvinceName(left.name),displayProvinceName(right.name))).map(item=>`<option value="${esc(item.id)}" ${item.id===selectedProvinceId?"selected":""}>${esc(displayProvinceName(item.name))}${item.available?"":" · chưa có dữ liệu"}</option>`).join("");
-return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type==="month"?"selected":""}>Tháng</option><option value="quarter" ${selectedPeriod.type==="quarter"?"selected":""}>Quý</option><option value="year" ${selectedPeriod.type==="year"?"selected":""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item=>`<option value="${item.id}" ${item.id===state.periodId?"selected":""}>${item.type==="month"?`Tháng ${item.value}`:item.type==="quarter"?`Quý ${item.value}`:"Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year=>`<option value="${year}" ${year===selectedPeriod.year?"selected":""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope==="all"?"selected":""}>Tất cả thủ tục hành chính</option>${!canAcquire()?"":`<option value="formality" ${state.scope==="formality"?"selected":""}>Theo thủ tục hành chính</option>`}</select></label></div><div class="context-bottom">${state.scope==="formality"&&state.screen!=="procedure"?`<label class="field saved-formality"><span>Thủ tục đã khai thác</span><select id="saved-formality"><option value="">${libraryLoading?"Đang đọc danh sách…":"Chọn thủ tục đã khai thác"}</option>${library.map(item=>`<option value="${esc(item.id)}" ${item.id===data.formality.id?"selected":""}>${esc(item.code+" · "+item.name)}</option>`).join("")}</select></label>`:""}<div class="context-actions">${!signedInUser&&googleLoginEnabled?`<a class="btn" href="/api/v1/auth/google/start">Đăng nhập Google</a>`:""}${canAcquire()?`<button class="btn" data-action="new-collection">+ Tra cứu TTHC khác</button>`:""}${collectionNotices()}${signedInUser?.role==="admin"?`<button class="btn" data-action="open-quality">${data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]?.delivery?.detailsAvailable===false?"● Chỉ có điểm tổng hợp":"● Chất lượng dữ liệu"}</button>`:""}<button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Báo cáo lãnh đạo</button></div></div></header>`;
+return `<header class="contextbar"><div class="context-fields"><label class="field province"><span>Tỉnh/Thành phố</span><select id="province-select">${provinceItems}</select></label><label class="field unit"><span>Cơ quan, đơn vị</span><select id="unit-select">${unitOptions()}</select></label><label class="field compact"><span>Loại kỳ</span><select id="period-type"><option value="month" ${selectedPeriod.type==="month"?"selected":""}>Tháng</option><option value="quarter" ${selectedPeriod.type==="quarter"?"selected":""}>Quý</option><option value="year" ${selectedPeriod.type==="year"?"selected":""}>Năm</option></select></label><label class="field compact"><span>Kỳ cụ thể</span><select id="period-value">${sameType.map(item=>`<option value="${item.id}" ${item.id===state.periodId?"selected":""}>${item.type==="month"?`Tháng ${item.value}`:item.type==="quarter"?`Quý ${item.value}`:"Cả năm"}</option>`).join("")}</select></label><label class="field compact"><span>Năm</span><select id="report-year">${years.map(year=>`<option value="${year}" ${year===selectedPeriod.year?"selected":""}>${year}</option>`).join("")}</select></label><label class="field"><span>Phạm vi thủ tục</span><select id="scope-select"><option value="all" ${state.scope==="all"?"selected":""}>Tất cả thủ tục hành chính</option>${!canAcquire()?"":`<option value="formality" ${state.scope==="formality"?"selected":""}>Theo thủ tục hành chính</option>`}</select></label></div><div class="context-bottom">${state.scope==="formality"&&state.screen!=="procedure"?`<label class="field saved-formality"><span>Thủ tục đã khai thác</span><select id="saved-formality"><option value="">${libraryLoading?"Đang đọc danh sách…":"Chọn thủ tục đã khai thác"}</option>${library.map(item=>`<option value="${esc(item.id)}" ${item.id===data.formality.id?"selected":""}>${esc(item.code+" · "+item.name)}</option>`).join("")}</select></label>`:""}<div class="context-actions">${!signedInUser&&googleLoginEnabled?`<a class="btn" href="/api/v1/auth/google/start">Đăng nhập Google</a>`:""}${canAcquire()?`<button class="btn" data-action="new-collection">+ Tra cứu TTHC khác</button>`:""}${collectionNotices()}${signedInUser?.role==="admin"?`<button class="btn" data-action="open-quality">${data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)]?.delivery?.detailsAvailable===false?"● Chỉ có điểm tổng hợp":"● Chất lượng dữ liệu"}</button>`:""}<button class="btn" data-action="export">Xuất dữ liệu</button><button class="btn primary" data-action="brief">Bảng xếp hạng</button></div></div></header>`;
 }
 
 function shell(content: string): void {
@@ -554,9 +555,9 @@ function unavailable(kind: DemoState): string {
   if(scoreDetailError)return `<section class="panel"><div class="empty-state"><h2>Chưa mở được chi tiết điểm</h2><p>${esc(scoreDetailError)}</p><p>Không tự chuyển sang kỳ khác, khai thác mới hoặc sử dụng Credit.</p><button class="btn" data-nav="time">So sánh theo thời gian</button></div></section>`;
   if (kind === "ready") return `<section class="panel"><div class="empty-state"><h2>${libraryLoading?"Đang đọc danh sách thủ tục…":"Chọn thủ tục đã khai thác"}</h2><p>${esc(libraryError||"Chọn thủ tục trong ô phía trên để xem lại. Chưa có thủ tục phù hợp? Hãy tạo yêu cầu lấy dữ liệu.")}</p><button class="btn primary" data-action="new-collection">Lấy dữ liệu TTHC</button></div></section>`;
   if (kind === "loading") return pageLoader();
-  if (kind === "queued") return `${title("Đang chờ cập nhật dữ liệu", "Yêu cầu đã được lưu trong hàng đợi an toàn.")}<div class="empty-state"><h2>Đang chuẩn bị dữ liệu cho lựa chọn này</h2><p>${esc(pendingMessage||"Hệ thống đang xử lý tuần tự và sẽ tự hiển thị khi snapshot hoàn chỉnh được lưu vào PostgreSQL.")}</p><button class="btn" data-action="retry-selection">Kiểm tra lại</button></div>`;
-  if (kind === "blocked") return `${title("Đang chờ kết nối nguồn", "Yêu cầu đã được lưu an toàn và sẽ giữ nguyên cho tới khi kết nối DVCQG được quản trị viên kiểm tra.")}<div class="empty-state"><p>${esc(pendingMessage||"Hệ thống không tự vượt WAF hoặc gửi thêm request.")}</p><div class="empty-actions"><button class="btn" data-action="retry-selection">Kiểm tra lại</button><button class="btn primary" data-nav="operations">Xem trạng thái vận hành</button></div></div>`;
-  if (kind === "error") return `${title("Dữ liệu không hợp lệ", "Hệ thống chưa thể tổng hợp báo cáo ở thời điểm này.")}<div class="empty-state"><h2>Không thể hiển thị báo cáo</h2><p>Vui lòng thử lại hoặc liên hệ cán bộ quản trị dữ liệu. Các trường chưa có dữ liệu không được tính là 0.</p><button class="btn primary" data-state="normal">Thử lại</button></div>`;
+  if (kind === "queued") return `${title("Đang chờ cập nhật dữ liệu", "Yêu cầu đã được ghi nhận.")}<div class="empty-state"><h2>Đang chuẩn bị dữ liệu cho lựa chọn này</h2><p>${esc(pendingMessage||"Kết quả sẽ hiển thị khi quá trình cập nhật hoàn tất.")}</p><button class="btn" data-action="retry-selection">Kiểm tra lại</button></div>`;
+  if (kind === "blocked") return `${title("Nguồn dữ liệu tạm thời gián đoạn", "Yêu cầu đã được ghi nhận và đang chờ nguồn dữ liệu sẵn sàng.")}<div class="empty-state"><p>${esc(pendingMessage||"Bạn có thể kiểm tra lại trạng thái sau ít phút.")}</p><div class="empty-actions"><button class="btn" data-action="retry-selection">Kiểm tra lại</button><button class="btn primary" data-nav="operations">Xem trạng thái</button></div></div>`;
+  if (kind === "error") return renderServiceState(new Error(pendingMessage),{compact:true});
   if (kind === "empty") return `${title("Không có dữ liệu", "Đơn vị hoặc kỳ được chọn không có bản ghi hợp lệ.")}<div class="empty-state"><h2>Không có dữ liệu cho lựa chọn hiện tại</h2><p>Hãy đổi kỳ báo cáo hoặc phạm vi TTHC. Giá trị null được giữ nguyên và không tham gia xếp hạng.</p><button class="btn" data-state="normal">Về dữ liệu thật</button></div>`;
   return `${title("Chưa đủ dữ liệu lịch sử", "Hệ thống chưa có chuỗi kỳ đồng nhất để so sánh.")}<div class="empty-state"><h2>Cần tối thiểu hai kỳ cùng loại</h2><p>Hiện có Tháng 8/2026, Quý III/2026 và Năm 2026. Ba kỳ này khác độ dài nên không được ghép thành một xu hướng.</p><button class="btn" data-state="normal">Quay lại báo cáo</button></div>`;
 }
@@ -654,6 +655,54 @@ function groupPanel(group: UnitGroupView): string {
   return `<button class="bento-card pillar-card ${state.selectedGroup===group.id?"selected":""}" style="--pillar-color:${groupColors[group.id]}" data-motion-card="${group.id}" data-group-detail="${group.id}" aria-pressed="${state.selectedGroup===group.id}"><div class="pillar-heading"><h3>${esc(group.label)}</h3><span class="bento-icon">${groupIcon(group.id)}</span></div><div class="pillar-score" data-score-tone="${level.tone}"><strong>${n(score)}</strong><span>/ ${n(maximum)}</span></div><div class="pillar-meta"><span title="${esc(comparisonTitle)}" class="${changeTone(delta)}">${delta===null?missingComparison:`${delta>=0?"+":""}${n(delta)} đ`}</span><span>${peer?`Hạng ${peer.rank}/${peer.total}`:"Chưa xếp hạng"}</span></div><div class="pillar-progress" role="img" aria-label="${ratio===null?"Chưa có tỷ lệ điểm":`Đạt ${pct(ratio)} điểm tối đa`}"><i style="width:${Math.max(0,Math.min(ratio??0,100))}%"></i></div><div class="pillar-bottom"><span>${ratio===null?"Chưa có điểm":pct(ratio)+" điểm tối đa"}</span><span>${peer?`Trung vị ${n(peer.median)} đ`:"Xem chi tiết →"}</span></div></button>`;
 }
 
+const peerHistoryCache=new Map<string,{history:RankingHistory|null}>();
+function peerHistoryContext(){
+ const baseline=annualObservationDates.get(dailyContext().key)??'';
+ const capture=snapshot().delivery?.detailsCapturedAt??snapshot().delivery?.capturedAt??'';
+ return {baseline,key:[data.province.id,state.unitId,state.periodId,historicalReportDate,baseline,capture].join(':')};
+}
+function peerRowsAt(periodId:string,groupId:GroupId|null,metric?:string):PeerListItem[]{
+ const selected=data.units.find(u=>u.departmentId===state.unitId);
+ if(selected?.departmentLevel==='PROVINCE_TOTAL')return (provinceBenchmarks[benchmarkCacheKey(periodId)]??[]).flatMap(item=>{
+  const group=groupId?item.groups[groupId]:undefined;
+  const score=metric&&group?benchmarkMetricPoint(group,metric)?.score:groupId?group?.score:item.totalScore;
+  return score==null?[]:[{id:item.rootDepartmentId,name:item.provinceName,score}];
+ });
+ const saved=data.snapshots[snapshotKey(periodId,state.scope,data.formality.id)];if(!saved)return [];
+ if(!groupId)return allUnitTotals(saved,selected?.departmentLevel??'COMMUNE').map(row=>({id:row.id,name:row.name,score:row.score}));
+ return (saved.datasets.find(g=>g.group===groupId)?.children??[]).filter(row=>row.departmentLevel===selected?.departmentLevel).flatMap(row=>{
+  const score=metric?metricPoint(row,metric)?.score:row.apiScore;return score==null?[]:[{id:row.departmentId,name:row.departmentName,score}];
+ });
+}
+function peerHeader(rows:PeerListItem[],groupId:GroupId|null,metric?:string):string{
+ const selected=data.units.find(u=>u.departmentId===state.unitId),national=selected?.departmentLevel==='PROVINCE_TOTAL';
+ const scope=national?'Tỉnh, thành phố · Toàn quốc':`${selected?.departmentLevel==='COMMUNE'?'Xã, phường':'Sở, ngành'} · ${displayProvinceName(data.province.name)}`;
+ let baseline:PeerBaseline|undefined;
+ if(period().type==='year'&&state.scope==='all'){
+  const history=peerHistoryCache.get(peerHistoryContext().key)?.history;
+  if(!metric&&history?.current&&history.baseline){
+   const convert=(day:NonNullable<RankingHistory['current']>)=>day.rows.flatMap(row=>{
+    const score=groupId?row.groups[groupId]:row.total;return score==null?[]:[{id:row.id,name:row.name,score}];
+   });
+   baseline={rows:convert(history.baseline),currentRows:convert(history.current),label:`${displayVersionDay(history.current.reportDate)} so với ${displayVersionDay(history.baseline.reportDate)}`};
+  }
+ }else{
+  const previous=previousPeriodFor();if(previous)baseline={rows:peerRowsAt(previous.id,groupId,metric),label:`So với ${previous.label}`};
+ }
+ return peerComparisonContext(rows,state.unitId,scope,baseline);
+}
+function loadPeerHistory():void{
+ if(!state||!data||state.screen!=='overview'||overviewTab!=='details'||state.demo!=='normal'||state.scope!=='all'||period().type!=='year'||state.selectedMetric||state.modal==='brief')return;
+ const {key,baseline}=peerHistoryContext();if(peerHistoryCache.has(key))return;
+ const entry={history:null as RankingHistory|null};peerHistoryCache.set(key,entry);
+ if(peerHistoryCache.size>8)peerHistoryCache.delete(peerHistoryCache.keys().next().value!);
+ const query=new URLSearchParams({root_department_id:data.province.id,unit_id:state.unitId,year:String(period().year)});
+ if(historicalReportDate)query.set('report_date',historicalReportDate);
+ if(baseline)query.set('baseline_date',baseline);
+ void fetch('/api/v1/dashboard/ranking-history?'+query,{cache:'no-store'}).then(response=>readServiceJson<RankingHistory>(response)).then(history=>{entry.history=history;}).catch(()=>{}).finally(()=>{
+  if(state.screen==='overview'&&overviewTab==='details'&&state.demo==='normal'&&key===peerHistoryContext().key)render();
+ });
+}
 function totalPeerComparison(view:UnitView):string{
   const selected=data.units.find(item=>item.departmentId===state.unitId);
   const isProvince=selected?.departmentLevel==="PROVINCE_TOTAL";
@@ -666,7 +715,7 @@ function totalPeerComparison(view:UnitView):string{
   const stats=current&&rows.length>1?peerStats(rows.map(item=>item.score),current.score):null;
   const heading=isProvince?"So sánh tổng điểm với tỉnh/thành phố khác":"So sánh tổng điểm với đơn vị cùng cấp";
   if(!stats)return `<aside class="comparison-card"><h3>${heading}</h3><div class="empty-state"><h2>Chưa đủ dữ liệu so sánh</h2><p>Cần tối thiểu hai đơn vị cùng cấp, cùng kỳ và cùng phạm vi.</p></div></aside>`;
-  return `<aside class="comparison-card"><h3>${heading}</h3><div class="comparison-kpi"><span>Thứ hạng tổng 6 nhóm</span><strong class="num">${stats.rank}/${stats.total}</strong></div><div class="comparison-kpi"><span>Trung vị tổng điểm</span><strong class="num">${n(stats.median)}</strong></div>${renderPeerList(rows,state.unitId)}</aside>`;
+  return `<aside class="comparison-card"><h3>${heading}</h3>${peerHeader(rows, null)}<div class="comparison-kpi"><span>Trung vị tổng điểm</span><strong class="num">${n(stats.median)}</strong></div>${renderPeerList(rows,state.unitId)}</aside>`;
 }
 
 function groupComparisonSummary(view:UnitView):string{
@@ -749,7 +798,7 @@ function metricPeerComparison(group:UnitGroupView,key:string):string{
   const stats=currentPoint&&rows.length>1?peerStats(rows.map(item=>item.score),currentPoint.score):null;
   const heading=isProvince?"So sánh chỉ tiêu với tỉnh/thành phố khác":"So sánh chỉ tiêu với đơn vị cùng cấp";
   if(!stats)return `<aside class="comparison-card"><h3>${heading}</h3><strong>${esc(currentPoint?.label??"Chỉ tiêu được chọn")}</strong><div class="empty-state"><h2>Chưa đủ dữ liệu so sánh</h2></div></aside>`;
-  return `<aside class="comparison-card metric-comparison"><h3>${heading}</h3><strong>${esc(currentPoint?.label)}</strong><div class="comparison-kpi"><span>Điểm chỉ tiêu</span><strong class="num">${n(currentPoint?.score)}${currentPoint?.maximum===null?"":` / ${n(currentPoint?.maximum)}`}</strong></div><div class="comparison-kpi"><span>Thứ hạng</span><strong class="num">${stats.rank}/${stats.total}</strong></div>${renderPeerList(rows,state.unitId)}</aside>`;
+  return `<aside class="comparison-card metric-comparison"><h3>${heading}</h3>${peerHeader(rows, group.id,key)}<strong>${esc(currentPoint?.label)}</strong><div class="comparison-kpi"><span>Điểm chỉ tiêu</span><strong class="num">${n(currentPoint?.score)}${currentPoint?.maximum===null?"":` / ${n(currentPoint?.maximum)}`}</strong></div>${renderPeerList(rows,state.unitId)}</aside>`;
 }
 
 function groupPeerComparison(group:UnitGroupView):string{
@@ -762,10 +811,10 @@ function groupPeerComparison(group:UnitGroupView):string{
     }).sort((left,right)=>right.score-left.score||alphabet.compare(left.name,right.name));
     const stats=benchmarkRank(state.periodId,group.id);
     if(!stats)return `<aside class="comparison-card"><h3>So với tỉnh/thành phố khác</h3><div class="empty-state"><h2>Chưa đủ dữ liệu liên tỉnh</h2><p>Cần có ít nhất hai tỉnh/thành phố cùng kỳ và cùng phạm vi để so sánh.</p></div></aside>`;
-    return `<aside class="comparison-card"><h3>So với tỉnh/thành phố khác</h3><div class="comparison-kpi"><span>Thứ hạng</span><strong class="num">${stats.rank}/${stats.total}</strong></div><div class="comparison-kpi"><span>Trung vị các tỉnh</span><strong class="num">${n(stats.median)}</strong></div>${renderPeerList(rows,state.unitId)}</aside>`;
+    return `<aside class="comparison-card"><h3>So với tỉnh/thành phố khác</h3>${peerHeader(rows, group.id)}<div class="comparison-kpi"><span>Trung vị các tỉnh</span><strong class="num">${n(stats.median)}</strong></div>${renderPeerList(rows,state.unitId)}</aside>`;
   }
   const comparable=(group.dataset?.children??[]).filter(item=>item.departmentLevel===selected?.departmentLevel&&item.apiScore!==null).sort((a,b)=>(b.apiScore??0)-(a.apiScore??0));
-  return `<aside class="comparison-card"><h3>So với đơn vị cùng cấp</h3>${group.peer?`<div class="comparison-kpi"><span>Thứ hạng trong tỉnh</span><strong class="num">${group.peer.rank}/${group.peer.total}${group.peer.tiedCount>1?' · đồng hạng':''}</strong></div><div class="comparison-kpi"><span>Trung vị</span><strong class="num">${n(group.peer.median)}</strong></div><div class="comparison-kpi"><span>Chênh lệch</span><strong class="num ${(group.peer.gapToMedian)>=0?"positive":"negative"}">${group.peer.gapToMedian>=0?"+":""}${n(group.peer.gapToMedian)}</strong></div>${renderPeerList(comparable.map(item=>({id:item.departmentId,name:item.departmentName,score:item.apiScore!})),state.unitId)}`:`<div class="empty-state"><h2>Chưa đủ đơn vị cùng cấp</h2></div>`}</aside>`;
+  return `<aside class="comparison-card"><h3>So với đơn vị cùng cấp</h3>${peerHeader(comparable.map(item=>({id:item.departmentId,name:item.departmentName,score:item.apiScore!})), group.id)}${group.peer?`<div class="comparison-kpi"><span>Trung vị</span><strong class="num">${n(group.peer.median)}</strong></div><div class="comparison-kpi"><span>Chênh lệch</span><strong class="num ${(group.peer.gapToMedian)>=0?"positive":"negative"}">${group.peer.gapToMedian>=0?"+":""}${n(group.peer.gapToMedian)}</strong></div>${renderPeerList(comparable.map(item=>({id:item.departmentId,name:item.departmentName,score:item.apiScore!})),state.unitId)}`:`<div class="empty-state"><h2>Chưa đủ đơn vị cùng cấp</h2></div>`}</aside>`;
 }
 
 let provinceOnlineViewKey:string|null=null;
@@ -819,7 +868,7 @@ function loadDailyHistory():void{
     if(!response.ok)throw new Error("Chưa đọc được lịch sử theo ngày. Vui lòng thử lại.");
     const body=await response.json() as DailyHistory;
     entry.history=historyWithinPeriod({days:Array.isArray(body.days)?body.days:[],scope:"all"},selected);
-  }).catch(error=>{entry.error=error instanceof Error?error.message:"Không đọc được lịch sử ngày."}).finally(()=>{
+  }).catch(error=>{entry.error=userFacingError(error,"Chưa thể tải lịch sử dữ liệu. Vui lòng thử lại.")}).finally(()=>{
     entry.loading=false;if((state?.screen==='overview'||state?.screen==='time')&&dailyContext().key===key)render();
   });
 }
@@ -853,7 +902,7 @@ function loadCustomTimePeriods(){
       const body=await response.json() as {snapshot:Snapshot;metadata:Snapshot['delivery']};
       if(!body.snapshot)throw new Error('Kỳ được chọn chưa có dữ liệu.');
       if(body.metadata)body.snapshot.delivery=body.metadata;target.snapshots[key]=body.snapshot;
-    }).catch(error=>{entry.error=error instanceof Error?error.message:'Không đọc được dữ liệu.'}).finally(()=>{entry.loading=false;if(dailyContext().key===context)render()});
+    }).catch(error=>{entry.error=userFacingError(error)}).finally(()=>{entry.loading=false;if(dailyContext().key===context)render()});
   }
 }
 function customTime():string{
@@ -920,7 +969,7 @@ function loadWatch(){
   if(!signedInUser||state.screen!=='peers'||agencyTab!=='watch')return;
   const {key,ownId}=watchContext();if(watchLoads.has(key))return;
   const entry={loading:true,error:''};watchLoads.set(key,entry);
-  void readWatch(data.province.id).then(ids=>{watchDrafts.set(key,ids.filter(id=>id!==ownId))}).catch(e=>{entry.error=e.message;watchMessages.set(key,entry.error)}).finally(()=>{entry.loading=false;if(state.screen==='peers'&&agencyTab==='watch'&&watchContext().key===key)render()});
+  void readWatch(data.province.id).then(ids=>{watchDrafts.set(key,ids.filter(id=>id!==ownId))}).catch(e=>{entry.error=userFacingError(e);watchMessages.set(key,entry.error)}).finally(()=>{entry.loading=false;if(state.screen==='peers'&&agencyTab==='watch'&&watchContext().key===key)render()});
 }
 function agencyWatch():string{
   if(state.scope!=='all')return `<section class="panel"><div class="empty-state"><h2>Theo dõi cơ quan</h2><p>Chọn phạm vi Tất cả thủ tục hành chính để theo dõi điểm tổng quan.</p></div></section>`;
@@ -1072,24 +1121,48 @@ async function loadOperations():Promise<void>{
     if(!statusResponse.ok||!jobsResponse.ok||!batchesResponse.ok||!provinceBatchesResponse.ok)throw new Error(`HTTP ${statusResponse.status}/${jobsResponse.status}/${batchesResponse.status}/${provinceBatchesResponse.status}`);
     const status=await statusResponse.json() as {circuitState:string;circuitReason:string|null;snapshotCount:number;latestSnapshotAt:string|null};
     operationData={loading:false,error:null,circuitState:status.circuitState,circuitReason:status.circuitReason,snapshotCount:status.snapshotCount,latestSnapshotAt:status.latestSnapshotAt,jobs:await jobsResponse.json() as OperationJob[],batches:await batchesResponse.json() as BatchResult[],provinceBatches:await provinceBatchesResponse.json() as BatchResult[]};
-  }catch(error){operationData.loading=false;operationData.error=error instanceof Error?error.message:String(error)}
+  }catch(error){operationData.loading=false;operationData.error=userFacingError(error)}
   render();
 }
 
 function briefModal(): string {
-  const report=leadershipReport(),loading=benchmarkLoading.has(benchmarkCacheKey(state.periodId));
-  const point=(value:number|null,unitId:string,group:GroupId|null)=>detailScore(value,{provinceId:report.nameHeader==='Tỉnh/Thành phố'?unitId:data.province.id,unitId,periodId:state.periodId,scope:state.scope,formalityId:data.formality.id,group,reportDate:historicalReportDate},report.rows.find(row=>row.id===unitId)?.name??report.selectedName);
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Báo cáo xếp hạng cho lãnh đạo"><div class="modal ranking-modal"><div class="modal-top no-print"><strong>Báo cáo lãnh đạo · Xếp hạng cùng cấp</strong><div><button class="btn small primary" data-action="leadership-excel" ${report.rows.length?"":"disabled"}>Tải Excel</button> <button class="btn small" data-action="print" ${report.rows.length?"":"disabled"}>In / PDF</button> <button class="btn small" data-action="close-modal">Đóng</button></div></div><article class="ranking-report"><h1>XẾP HẠNG ĐÁNH GIÁ CHẤT LƯỢNG PHỤC VỤ</h1><p>${esc(report.period)} · ${esc(report.population)} · ${esc(report.scope)}</p><p class="muted">Cập nhật: ${esc(leadershipUpdatedLabel(report))}</p>${report.rows.length?`<div class="ranking-scroll"><table class="leadership-table"><thead><tr><th>STT</th><th>${esc(report.nameHeader)}</th>${report.groupLabels.map((label,index)=>`<th style="background:#${leadershipColors[index]}">${esc(label)}</th><th style="background:#${leadershipColors[index]}">Hạng</th>`).join("")}<th>Tổng điểm</th></tr></thead><tbody>${report.rows.map((row,index)=>`<tr class="${row.id===report.selectedId?"selected-agency":""}" ${row.id===report.selectedId?'aria-current="true"':""}><td>${index+1}</td><td>${esc(row.name)}</td>${row.scores.map((score,i)=>`<td>${point(score,row.id,data.groupOrder[i]??null)}</td><td class="leadership-rank">${row.ranks[i]??"—"}</td>`).join("")}<td class="leadership-total">${point(row.total,row.id,null)}</td></tr>`).join("")}</tbody></table></div>`:`<p role="status">${loading?"Đang đọc dữ liệu xếp hạng đã lưu…":"Chưa có dữ liệu xếp hạng cho lựa chọn này. Không gửi yêu cầu lấy dữ liệu mới."}</p>`}<div class="ranking-notes"><p>Cơ quan đang chọn: <strong>${esc(report.selectedName)}</strong>. Dòng màu xanh là cơ quan đang chọn. STT là vị trí dòng theo tổng điểm giảm dần, không phải thứ hạng khi có đồng điểm.</p>${report.notes.map(note=>`<p>${esc(note)}</p>`).join("")}</div></article></div></div>`;
+  const report=leadershipReport(),loading=rankingSelectionCache.get(rankingContextKey())?.loading||benchmarkLoading.has(benchmarkCacheKey(rankingPeriod().id));
+  const unitLink=(unitId:string,name:string)=>{
+    const target:ScoreDetailTarget={provinceId:report.nameHeader==='Tỉnh/Thành phố'?unitId:data.province.id,unitId,periodId:rankingPeriod().id,scope:state.scope,formalityId:data.formality.id,group:null,view:'overview',reportDate:report.reportDate??rankingReportDay()};
+    if(!scoreDetailAllowed(target,scoreRenderAccess??scoreAccess())||!data.periods.some(p=>p.id===target.periodId))return esc(name);
+    const key='unit-'+scoreDetailTargets.size;scoreDetailTargets.set(key,target);
+    const label=`Mở Tổng quan · ${name} · ${rankingPeriod().label}`;
+    return `<button type="button" class="ranking-unit-link" data-score-detail="${key}" title="${esc(label)}" aria-label="${esc(label)}">${esc(name)}</button>`;
+  };
+  const point=(value:number|null,unitId:string,group:GroupId|null)=>detailScore(value,{provinceId:report.nameHeader==='Tỉnh/Thành phố'?unitId:data.province.id,unitId,periodId:rankingPeriod().id,scope:state.scope,formalityId:data.formality.id,group,reportDate:report.reportDate??rankingReportDay()},report.rows.find(row=>row.id===unitId)?.name??report.selectedName);
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Bảng xếp hạng"><div class="modal ranking-modal"><div class="modal-top no-print ranking-toolbar"><strong>Bảng xếp hạng</strong>${rankingPeriodControl(data.periods,rankingPeriod().id)}<div class="ranking-toolbar-actions"><button class="btn small primary" data-action="leadership-excel" ${report.rows.length?"":"disabled"}>Tải Excel</button> <button class="btn small" data-action="print" ${report.rows.length?"":"disabled"}>In / PDF</button> <button class="btn small" data-action="close-modal">Đóng</button></div></div><article class="ranking-report"><h1>BẢNG XẾP HẠNG ĐÁNH GIÁ CHẤT LƯỢNG PHỤC VỤ</h1><p>${esc(report.period)} · ${esc(report.population)} · ${esc(report.scope)}</p>${report.comparisonLabel?`<p class="muted">${esc(report.comparisonLabel)}</p>`:""}<p class="muted">Cập nhật: ${esc(leadershipUpdatedLabel(report))}</p>${report.rows.length?renderRankingTable(report,data.groupOrder,point,unitLink):`<p role="status">${loading?"Đang đọc dữ liệu xếp hạng đã lưu…":"Chưa có dữ liệu xếp hạng cho lựa chọn này. Không gửi yêu cầu lấy dữ liệu mới."}</p>`}<div class="ranking-notes"><p>Cơ quan đang chọn: <strong>${esc(report.selectedName)}</strong>. Dòng màu xanh là cơ quan đang chọn. Thứ hạng tính theo tổng điểm giảm dần; các đơn vị đồng điểm được xếp đồng hạng.</p>${report.notes.map(note=>`<p>${esc(note)}</p>`).join("")}</div></article></div></div>`;
 }
 
+const rankingHistoryCache=new Map<string,{history:RankingHistory|null;loading:boolean;error:string}>();
+let rankingSort:RankingSort|null=null;
+let rankingPeriodId:string|null=null;
+const rankingPeriod=()=>data.periods.find(p=>p.id===rankingPeriodId)??period();
+const rankingReportDay=()=>rankingPeriod().id===state.periodId?historicalReportDate:'';
+const rankingContextKey=()=>[data.province.id,state.unitId,rankingPeriod().id,state.scope,state.scope==='formality'?data.formality.id:'',rankingReportDay()].join(':');
+const rankingSelectionCache=new Map<string,{snapshot:Snapshot|null;benchmarks:ProvinceBenchmark[];loading:boolean;error:string}>();
 const leadershipReport=()=>{
-  const report=buildLeadershipReport(data,state.periodId,state.scope,state.unitId,provinceBenchmarks[benchmarkCacheKey(state.periodId)]??[]);
-  if(historicalReportDate)report.period+=' · Dữ liệu ngày '+displayVersionDay(historicalReportDate);
-  if(state.demo!=="normal"){report.rows=[];report.capturedAt=[];report.notes=["Có dữ liệu thật của lựa chọn hiện tại mới lập được báo cáo."];}
+  const chosen=rankingPeriod(),selection=rankingSelectionCache.get(rankingContextKey());
+  const reportData=selection?.snapshot?{...data,snapshots:{...data.snapshots,[snapshotKey(chosen.id,state.scope,data.formality.id)]:selection.snapshot}}:data;
+  let report=buildLeadershipReport(reportData,chosen.id,state.scope,state.unitId,selection?.benchmarks??provinceBenchmarks[benchmarkCacheKey(chosen.id)]??[]);
+  if(chosen.type==='year'&&state.scope==='all'){
+    const entry=rankingHistoryCache.get(rankingContextKey());
+    if(entry?.history)report=applyRankingHistory(report,entry.history,data.groupOrder);
+    else report.notes.push(entry?.loading?'Đang đọc biến động theo ngày…':entry?.error||'Chưa có dữ liệu đối chiếu theo ngày.');
+  }
+  report=sortRankingReport(report,rankingSort);
+  if(rankingReportDay())report.period+=' · Dữ liệu ngày '+displayVersionDay(rankingReportDay()!);
+  if(selection?.loading||selection?.error){report.rows=[];report.capturedAt=[];report.notes=[selection.error||'Đang đọc dữ liệu của kỳ được chọn…'];}
+  if(state.demo!=="normal"&&chosen.id===state.periodId){report.rows=[];report.capturedAt=[];report.notes=["Có dữ liệu thật của lựa chọn hiện tại mới lập được báo cáo."];}
   return report;
 };
 async function openLeadershipReport():Promise<void>{
-  state.modal="brief";render();
+  rankingPeriodId=state.periodId;rankingSort=null;rankingSelectionCache.delete(rankingContextKey());state.modal="brief";render();
+  if(state.demo==='normal'&&period().type==='year'&&state.scope==='all')void loadRankingHistory();
   if(state.demo==="normal"&&(state.unitId===data.province.id||data.units.find(item=>item.departmentId===state.unitId)?.departmentLevel==="PROVINCE_TOTAL")){
     // Re-read saved rankings on open so a later automatic refresh is reflected.
     if(!benchmarkLoading.has(benchmarkCacheKey(state.periodId)))delete provinceBenchmarks[benchmarkCacheKey(state.periodId)];
@@ -1098,12 +1171,47 @@ async function openLeadershipReport():Promise<void>{
   if(state.modal==="brief")render();
 }
 
+async function loadRankingHistory():Promise<void>{
+  const key=rankingContextKey();if(rankingHistoryCache.get(key)?.loading)return;
+  const entry={history:null as RankingHistory|null,loading:true,error:''};
+  rankingHistoryCache.set(key,entry);
+  if(rankingHistoryCache.size>8)rankingHistoryCache.delete(rankingHistoryCache.keys().next().value!);
+  const query=new URLSearchParams({root_department_id:data.province.id,unit_id:state.unitId,year:String(rankingPeriod().year)});
+  if(rankingReportDay())query.set('report_date',rankingReportDay()!);
+  try{entry.history=await readServiceJson<RankingHistory>(await fetch('/api/v1/dashboard/ranking-history?'+query,{cache:'no-store'}));}
+  catch(error){entry.error=userFacingError(error,'Chưa thể tải biến động theo ngày. Vui lòng mở lại bảng để thử lại.');}
+  finally{entry.loading=false;if(state.modal==='brief'&&key===rankingContextKey())render();}
+}
+
+async function loadRankingPeriod():Promise<void>{
+  const key=rankingContextKey(),chosen=rankingPeriod();
+  if(rankingSelectionCache.get(key)?.loading)return;
+  const entry={snapshot:null as Snapshot|null,benchmarks:[] as ProvinceBenchmark[],loading:true,error:''};
+  rankingSelectionCache.set(key,entry);
+  if(rankingSelectionCache.size>8)rankingSelectionCache.delete(rankingSelectionCache.keys().next().value!);
+  const query=new URLSearchParams({root_department_id:data.province.id,period_type:chosen.type,year:String(chosen.year),scope:state.scope});
+  if(chosen.value!=null)query.set('period_value',String(chosen.value));
+  if(state.scope==='formality')query.set('formality_id',data.formality.id);
+  if(rankingReportDay())query.set('report_date',rankingReportDay()!);
+  const national=state.unitId===data.province.id||data.units.find(u=>u.departmentId===state.unitId)?.departmentLevel==='PROVINCE_TOTAL';
+  render();
+  try{
+    const response=await fetch('/api/v1/dashboard/selection?'+query,{cache:'no-store'});
+    if(response.status===404)throw new Error('Kỳ báo cáo được chọn chưa có dữ liệu xếp hạng.');
+    const body=await readServiceJson<{snapshot:Snapshot;metadata:Snapshot['delivery'];benchmarks?:ProvinceBenchmark[]}>(response);
+    entry.snapshot={...body.snapshot,delivery:body.metadata??{}};entry.benchmarks=body.benchmarks??[];
+    if(national&&!body.benchmarks){const params=new URLSearchParams(query);params.delete('root_department_id');entry.benchmarks=await readServiceJson<ProvinceBenchmark[]>(await fetch('/api/v1/dashboard/province-rankings?'+params,{cache:'no-store'}));}
+    if(chosen.type==='year'&&state.scope==='all'&&key===rankingContextKey())await loadRankingHistory();
+  }catch(error){entry.error=userFacingError(error,'Chưa thể tải kỳ báo cáo. Vui lòng chọn lại để thử lại.');}
+  finally{entry.loading=false;if(state.modal==='brief'&&key===rankingContextKey())render();}
+}
+
 async function downloadLeadershipExcel():Promise<void>{
   const report=leadershipReport();if(!report.rows.length)return;
   const workbook=buildLeadershipWorkbook(ExcelJS.Workbook,report);
-  const snap=data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)];
+  const snap=rankingSelectionCache.get(rankingContextKey())?.snapshot??data.snapshots[snapshotKey(rankingPeriod().id,state.scope,data.formality.id)];
   const reportSnapshot:Snapshot={...(snap??{scope:state.scope,formalityId:null,status:{state:"incomplete",requiredGroups:[],loadedGroups:[],unsupportedGroups:[],missingGroups:[]},provinceAggregatedScore:null,provinceAggregatedMaximum:null,scorePolicy:{},datasets:[]}),delivery:{capturedAt:report.capturedAt.at(-1)??""}};
-  const filename=analysisExcelFilename(report.selectedName,reportSnapshot,"scores").replace("-tonghop-","-tonghop-baocao-lanhdao-");
+  const filename=analysisExcelFilename(report.selectedName,reportSnapshot,"scores").replace("-tonghop-","-bang-xep-hang-");
   const content=await workbook.xlsx.writeBuffer();
   const url=URL.createObjectURL(new Blob([new Uint8Array(content)],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
   const link=document.createElement("a");link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -1113,7 +1221,7 @@ function exportModal(): string {
   const selectedSnapshot=data.snapshots[snapshotKey(state.periodId,state.scope,data.formality.id)];
   const available=state.demo==="normal"&&Boolean(selectedSnapshot)&&(selectedSnapshot?.delivery?.detailsAvailable!==false||state.unitId===data.province.id);
   const detailsAvailable=available&&selectedSnapshot?.delivery?.detailsAvailable!==false;
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Trung tâm xuất báo cáo"><div class="modal"><div class="modal-top"><strong>Xuất dữ liệu và báo cáo</strong><button class="btn small" data-action="close-modal">Đóng</button></div><div class="brief"><p class="eyebrow">${esc(data.units.find(item=>item.departmentId===state.unitId)?.departmentName??data.province.name)} · ${esc(period().label)}</p><h1>Xuất dữ liệu đang xem</h1><p class="muted">Tệp Excel có tên chỉ tiêu tiếng Việt, định dạng số và bộ lọc. Giữ nguyên số 0, để trống giá trị chưa có; kèm kỳ và thời điểm cập nhật.${available?"":" Cần có dữ liệu của lựa chọn hiện tại trước khi xuất."}</p><div class="quality-grid" style="margin-top:18px"><article class="quality-card"><h3>Điểm 6 nhóm chỉ tiêu</h3><strong>Excel (.xlsx)</strong><p>Điểm nguồn, thứ hạng, trung vị và trạng thái dữ liệu của cơ quan đang chọn.</p><button class="btn small primary" data-export-excel="scores" ${available?"":"disabled"}>Tải Excel bảng điểm</button></article><article class="quality-card"><h3>Số liệu thành phần</h3><strong>Excel (.xlsx)</strong><p>Chỉ tiêu và số liệu nghiệp vụ của 6 nhóm, sử dụng tên tiếng Việt.</p><button class="btn small" data-export-excel="details" ${detailsAvailable?"":"disabled"}>Tải Excel chi tiết</button></article><article class="quality-card"><h3>Báo cáo lãnh đạo</h3><strong>Xếp hạng cùng cấp</strong><p>Điểm và hạng của 6 nhóm, tổng điểm; so sánh tỉnh, Sở ngành hoặc xã phường theo cơ quan đang chọn.</p><button class="btn small" data-action="brief">Xem báo cáo</button></article></div></div></div></div>`;
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Trung tâm xuất báo cáo"><div class="modal"><div class="modal-top"><strong>Xuất dữ liệu và báo cáo</strong><button class="btn small" data-action="close-modal">Đóng</button></div><div class="brief"><p class="eyebrow">${esc(data.units.find(item=>item.departmentId===state.unitId)?.departmentName??data.province.name)} · ${esc(period().label)}</p><h1>Xuất dữ liệu đang xem</h1><p class="muted">Tệp Excel có tên chỉ tiêu tiếng Việt, định dạng số và bộ lọc. Giữ nguyên số 0, để trống giá trị chưa có; kèm kỳ và thời điểm cập nhật.${available?"":" Cần có dữ liệu của lựa chọn hiện tại trước khi xuất."}</p><div class="quality-grid" style="margin-top:18px"><article class="quality-card"><h3>Điểm 6 nhóm chỉ tiêu</h3><strong>Excel (.xlsx)</strong><p>Điểm nguồn, thứ hạng, trung vị và trạng thái dữ liệu của cơ quan đang chọn.</p><button class="btn small primary" data-export-excel="scores" ${available?"":"disabled"}>Tải Excel bảng điểm</button></article><article class="quality-card"><h3>Số liệu thành phần</h3><strong>Excel (.xlsx)</strong><p>Chỉ tiêu và số liệu nghiệp vụ của 6 nhóm, sử dụng tên tiếng Việt.</p><button class="btn small" data-export-excel="details" ${detailsAvailable?"":"disabled"}>Tải Excel chi tiết</button></article><article class="quality-card"><h3>Bảng xếp hạng</h3><strong>Xếp hạng cùng cấp</strong><p>Điểm và hạng của 6 nhóm, tổng điểm; so sánh tỉnh, Sở ngành hoặc xã phường theo cơ quan đang chọn.</p><button class="btn small" data-action="brief">Xem bảng xếp hạng</button></article></div></div></div></div>`;
 }
 
 async function downloadAnalysisExcel(kind:"scores"|"details"):Promise<void>{
@@ -1136,6 +1244,7 @@ async function downloadAnalysisExcel(kind:"scores"|"details"):Promise<void>{
 }
 
 function bind(): void {
+  bindServiceRetry(document);
   document.querySelectorAll<HTMLElement>('[data-indicator-detail-tab]').forEach(el=>el.addEventListener('click',()=>{
     if(state.scope!=='all'||state.selectedGroup===null)return;
     if(el.dataset.indicatorDetailTab==='daily'&&!supportsDailyIndicators(state.selectedGroup,unit().groups.find(g=>g.id===state.selectedGroup)?.entity??null,data.province.id))return;
@@ -1149,6 +1258,7 @@ function bind(): void {
   if(typeof window!=='undefined'&&typeof window.requestAnimationFrame==='function')window.requestAnimationFrame(()=>centerPeerLists(document));
   else centerPeerLists(document);
   if(state)loadWatch();
+  loadPeerHistory();
   document.querySelector('[data-watch-retry]')?.addEventListener('click',()=>{watchLoads.delete(watchContext().key);render()});
   if(state?.screen==='overview'&&!document.querySelector('[data-challenge-board]')){
     root.insertAdjacentHTML?.('beforeend','<button type="button" class="btn primary challenge-floating" data-challenge-board hidden>BXH thách đấu</button>');
@@ -1331,7 +1441,7 @@ function bind(): void {
     watchSaves.add(key);const draft=[...ids],province=data.province.id;
     const button=document.querySelector<HTMLButtonElement>('[data-watch-save]');if(button){button.disabled=true;button.textContent='Đang lưu…'}
     try{await saveWatch(province,draft,signedInUser.csrfToken);watchMessages.set(key,JSON.stringify(watchDrafts.get(key))===JSON.stringify(draft)?'Đã lưu danh sách theo tài khoản.':'Đã lưu danh sách trước đó; có lựa chọn mới chưa lưu.')}
-    catch(e){watchMessages.set(key,(e as Error).message)}
+    catch(e){watchMessages.set(key,userFacingError(e))}
     finally{watchSaves.delete(key);if(watchContext().key===key)render()}
   });
   document.querySelectorAll<HTMLElement>('[data-watch-sort]').forEach(el=>el.addEventListener('click',()=>{
@@ -1392,9 +1502,25 @@ function bind(): void {
   document.querySelectorAll<HTMLElement>("[data-action=submit-statistics]").forEach(el=>el.addEventListener("click",()=>{void prepareCollection()}));
   document.querySelector<HTMLElement>("[data-action=dismiss-completion]")?.addEventListener("click",()=>{completionMessage="";render()});
   document.querySelector<HTMLElement>("[data-action=refresh-operations]")?.addEventListener("click",()=>{void loadOperations()});
-  document.querySelectorAll<HTMLElement>("[data-resume-batch]").forEach(el=>el.addEventListener("click",async()=>{const id=el.dataset.resumeBatch;if(!id)return;el.setAttribute("disabled","");try{const response=await fetch(`/api/v1/formality-batches/${encodeURIComponent(id)}/resume`,{method:"POST"});if(!response.ok)throw new Error(`HTTP ${response.status}`);await loadOperations()}catch(error){operationData.error=error instanceof Error?error.message:String(error);render()}}));
+  document.querySelectorAll<HTMLElement>("[data-resume-batch]").forEach(el=>el.addEventListener("click",async()=>{const id=el.dataset.resumeBatch;if(!id)return;el.setAttribute("disabled","");try{const response=await fetch(`/api/v1/formality-batches/${encodeURIComponent(id)}/resume`,{method:"POST"});if(!response.ok)throw new Error(`HTTP ${response.status}`);await loadOperations()}catch(error){operationData.error=userFacingError(error);render()}}));
   document.querySelector<HTMLElement>("[data-action=catalog-prev]")?.addEventListener("click",()=>{catalogPreview.offset=Math.max(0,catalogPreview.offset-100);void loadCatalogPreview()});
   document.querySelector<HTMLElement>("[data-action=catalog-next]")?.addEventListener("click",()=>{catalogPreview.offset+=100;void loadCatalogPreview()});
+  document.querySelectorAll<HTMLElement>('[data-ranking-sort]').forEach(button=>button.addEventListener('click',()=>{
+    const index=Number(button.dataset.rankingSort);
+    if(!Number.isInteger(index)||index<0||index>=data.groupOrder.length)return;
+    const left=document.querySelector<HTMLElement>('.ranking-scroll')?.scrollLeft??0;
+    rankingSort=nextRankingSort(rankingSort,index);render();
+    const list=document.querySelector<HTMLElement>('.ranking-scroll');if(list)list.scrollLeft=left;
+  }));
+  document.querySelector<HTMLSelectElement>('[data-ranking-period]')?.addEventListener('change',event=>{
+    const id=(event.currentTarget as HTMLSelectElement).value;if(!data.periods.some(p=>p.id===id))return;
+    rankingPeriodId=id;rankingSort=null;void loadRankingPeriod();
+  });
+  document.querySelectorAll<HTMLSelectElement>('[data-ranking-period-field]').forEach(select=>select.addEventListener('change',()=>{
+    const field=select.dataset.rankingPeriodField;if(field!=='type'&&field!=='year')return;
+    const id=resolveRankingPeriod(data.periods,rankingPeriod().id,field,select.value);if(!id)return;
+    rankingPeriodId=id;rankingSort=null;void loadRankingPeriod();
+  }));
   initSearchableSelects();
 }
 
@@ -1493,7 +1619,7 @@ async function submitStatistics():Promise<void>{
     else await requestCollection(requestId);
   }catch(error){
     if(requestId!==selectionRequest)return;
-    pendingMessage=error instanceof Error?error.message:String(error);state.demo="error";
+    pendingMessage=userFacingError(error);state.demo="error";
   }finally{submittingCollection=false;render();}
 }
 
@@ -1549,7 +1675,7 @@ async function loadCatalogPreview():Promise<void>{
   }catch(error){
     if(requestId!==catalogPreviewRequest)return;
     catalogPreview.loading=false;
-    catalogPreview.error=error instanceof Error?error.message:String(error);
+    catalogPreview.error=userFacingError(error);
   }
   if(state.screen==="procedure"||(state.scope==="formality"&&state.demo==="ready"))render();
 }
@@ -1586,7 +1712,7 @@ async function loadSelection(readOnly=false):Promise<void>{
       provinceBenchmarks[benchmarkCacheKey(state.periodId)]=body.benchmarks??[];
     }
     data.snapshots[key]=body.snapshot;mergeUnits(body.snapshot);state.demo="normal";
-  }catch(error){if(requestId!==selectionRequest)return;console.error(error);if(readOnly||historicalReportDate)scoreDetailError=error instanceof Error?error.message:'Chưa đọc được dữ liệu chi tiết.';state.demo="error"}
+  }catch(error){if(requestId!==selectionRequest)return;console.error(error);if(readOnly||historicalReportDate)scoreDetailError=userFacingError(error,'Chưa thể tải dữ liệu chi tiết. Vui lòng thử lại.');state.demo="error"}
   render();
 }
 
@@ -1639,7 +1765,7 @@ async function switchProvince(rootDepartmentId:string):Promise<void>{
     if(requestId!==selectionRequest)return;
     pendingProvinceId="";
     console.error(error);
-    pendingMessage=error instanceof Error?error.message:String(error);
+    pendingMessage=userFacingError(error);
     state.demo="error";
   }
   render();
@@ -1669,22 +1795,22 @@ async function start(): Promise<void> {
       location.assign("/api/v1/auth/google/start");return;
     }
     const policyResponse=await fetch("/api/v1/access-policy");
-    if(productionSite&&!policyResponse.ok)throw new Error("Website chưa kết nối được backend HTTPS máy cơ quan.");
+    if(productionSite&&!policyResponse.ok)throw new ServiceError('unavailable',policyResponse.status);
     if(policyResponse.ok){
-      const policy=await policyResponse.json() as {publicReadOnly:boolean;loginRequired?:boolean;googleLoginEnabled?:boolean;paidRequestsEnabled?:boolean;geminiAnalysisEnabled?:boolean;inviteRequired?:boolean;localSimulation?:boolean;localGoogleTrial?:boolean};
+      const policy=await readServiceJson<{publicReadOnly:boolean;loginRequired?:boolean;googleLoginEnabled?:boolean;paidRequestsEnabled?:boolean;geminiAnalysisEnabled?:boolean;inviteRequired?:boolean;localSimulation?:boolean;localGoogleTrial?:boolean}>(policyResponse);
       localSimulation=Boolean(policy.localSimulation);
       localGoogleTrial=Boolean(policy.localGoogleTrial);
       invitationOnly=Boolean(policy.inviteRequired);
       publicRegistrationEnabled=Boolean((policy as {publicRegistrationEnabled?:boolean}).publicRegistrationEnabled);
-      if(productionSite&&policy.publicReadOnly!==true)throw new Error("Backend chưa bật chế độ truy cập công khai an toàn.");
+      if(productionSite&&policy.publicReadOnly!==true)throw new ServiceError('unavailable');
       publicReadOnly=Boolean(policy.publicReadOnly);loginRequired=Boolean(policy.loginRequired);googleLoginEnabled=Boolean(policy.googleLoginEnabled);
       paidRequestsEnabled=Boolean(policy.paidRequestsEnabled);
       geminiAnalysisEnabled=Boolean(policy.geminiAnalysisEnabled);
     }
     if(googleLoginEnabled||loginRequired){
       const meResponse=await fetch("/api/v1/auth/me");
-      if(meResponse.ok)signedInUser=await meResponse.json() as typeof signedInUser;
-      else if(meResponse.status!==401&&meResponse.status!==403)throw new Error("Chưa kiểm tra được phiên đăng nhập. Vui lòng thử lại.");
+      if(meResponse.ok)signedInUser=await readServiceJson<typeof signedInUser>(meResponse);
+      else if(meResponse.status!==401&&meResponse.status!==403)throw new ServiceError('unavailable',meResponse.status);
       if(loginRequired&&(!signedInUser||(!signedInUser.provinceId&&signedInUser.role!=="admin"))){
         if(await mountTrialRegistration(root,localGoogleTrial))return;
         if(localSimulation){location.assign("/local-trial.html");return;}
@@ -1707,9 +1833,9 @@ async function start(): Promise<void> {
     }
     if(provincesResponse.ok)provinceOptions=await provincesResponse.json() as ProvinceOption[];
     if(apiResponse.ok){
-      data=normalizeLoadedData(await apiResponse.json() as AppData);
+      data=normalizeLoadedData(await readServiceJson<AppData>(apiResponse));
     }else{
-      if(publicReadOnly||productionSite)throw new Error("Chưa tải được dữ liệu thật từ máy chủ. Không dùng dữ liệu mẫu thay thế.");
+      if(publicReadOnly||productionSite)throw new ServiceError(apiResponse.status===401?'session':apiResponse.status===403?'access':'unavailable',apiResponse.status);
       const fixtureResponse=await fetch("./data/snapshots.json");
       if(!fixtureResponse.ok)throw new Error(`API HTTP ${apiResponse.status}; fixture HTTP ${fixtureResponse.status}`);
       data=normalizeLoadedData(await fixtureResponse.json() as AppData);
@@ -1737,7 +1863,7 @@ async function start(): Promise<void> {
     if(paidRequestsEnabled)void loadMyRequests();
     void loadProvinceBenchmarks();
   } catch(error) {
-    root.innerHTML=`<main class="content"><div class="empty-state"><h2>Không thể tải dữ liệu</h2><p>${esc(error instanceof Error?error.message:error)}</p><p>${productionSite?"Vui lòng thử lại sau hoặc liên hệ quản trị viên. Website không sử dụng dữ liệu mẫu thay cho dữ liệu thật.":"Hãy kiểm tra máy chủ cục bộ và dữ liệu đầu vào."}</p></div></main>`;
+    console.error('Page could not load',error);root.innerHTML=renderServiceState(error);bindServiceRetry(document);
   } finally {
     root.setAttribute("aria-busy", "false");
   }

@@ -97,7 +97,7 @@ export function bindComparisonExports(context:ComparisonContext,WorkbookClass:()
   document.querySelectorAll<HTMLElement>('.content .comparison-card').forEach(card=>{
     if(!card.querySelector('.peer-row'))return;
     const title=card.querySelector('h3')?.textContent?.trim()??'So sánh cùng cấp';
-    addButton(card,()=>({title,headers:['Cơ quan, đơn vị','Điểm','Hạng'],rows:Array.from(card.querySelectorAll('.peer-row')).map(row=>Array.from(row.children).map(cell=>cell.textContent?.trim()??''))}));
+    addButton(card,()=>({title,headers:['STT','Cơ quan, đơn vị','Điểm'],rows:Array.from(card.querySelectorAll('.peer-row')).map(row=>Array.from(row.children).map(cell=>cell.textContent?.trim()??''))}));
   });
   document.querySelectorAll<HTMLElement>('.content .split>.panel,.content .peer-grid>.panel').forEach(panel=>{
     const peers=panel.querySelectorAll('.peer-row');if(!peers.length)return;

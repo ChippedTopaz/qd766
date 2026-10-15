@@ -2,6 +2,7 @@
 import sys
 import unittest
 import uuid
+import secrets
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,7 +18,7 @@ from qd766.backend.auth import digest
 from qd766.backend.importer import store_normalized_snapshot
 from qd766.backend.config import Settings
 from qd766.backend.local_credit_trial import ROOT, identifier, mock_catalog, mock_snapshot
-from qd766.backend.models import Base, CollectionJob, CreditWalletEvent, LoginSession, SubscriptionCycle, UserAccount
+from qd766.backend.models import Base, CollectionJob, CreditWalletEvent, LoginSession, SubscriptionCycle, UserAccount, TrialInvitation
 from qd766.backend.worker import run_one_job
 
 
@@ -65,15 +66,17 @@ class TrialJourneyTests(unittest.TestCase):
         return client.get("/api/v1/auth/me").json()
 
     def invite(self,subject,agency=False):
-        body={"provinceId":str(ROOT),"email":subject+"@example.test",
-              "accessTier":"agency" if agency else "province"}
-        if agency:body["unitId"]=str(identifier("department:commune"))
-        invite=self.admin.post("/api/v1/admin/invitations",json=body,
-            headers={"X-QD766-CSRF":"journey-owner-csrf"})
-        self.assertEqual(invite.status_code,200)
+        # Seed a previously issued link, keeping legacy redemption regression tests.
+        token=secrets.token_urlsafe(32)
+        with self.factory.begin() as db:
+            actor=db.scalar(select(UserAccount).where(UserAccount.role=='admin'))
+            db.add(TrialInvitation(token_hash=digest(token),created_by=actor.id,root_department_id=ROOT,
+                recipient_email=subject+'@example.test',access_tier='agency' if agency else 'province',
+                unit_department_id=identifier('department:commune') if agency else None,
+                expires_at=datetime.now(timezone.utc)+timedelta(days=7)))
         client=TestClient(self.app,base_url=self.origin,follow_redirects=False)
         self.clients.append(client)
-        self.assertEqual(client.post("/api/v1/auth/invite",json={"token":invite.json()["token"]}).status_code,200)
+        self.assertEqual(client.post("/api/v1/auth/invite",json={"token":token}).status_code,200)
         profile=self.login(client,subject)
         self.assertEqual(profile["credits"],100)
         self.assertTrue(profile["canCollect"])

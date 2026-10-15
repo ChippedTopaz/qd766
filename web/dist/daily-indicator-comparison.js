@@ -4,6 +4,7 @@ import { paymentDefinitions } from './payment-indicators.js';
 import { changeTone } from './change-tone.js';
 import { renderComboChart, bindComboCharts } from './daily-combo-chart.js';
 import { renderDatePicker, bindDatePickers } from './daily-date-picker.js';
+import { userFacingError } from './service-feedback.js';
 const escape = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const numeric = (v) => typeof v === 'number' && Number.isFinite(v) ? v : null;
 const round = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
@@ -223,7 +224,7 @@ export class DailyIndicatorPanel {
         }
         catch (e) {
             if (entry.request === revision && !controller.signal.aborted)
-                entry.error = e instanceof Error ? e.message : 'Chưa đọc được dữ liệu đã lưu.';
+                entry.error = userFacingError(e, 'Chưa thể tải dữ liệu đã lưu. Vui lòng thử lại.');
         }
         finally {
             if (entry.request === revision)

@@ -1,4 +1,5 @@
 import { openTriviaLeaderboard } from './trivia-leaderboard.js';
+import { userFacingError } from './service-feedback.js';
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let question = null, stats = { score: 0, streak: 0, best: 0, answered: 0 }, result = null;
 let choice = null, started = false, busy = false, failed = false, message = '', available = true, roundId = '';
@@ -94,7 +95,7 @@ export function bindTrivia(csrf) {
         }
         catch (error) {
             failed = true;
-            message = error.name === 'TimeoutError' ? 'Máy chủ phản hồi chậm. Vui lòng thử lại.' : String(error.message);
+            message = userFacingError(error);
             retryAt = performance.now() + 10000;
         }
         finally {
@@ -143,7 +144,7 @@ export function bindTrivia(csrf) {
         }
         catch (error) {
             failed = true;
-            message = String(error.message);
+            message = userFacingError(error);
         }
         finally {
             busy = false;

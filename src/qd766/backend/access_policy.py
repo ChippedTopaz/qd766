@@ -15,6 +15,7 @@ PUBLIC_READ_PATHS = frozenset({
     "/api/v1/dashboard", "/api/v1/dashboard/selection", "/api/v1/dashboard/group-export",
     "/api/v1/dashboard/provinces", "/api/v1/dashboard/province-rankings", "/api/v1/dashboard/daily-history",
     "/api/v1/dashboard/daily-indicator-comparison",
+    "/api/v1/dashboard/ranking-history",
     "/api/v1/national-summaries", "/api/v1/national-summaries/latest",
 })
 
@@ -96,7 +97,7 @@ async def enforce_public_read_only(request: Request, call_next):
             allowed=(request.method in {"GET","HEAD"} and path not in {"/api/v1/me/collection-quote","/api/v1/me/analysis"}) or (
                 request.method=="POST" and path in {"/api/v1/me/analysis","/api/v1/me/analysis/cancel","/api/v1/me/subscription/redemption","/api/v1/me/collection-quote","/api/v1/me/formality-requests","/api/v1/me/notifications/read"})
     else:
-        allowed = allowed and (path in {"/", "/index.html", "/admin.html", "/admin.css", "/formula-admin.css", "/styles.css", "/bento.css", "/collection.css", "/assets/logo-cchc.png"}
+        allowed = allowed and (path in {"/", "/index.html", "/admin.html", "/admin.css", "/admin-logs.css", "/formula-admin.css", "/styles.css", "/bento.css", "/collection.css", "/assets/logo-cchc.png"}
             or path.startswith("/dist/") and path.endswith(".js")
             or path.startswith("/vendor/") and path.endswith((".js", ".css")))
     if not allowed:

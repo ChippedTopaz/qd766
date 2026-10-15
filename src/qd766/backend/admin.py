@@ -1,14 +1,13 @@
 """Authenticated trial administration. No collection/circuit or billing controls."""
-import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select, func, or_
 
-from .auth import SESSION_COOKIE, current_session, digest, csrf_matches
+from .auth import SESSION_COOKIE, current_session, csrf_matches
 from .models import AccountCollectionPermission, AdminAudit, CreditLedgerEntry, Department, Dataset, Entity, LoginSession, Snapshot, TrialInvitation, UserAccount, SubscriptionCycle
 from .wallet_access import enabled as wallet_enabled, credits, active_subscription, subscription_summary
 
@@ -18,14 +17,21 @@ router = APIRouter(prefix="/api/v1/admin", tags=["trial administration"])
 def collection_log(request: Request, kind: Literal['default','formality'] | None = None,
                    source: Literal['system','user'] | None = None,
                    state: Literal['queued','running','succeeded','failed','halted'] | None = None,
-                   offset: int = Query(0,ge=0,le=100000), limit: int = Query(30,ge=1,le=100)):
+                   offset: int = Query(0,ge=0,le=100000), limit: int = Query(30,ge=1,le=100),
+                   fromDate: date | None = None, toDate: date | None = None,
+                   provinceId: uuid.UUID | None = None, compact: bool = False,
+                   periodType: Literal['month','quarter','year'] | None = None,
+                   year: int | None = Query(None,ge=2000,le=2100),
+                   periodValue: int | None = Query(None,ge=1,le=12)):
     from .collection_monitor import collection_status, probe_status, daily_status
     with request.app.state.session_factory() as db:
         administrator(request,db)
-        report=collection_status(db,kind=kind,source=source,state=state,offset=offset,limit=limit)
+        report=collection_status(db,kind=kind,source=source,state=state,offset=offset,limit=limit,
+            from_date=fromDate,to_date=toDate,province_id=provinceId,compact=compact,
+            period_type=periodType,year=year,period_value=periodValue)
     report['localSimulation']=bool(request.app.state.settings.local_google_trial)
-    report['probe']=None if source=='user' else probe_status(getattr(request.app.state,'collection_probe_checkpoint',None))
-    report['daily']=[] if source=='user' else daily_status()
+    report['probe']=None if source=='user' or compact else probe_status(getattr(request.app.state,'collection_probe_checkpoint',None))
+    report['daily']=[] if source=='user' or compact else daily_status()
     return report
 
 
@@ -92,11 +98,13 @@ def directory(request: Request, provinceId: uuid.UUID | None = None):
 @router.get("/accounts")
 def accounts(request: Request, page: int | None = Query(None, ge=1),
              search: str = Query('', max_length=200), provinceId: uuid.UUID | None = None,
-             unitId: uuid.UUID | None = None, status: Literal['active','unadmitted','locked'] | None = None):
+             unitId: uuid.UUID | None = None, status: Literal['active','unadmitted','locked'] | None = None,
+             accountId: uuid.UUID | None = None):
     with request.app.state.session_factory() as db:
         administrator(request, db)
         from .admin_accounts import account_projections
         statement = select(UserAccount)
+        if accountId is not None: statement = statement.where(UserAccount.id == accountId)
         if provinceId is not None: statement = statement.where(UserAccount.root_department_id == provinceId)
         if unitId is not None: statement = statement.where(UserAccount.unit_department_id == unitId)
         if status == 'active': statement = statement.where(UserAccount.active.is_(True), UserAccount.trial_admitted.is_(True))
@@ -170,15 +178,9 @@ def create_invitation(payload: InviteCreate, request: Request):
         email = (payload.email or "").strip().lower() or None
         if email and ("@" not in email or any(c.isspace() for c in email)):
             raise HTTPException(422, "Email không hợp lệ.")
-        token = secrets.token_urlsafe(32)
-        invitation = TrialInvitation(token_hash=digest(token), created_by=actor.id, recipient_email=email,
-            root_department_id=payload.provinceId, access_tier=payload.accessTier, unit_department_id=payload.unitId,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=payload.days))
-        db.add(invitation)
-        db.flush()
-        audit(db, actor, "invitation.created", invitationId=str(invitation.id), email=email,
-              provinceId=str(payload.provinceId), accessTier=payload.accessTier, unitId=str(payload.unitId))
-        return {"id": str(invitation.id), "token": token, "expiresAt": invitation.expires_at.isoformat()}
+        # Preserve redemption/history of existing links and approval's internal
+        # invitation records, but do not issue new links through an old frontend.
+        raise HTTPException(410, "Chức năng tạo lời mời đã ngừng. Người dùng vui lòng đăng ký tài khoản để quản trị viên xét duyệt.")
 
 
 @router.get("/invitations")
@@ -206,11 +208,25 @@ def revoke(invitation_id: uuid.UUID, request: Request):
 
 
 @router.get("/audit")
-def audit_log(request: Request):
+def audit_log(request: Request, page: int | None = Query(None, ge=1, le=100000),
+              fromDate: date | None = None, toDate: date | None = None,
+              actorId: uuid.UUID | None = None, action: str = Query('',max_length=80),
+              search: str = Query('',max_length=200)):
     with request.app.state.session_factory() as db:
         administrator(request, db)
-        return [{"action": a.action, "details": a.details, "at": a.created_at.isoformat()}
+        from .admin_audit_log import audit_page, safe_details
+        if page is not None:
+            return audit_page(db,page,fromDate,toDate,actorId,action,search)
+        return [{"action": a.action, "details": safe_details(a.details), "at": a.created_at.isoformat()}
                 for a in db.scalars(select(AdminAudit).order_by(AdminAudit.created_at.desc()).limit(100))]
+
+
+@router.get('/audit/{identifier}')
+def audit_entry(identifier: uuid.UUID, request: Request):
+    with request.app.state.session_factory() as db:
+        administrator(request, db)
+        from .admin_audit_log import audit_detail
+        return audit_detail(db,identifier)
 
 
 class TrialCreditChange(BaseModel):

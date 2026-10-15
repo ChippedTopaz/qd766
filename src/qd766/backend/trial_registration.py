@@ -198,12 +198,7 @@ def create_link(payload: LinkCreate, request: Request):
     from .admin import administrator, audit
     with request.app.state.session_factory.begin() as db:
         actor = administrator(request, db, write=True)
-        token = secrets.token_urlsafe(32)
-        item = SharedTrialLink(token_hash=digest(token), created_by=actor.id, max_registrations=payload.maxRegistrations,
-                               registered_count=0, expires_at=datetime.now(timezone.utc)+timedelta(days=payload.days))
-        db.add(item); db.flush()
-        audit(db, actor, "registration-link.created", linkId=str(item.id), maxRegistrations=item.max_registrations)
-        return {"id": str(item.id), "token": token}
+        raise HTTPException(410, "Chức năng tạo link đăng ký đã ngừng. Người dùng đăng ký trực tiếp tại trang đăng nhập.")
 
 
 @router.get("/admin/registration-links")

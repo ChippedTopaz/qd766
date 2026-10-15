@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const read=name=>readFileSync(new URL('../'+name,import.meta.url),'utf8');
+const layout=read('src/admin-layout.ts'),admin=read('src/admin.ts'),registration=read('src/admin-registration.ts');
+for(const source of [layout,admin,read('admin.html')])assert.doesNotMatch(source,/Mời dùng thử|Tạo link mời|data-new-invite/);
+assert.doesNotMatch(admin,/admin\/invitations|loadInvitations|invite-result|\.invite\(/);
+assert.doesNotMatch(registration,/data-create-link|admin\/registration-links|loadLinks|sharedLinks/);
+assert.match(layout,/Đăng ký chờ duyệt/);assert.match(layout,/panels\.registrations!\.append\(registration\)/);
+assert.match(layout,/form\.hidden=true/);assert.match(layout,/closeEdit:/);
+assert.match(admin,/data-account-editor="true" hidden/);assert.match(admin,/data-account-list="true"/);
+assert.match(admin,/admin\/accounts\/\$\{editing\}/);assert.match(admin,/if\(!editing\)throw/);
+assert.match(admin,/Lưu quyền/);assert.match(admin,/Toàn quốc \(không có quyền quản trị\)/);
+assert.match(admin,/if\(!province\).*Chọn tỉnh\/thành phố trước.*return;/,'Unassigned accounts must not request directory with an empty province UUID');
+assert.match(registration,/admin\/registrations\/review/);assert.match(registration,/data-registration-review|registrationReview/);
+console.log('ADMIN_INVITATION_RETIREMENT=PASS: no invite UI/create/read requests, review preserved, scope-only account editor');

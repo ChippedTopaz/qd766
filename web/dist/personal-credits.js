@@ -1,4 +1,5 @@
 import { personalCreditMarkup, CREDIT_PAGE_SIZE } from "./personal-credit-view.js";
+import { readServiceJson, userFacingError } from './service-feedback.js';
 const num = (n) => new Intl.NumberFormat("vi-VN").format(n);
 const esc = (v) => v.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export function requestCreditDisplay(state, cost) {
@@ -44,9 +45,7 @@ export function openPersonalCredits(onBalance) {
             const status = dialog.querySelector('[data-renew-status]'), wallet = data;
             try {
                 const me = await fetch('/api/v1/auth/me', { cache: 'no-store' });
-                if (!me.ok)
-                    throw new Error('Phiên đăng nhập đã hết hạn.');
-                const profile = await me.json();
+                const profile = await readServiceJson(me);
                 redemptionToken ??= crypto.randomUUID();
                 const response = await fetch('/api/v1/me/subscription/redemption', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-QD766-CSRF': profile.csrfToken }, body: JSON.stringify({ token: redemptionToken, expectedCost: wallet.redemptionCost }) });
                 const result = await response.json();
@@ -61,7 +60,7 @@ export function openPersonalCredits(onBalance) {
             }
             catch (e) {
                 if (status?.isConnected)
-                    status.textContent = e instanceof Error ? e.message : 'Không thể gia hạn.';
+                    status.textContent = userFacingError(e, 'Chưa thể gia hạn. Vui lòng kiểm tra lại trạng thái trước khi thử lại.');
                 button.disabled = false;
             }
             finally {
@@ -86,7 +85,7 @@ export function openPersonalCredits(onBalance) {
             offset = nextOffset;
         }
         catch (e) {
-            error = e instanceof Error ? e.message : 'Không thể tải thông tin Credit.';
+            error = userFacingError(e, 'Chưa thể tải thông tin Credit. Vui lòng thử lại.');
         }
         finally {
             loading = false;

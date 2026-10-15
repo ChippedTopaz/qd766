@@ -18,10 +18,13 @@ for(const p of data.periods.filter(p=>p.type!=='month'))data.snapshots[p.id+':al
 const app={innerHTML:'',setAttribute(){},querySelectorAll(){return []}};
 const control=dataset=>({dataset,handlers:{},addEventListener(k,cb){this.handlers[k]=cb},focus(){}});
 const navTime=control({nav:'time'}),navOverview=control({nav:'overview'}),brief=control({});
+const rankingPeriod=control({});
+const rankingType=control({rankingPeriodField:'type'}),rankingYear=control({rankingPeriodField:'year'});
 let scoreButtons=[],tabs=[],kind;
-globalThis.document={title:'',querySelector(s){if(s==='#app')return app;if(s==='[data-action=brief]')return brief;return null;},querySelectorAll(s){
+globalThis.document={title:'',querySelector(s){if(s==='#app')return app;if(s==='[data-action=brief]')return brief;if(s==='[data-ranking-period]')return rankingPeriod;return null;},querySelectorAll(s){
  if(s==='[data-nav]')return [navTime,navOverview];
  if(s==='[data-action=brief]')return [brief];
+ if(s==='[data-ranking-period-field]')return [rankingType,rankingYear];
  if(s==='[data-score-detail]'){
   scoreButtons=[...app.innerHTML.matchAll(/data-score-detail="([^"]+)" title="([^"]*)" aria-label="[^"]*">([^<]*)/g)].map(m=>({...control({scoreDetail:m[1]}),title:m[2],text:m[3]}));return scoreButtons;
  }
@@ -33,7 +36,7 @@ globalThis.window={setTimeout:(fn,delay)=>{const timer=setTimeout(fn,delay);time
 globalThis.location={search:'?period=month-2026-10',hash:'',pathname:'/'};
 let savedUrl='';globalThis.history={state:null,replaceState(_s,_t,url){savedUrl=url}};globalThis.scrollTo=()=>{};
 const calls=[];
-let failDaily=false,pendingDaily=null;
+let failDaily=false,pendingDaily=null,failRanking=false,pendingRanking=null;
 const benchmarkRows=()=>[own,peer].map((u,i)=>({rootDepartmentId:u.departmentId,provinceName:u.departmentName,totalScore:12+i,capturedAt:'2026-10-13T00:00:00Z',groups:Object.fromEntries(data.groupOrder.map(g=>[g,{score:2,maximum:20}]))}));
 globalThis.fetch=async(url,options)=>{
  calls.push({url,method:options?.method??'GET'});let body=[];
@@ -50,6 +53,8 @@ globalThis.fetch=async(url,options)=>{
  else if(url.includes('daily-history'))body={scope:'all',days:[7,8].map(day=>({reportDate:`2026-10-0${day}`,capturedAt:'2026-10-09T00:00:00Z',totalScore:(day-6)*6,rank:1,cohortSize:2,cohortKey:'review',groups:Object.fromEntries(data.groupOrder.map(g=>[g,{score:day-6,maximum:20}]))}))};
  else if(url.includes('/selection?')){
   const date=new URL(url,'https://test.local').searchParams.get('report_date');
+  if(!date&&failRanking)return {ok:false,status:404,json:async()=>({detail:'Missing period'})};
+  if(!date&&pendingRanking&&url.includes('year=2025'))await pendingRanking.promise;
   if(date&&failDaily)return {ok:false,status:404,json:async()=>({detail:'Missing saved day'})};
   if(date&&pendingDaily)await pendingDaily.promise;
   body={snapshot:makeSnapshot(date==='2026-10-07'?1:2),metadata:{reportDate:date,detailsAvailable:true,result:'detail'},benchmarks:national?benchmarkRows():[]};
@@ -92,9 +97,46 @@ tabs[1].handlers.click();kind.value='month';kind.handlers.change();await settle(
 assert(button);button.handlers.click();await settle();
 navOverview.handlers.click();assert(brief.handlers.click);brief.handlers.click();await settle();
 assert.match(app.innerHTML,/ranking-report/);
+const outsideUrl=savedUrl;
+rankingType.value='quarter';rankingType.handlers.change();await settle();
+assert.match(app.innerHTML.slice(app.innerHTML.indexOf('class="ranking-report"')),/Quý 4\/2026/);
+rankingType.value='year';rankingType.handlers.change();await settle();
+rankingYear.value='2025';rankingYear.handlers.change();await settle();
+assert.match(app.innerHTML.slice(app.innerHTML.indexOf('class="ranking-report"')),/Năm 2025/);
+assert.equal(savedUrl,outsideUrl,'Type and year controls leave main context unchanged');
+for(const [id,label] of [['month-2026-9','Tháng 9/2026'],['quarter-2026-4','Quý 4/2026'],['year-2026','Năm 2026'],['month-2026-10','Tháng 10/2026']]){
+ rankingPeriod.value=id;rankingPeriod.handlers.change({currentTarget:rankingPeriod});await settle();
+ const ranking=app.innerHTML.slice(app.innerHTML.indexOf('class="ranking-report"'));
+ assert(ranking.includes(label),`Ranking changes independently to ${id}`);
+ assert(scoreButtons.some(b=>b.title.includes(label)),'Ranking detail links target the selected report period');
+ assert.equal(savedUrl,outsideUrl,'Changing ranking period does not change main page URL');
+ assert(calls.some(c=>c.url.includes('/selection?')&&c.url.includes('period_type='+id.split('-')[0])));
+}
+failRanking=true;rankingPeriod.value='quarter-2026-3';rankingPeriod.handlers.change({currentTarget:rankingPeriod});await settle();
+assert.match(app.innerHTML,/Kỳ báo cáo được chọn chưa có dữ liệu xếp hạng/);assert.doesNotMatch(app.innerHTML,/<table class="leadership-table"/,'Missing period never falls back to latest');
+failRanking=false;
+pendingRanking={};pendingRanking.promise=new Promise(resolve=>{pendingRanking.resolve=resolve});
+rankingPeriod.value='year-2025';rankingPeriod.handlers.change({currentTarget:rankingPeriod});await settle();
+rankingPeriod.value='month-2026-9';rankingPeriod.handlers.change({currentTarget:rankingPeriod});await settle();
+pendingRanking.resolve();await settle();pendingRanking=null;
+assert.match(app.innerHTML.slice(app.innerHTML.indexOf('class="ranking-report"')),/Tháng 9\/2026/,'Late response cannot overwrite a newer period selection');
+assert.equal(savedUrl,outsideUrl);
+rankingPeriod.value='month-2026-10';rankingPeriod.handlers.change({currentTarget:rankingPeriod});await settle();
 const modal=app.innerHTML.slice(app.innerHTML.indexOf('class="modal-backdrop"'));
 if(restricted)assert(!scoreButtons.some(b=>b.title.includes(peer.departmentName)),'Peer business details never become clickable for agency account');
 const row=restricted?own:peer;
+if(process.argv.includes('--unit-name')){
+ rankingPeriod.value='month-2026-9';rankingPeriod.handlers.change({currentTarget:rankingPeriod});await settle();
+ button=scoreButtons.find(b=>b.title.startsWith('Mở Tổng quan')&&b.title.includes(row.departmentName));
+ assert(button,'Unit name has an authorized overview link');button.handlers.click();await settle();
+ assert.doesNotMatch(app.innerHTML,/ranking-report/);
+ const query=new URLSearchParams(savedUrl.split('?')[1]);assert.equal(query.get('unit'),row.departmentId);assert.equal(query.get('period'),'month-2026-9');
+ assert.match(app.innerHTML,/data-overview-tab="overview" aria-selected="true"/);
+ if(national)assert.equal(query.get('province'),peer.departmentId);
+ assert(calls.every(c=>c.method==='GET'));
+ console.log('RANKING_UNIT_NAME_PASS: correct unit/province, independent report period, overview, permissions, GET-only');
+ process.exit(0);
+}
 button=scoreButtons.find(b=>b.title.includes(row.departmentName)&&b.title.includes(data.groupLabels[data.groupOrder[1]]));
 assert(button);button.handlers.click();await settle();
 assert.doesNotMatch(app.innerHTML,/ranking-report/,'Preview dialog closes on navigation');

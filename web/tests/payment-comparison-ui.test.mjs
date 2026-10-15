@@ -39,7 +39,7 @@ for(const scope of ['all','formality']){
  const entry=peerControls.find(c=>c.dataset.peerUnit===agency.departmentId&&c.dataset.peerGroup===group.group);assert(entry);entry.handlers.click();
  const initialComparison=app.innerHTML.match(/<aside class="comparison-card"><h3>So với đơn vị cùng cấp<\/h3>([\s\S]*?)<\/aside>/)?.[1];
  assert(initialComparison,'Group-level peer panel opens before selecting any metric');
- assert.match(initialComparison,/Thứ hạng trong tỉnh/,'Initial group panel shows provincial same-level rank');
+ assert.match(initialComparison,/peer-own-rank[\s\S]*Hạng <b>\d+\/\d+/,'Initial group panel shows same-level rank in the context header');
  assert.match(initialComparison,/aria-current="true"/,'Selected agency is marked for local centering');
  for(const key of keys){
   const row=metrics.find(m=>m.dataset.metricDetail===key);assert(row,'Scored payment row is bound');

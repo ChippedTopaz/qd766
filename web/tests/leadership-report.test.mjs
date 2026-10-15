@@ -51,20 +51,23 @@ for(const WorkbookClass of [ExcelJS.Workbook,globalThis.ExcelJS.Workbook]){
   const buffer=await workbook.xlsx.writeBuffer();
   const reopened=new ExcelJS.Workbook();await reopened.xlsx.load(buffer);
   const sheet=reopened.worksheets[0];
-  assert.equal(sheet.getRow(6).cellCount,15);assert.equal(sheet.getCell("O7").value,100);
-  assert.deepEqual(sheet.getRow(6).values.slice(1),["STT",report.nameHeader,...report.groupLabels.flatMap(label=>[label,"Hạng"]),"Tổng điểm"]);
-  for(const column of [4,6,8,10,12,14])assert.equal(sheet.getCell(6,column).value,"Hạng");
-  assert.equal(sheet.getCell("C7").numFmt,"#,##0.00");assert.equal(sheet.getCell("D7").value,1);
-  assert.equal(sheet.getCell("D7").font.color.argb,"FFB91C1C");
+  assert.equal(sheet.getCell('A1').value,'BẢNG XẾP HẠNG ĐÁNH GIÁ CHẤT LƯỢNG PHỤC VỤ');
+  assert.equal(sheet.getRow(6).cellCount,16);assert.equal(sheet.getCell("C7").value,100);
+  assert.deepEqual(sheet.getRow(6).values.slice(1),["Thứ hạng",report.nameHeader,"Tổng điểm","Tăng/Giảm",...report.groupLabels.flatMap(label=>[label,'Hạng'])]);
+  for(const col of [6,8,10,12,14,16]){assert.equal(sheet.getCell(6,col).value,'Hạng');assert.equal(sheet.getCell(7,col).value,1);assert.equal(sheet.getCell(7,col).note,undefined);}
+  assert.equal(sheet.getCell('A7').alignment.horizontal,'center');assert.equal(sheet.getCell('D7').font.size,11);
+  assert.equal(sheet.getCell("C7").numFmt,"#,##0.00");assert.equal(sheet.getCell("E7").value,10);
+  assert.equal(sheet.getCell("E7").font.color.argb,"FF0F172A");
   assert.equal(sheet.getCell("B7").fill.fgColor.argb,"FF67CBE7");
   assert.equal(sheet.getRow(7).height,15);assert.deepEqual(sheet.model.merges,[]);
-  assert.equal(sheet.getRow(6).height,sheet.getRow(7).height);
-  sheet.getRow(6).eachCell(cell=>assert.notEqual(cell.alignment.wrapText,true));
-  for(let column=1;column<=15;column++){
+  assert(sheet.getRow(6).height>sheet.getRow(7).height);
+  sheet.getRow(6).eachCell(cell=>assert.equal(cell.alignment.wrapText,true));
+  for(let column=1;column<=16;column++){
     const headerText=String(sheet.getCell(6,column).value);
-    assert.ok(sheet.getColumn(column).width>=headerText.length+4);
+    if(column<5)assert.ok(sheet.getColumn(column).width>=headerText.length+4);
+    else assert.ok(sheet.getColumn(column).width<=24);
   }
-  assert.ok(sheet.getColumn(4).width<sheet.getColumn(3).width);
+  assert.ok(sheet.getColumn(4).width<sheet.getColumn(5).width);
   assert.ok(sheet.getColumn(1).width<15); // Metadata does not stretch STT.
   assert.equal(sheet.views[0].ySplit,6);assert.equal(sheet.pageSetup.orientation,"landscape");
   for(const label of data.groupOrder.map(id=>data.groupLabels[id]))assert.ok(sheet.getRow(6).values.includes(label));

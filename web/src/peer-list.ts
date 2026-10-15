@@ -1,13 +1,30 @@
 export interface PeerListItem {id:string;name:string;score:number}
+export interface PeerBaseline {rows:PeerListItem[];label:string;currentRows?:PeerListItem[]}
 const escape=(value:string)=>value.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));
+export function peerRankChange(items:PeerListItem[],selectedId:string,baseline?:PeerBaseline){
+ const rows=items.filter(row=>Number.isFinite(row.score)),own=rows.find(row=>row.id===selectedId);
+ const rank=own?1+rows.filter(row=>row.score>own.score+.005).length:null;
+ const ids=(values:PeerListItem[])=>values.filter(row=>Number.isFinite(row.score)).map(row=>row.id).sort().join('|');
+ let change:number|null=null;
+ const previous=baseline?.rows.filter(row=>Number.isFinite(row.score));
+ const prior=previous?.find(row=>row.id===selectedId);
+ const reference=baseline?.currentRows;
+ const matches=!reference||(ids(reference)===ids(rows)&&rows.every(row=>{const saved=reference.find(r=>r.id===row.id);return saved!=null&&Math.abs(saved.score-row.score)<.005;}));
+ if(rank!==null&&previous&&prior&&matches&&ids(rows)===ids(previous))change=1+previous.filter(row=>row.score>prior.score+.005).length-rank;
+ return {rank,total:rows.length,change};
+}
+export function peerComparisonContext(items:PeerListItem[],selectedId:string,scope:string,baseline?:PeerBaseline):string{
+ const {rank,total,change}=peerRankChange(items,selectedId,baseline);
+ const own=items.find(row=>row.id===selectedId);
+ const title=`${own?.name??''}${baseline?' · '+baseline.label:''}`;
+ return `<div class="peer-comparison-context"><span>${escape(scope)}</span><span class="peer-own-rank" title="${escape(title)}"><span>Hạng <b>${rank===null?'—':`${rank}/${total}`}</b></span>${change===null?'':`<span aria-hidden="true">·</span><span class="${change>0?'peer-rank-up':change<0?'peer-rank-down':'peer-rank-neutral'}">${change===0?'Không đổi':`${change>0?'↑':'↓'} ${Math.abs(change)} bậc`}</span>`}</span></div>`;
+}
 export function renderPeerList(items:PeerListItem[],selectedId:string):string {
   const rows=items.filter(item=>Number.isFinite(item.score)).sort((a,b)=>b.score-a.score||a.name.localeCompare(b.name,'vi'));
-  let higher=0;
-  const html=rows.map(item=>{
-    while(higher<rows.length&&rows[higher]!.score>item.score+.005)higher++;
-    return `<div class="peer-row ${item.id===selectedId?'mine':''}"${item.id===selectedId?' aria-current="true"':''}><span>${escape(item.name)}</span><b class="num">${item.score.toLocaleString('vi-VN',{minimumFractionDigits:2,maximumFractionDigits:2})}</b><small>Hạng ${higher+1}/${rows.length}</small></div>`;
+  const html=rows.map((item,index)=>{
+    return `<div class="peer-row ${item.id===selectedId?'mine':''}"${item.id===selectedId?' aria-current="true"':''}><small class="peer-index">${index+1}</small><span>${escape(item.name)}</span><b class="num">${item.score.toLocaleString('vi-VN',{minimumFractionDigits:2,maximumFractionDigits:2})}</b></div>`;
   }).join('');
-  return `<div class="nearby-list" tabindex="0" role="region" aria-label="Danh sách điểm các cơ quan, đơn vị cùng cấp">${html}</div>`;
+  return `<div class="nearby-list" tabindex="0" role="region" aria-label="Danh sách điểm các cơ quan, đơn vị cùng cấp"><div class="peer-list-columns" aria-hidden="true"><span>STT</span><span>Cơ quan, đơn vị</span><span>Điểm</span></div>${html}</div>`;
 }
 
 /** Scroll only this list, never the page/sidebar; keep the score order intact. */

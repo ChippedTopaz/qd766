@@ -1,3 +1,4 @@
+import {userFacingError} from './service-feedback.js';
 type Player={rank:number;name:string;province:string;best:number;correctAnswers:number};
 const esc=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export function leaderboardRows(players:Player[]):string{
@@ -19,5 +20,5 @@ export async function openTriviaLeaderboard():Promise<void>{
     if(!dialog.isConnected)return;
     const content=dialog.querySelector<HTMLElement>('[data-leaderboard-content]')!;
     content.innerHTML=body.players.length?`<div class="trivia-leaderboard-scroll"><table><thead><tr><th>Hạng</th><th>Tên tài khoản Google</th><th>Tỉnh công tác</th><th>Chuỗi cao nhất</th><th>Câu trả lời đúng</th></tr></thead><tbody>${leaderboardRows(body.players)}</tbody></table></div><p class="trivia-leaderboard-note">Mỗi câu hỏi trả lời đúng chỉ tính một lần, không tính trả lời lại. Đồng chuỗi: ưu tiên người có nhiều câu đúng khác nhau hơn.</p>`:'Chưa có người chơi có câu trả lời đúng.';
-  }catch(error){if(dialog.isConnected)dialog.querySelector<HTMLElement>('[data-leaderboard-content]')!.textContent=(error as Error).name==='TimeoutError'?'Máy chủ phản hồi chậm. Vui lòng thử lại.':(error as Error).message;}
+  }catch(error){if(dialog.isConnected)dialog.querySelector<HTMLElement>('[data-leaderboard-content]')!.textContent=userFacingError(error);}
 }

@@ -1,4 +1,5 @@
 import { loginView } from './login-view.js';
+import { readServiceJson, userFacingError } from './service-feedback.js';
 /** Numeric keyboard input, preserving the cursor when editing within the date. */
 export function registrationBirthMask(raw, position = raw.length, deleting = false) {
     const digits = raw.replace(/\D/g, '').slice(0, 8);
@@ -68,9 +69,9 @@ export function registrationFieldError(field, value) {
 }
 export async function mountTrialRegistration(root, local) {
     const response = await fetch('/api/v1/auth/registration', { cache: 'no-store' });
-    if (!response.ok)
+    if (response.status === 401 || response.status === 403)
         return false;
-    let profile = await response.json();
+    let profile = await readServiceJson(response);
     if (profile.state === 'approved')
         return false;
     root.innerHTML = loginView({ pending: true, name: profile.name, local, googleEnabled: true });
@@ -88,7 +89,7 @@ export async function mountTrialRegistration(root, local) {
             location.assign('/api/v1/auth/google/start');
         }
         catch (error) {
-            form.querySelector('[data-message]').textContent = error instanceof Error ? error.message : 'Không thể đăng nhập.';
+            form.querySelector('[data-message]').textContent = userFacingError(error, 'Chưa thể đăng nhập. Vui lòng thử lại.');
             button.disabled = false;
         }
     };
@@ -186,7 +187,7 @@ export async function mountTrialRegistration(root, local) {
             }
             catch (error) {
                 if (version === loading)
-                    message.textContent = error instanceof Error ? error.message : 'Không thể tải danh sách.';
+                    message.textContent = userFacingError(error, 'Chưa thể tải danh sách. Vui lòng thử lại.');
             }
             finally {
                 if (version === loading)
@@ -252,16 +253,14 @@ export async function mountTrialRegistration(root, local) {
                     declarationAccepted: form.querySelector('[name=declarationAccepted]').checked }
                     : { provinceId: province.value, unitId: unit.value };
                 const reply = await fetch(isPublic ? '/api/v1/auth/registration/public' : '/api/v1/auth/registration', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-QD766-CSRF': profile.csrfToken }, body: JSON.stringify(payload) });
-                const body = await reply.json();
-                if (!reply.ok)
-                    throw new Error(typeof body.detail === 'string' ? body.detail : 'Không thể gửi đăng ký.');
+                await readServiceJson(reply);
                 provinces.destroy();
                 units.destroy();
                 profile.state = 'pending';
                 waiting();
             }
             catch (error) {
-                message.textContent = error instanceof Error ? error.message : 'Không thể gửi đăng ký.';
+                message.textContent = userFacingError(error, 'Chưa thể gửi đăng ký. Vui lòng thử lại.');
                 submit.disabled = false;
             }
         });
@@ -282,14 +281,12 @@ export async function mountTrialRegistration(root, local) {
             button.disabled = true;
             try {
                 const reply = await fetch('/api/v1/auth/registration', { cache: 'no-store' });
-                if (!reply.ok)
-                    throw new Error('Phiên đã hết hạn. Vui lòng đăng nhập lại.');
-                profile = await reply.json();
+                profile = await readServiceJson(reply);
                 display();
                 form.querySelector('[data-message]').textContent = '';
             }
             catch (error) {
-                form.querySelector('[data-message]').textContent = error instanceof Error ? error.message : 'Chưa kiểm tra được trạng thái.';
+                form.querySelector('[data-message]').textContent = userFacingError(error, 'Chưa thể kiểm tra trạng thái. Vui lòng thử lại.');
             }
             finally {
                 button.disabled = false;

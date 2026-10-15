@@ -1,3 +1,4 @@
+import { userFacingError, readServiceJson } from './service-feedback.js';
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let context = '', directory = [], items = [], eligible = false, loaded = false, loading = false, busy = false, message = '', query = '', agencyId = '', recipientId = '', kind = 'month';
 let historyPage = 1, historyTotal = 0;
@@ -41,10 +42,7 @@ export function confirmChallenge(title, person, agency, periodLabel, actionLabel
 }
 async function api(path, csrf = '', body) {
     const response = await fetch('/api/v1/me/challenges' + path, { cache: 'no-store', signal: AbortSignal.timeout(15000), ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-QD766-CSRF': csrf }, body: JSON.stringify(body) } : {}) });
-    const result = await response.json();
-    if (!response.ok)
-        throw new Error(typeof result.detail === 'string' ? result.detail : 'Chưa thực hiện được. Vui lòng thử lại.');
-    return result;
+    return readServiceJson(response);
 }
 export function challengeMarkup() {
     if (loading)
@@ -79,7 +77,7 @@ async function load(rerender) {
     }
     catch (e) {
         if (key === context)
-            message = e.message;
+            message = userFacingError(e);
     }
     finally {
         if (key === context) {
@@ -123,7 +121,7 @@ export function bindChallenges(key, csrf, rerender) {
         }
         catch (e) {
             if (current === context)
-                message = e.message;
+                message = userFacingError(e);
         }
         finally {
             if (current === context) {
@@ -160,7 +158,7 @@ export function bindChallenges(key, csrf, rerender) {
             message = 'Đã gửi thách đấu. Đang chờ người nhận chấp nhận.';
         }
         catch (e) {
-            message = e.message;
+            message = userFacingError(e);
         }
         finally {
             busy = false;
@@ -183,7 +181,7 @@ export function bindChallenges(key, csrf, rerender) {
             message = 'Đã cập nhật lời thách đấu.';
         }
         catch (e) {
-            message = e.message;
+            message = userFacingError(e);
         }
         finally {
             busy = false;
@@ -241,7 +239,7 @@ function drawIncoming() {
         }
         catch (e) {
             if (key === notificationKey)
-                notificationMessage = e.message;
+                notificationMessage = userFacingError(e);
         }
         finally {
             if (key === notificationKey) {
@@ -316,7 +314,7 @@ export async function openChallengeBoard() {
         }
         catch (e) {
             if (dialog.isConnected && requestId === sequence) {
-                content.innerHTML = tabs + `<p role="status">${esc(e.message)}</p>`;
+                content.innerHTML = tabs + `<p role="status">${esc(userFacingError(e))}</p>`;
                 bindTabs();
             }
         }

@@ -1,3 +1,4 @@
+import { userFacingError } from './service-feedback.js';
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export function leaderboardRows(players) {
     return players.slice(0, 20).map(p => `<tr><td class="num">${esc(p.rank)}</td><td>${esc(p.name)}</td><td>${esc(p.province)}</td><td class="num"><strong>${esc(p.best)}</strong></td><td class="num">${esc(p.correctAnswers)}</td></tr>`).join('');
@@ -29,7 +30,7 @@ export async function openTriviaLeaderboard() {
     }
     catch (error) {
         if (dialog.isConnected)
-            dialog.querySelector('[data-leaderboard-content]').textContent = error.name === 'TimeoutError' ? 'Máy chủ phản hồi chậm. Vui lòng thử lại.' : error.message;
+            dialog.querySelector('[data-leaderboard-content]').textContent = userFacingError(error);
     }
 }
 //# sourceMappingURL=trivia-leaderboard.js.map

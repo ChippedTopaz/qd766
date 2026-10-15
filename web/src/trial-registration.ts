@@ -1,4 +1,5 @@
 import {loginView} from './login-view.js';
+import {readServiceJson,userFacingError} from './service-feedback.js';
 import type TomSelectControl from 'tom-select';
 declare const TomSelect: typeof TomSelectControl;
 type Status={state:'draft'|'pending'|'approved'|'rejected';name:string;email:string;csrfToken:string;publicRegistration?:boolean};
@@ -53,8 +54,8 @@ export function registrationFieldError(field:string,value:string|boolean):string
 
 export async function mountTrialRegistration(root:HTMLElement,local:boolean):Promise<boolean>{
   const response=await fetch('/api/v1/auth/registration',{cache:'no-store'});
-  if(!response.ok)return false;
-  let profile=await response.json() as Status;
+  if(response.status===401||response.status===403)return false;
+  let profile=await readServiceJson<Status>(response);
   if(profile.state==='approved')return false;
   root.innerHTML=loginView({pending:true,name:profile.name,local,googleEnabled:true});
   const form=root.querySelector<HTMLElement>('.login-form')!;
@@ -66,7 +67,7 @@ export async function mountTrialRegistration(root:HTMLElement,local:boolean):Pro
       const reply=await fetch('/api/v1/auth/logout',{method:'POST',headers:{'X-QD766-CSRF':profile.csrfToken}});
       if(!reply.ok&&reply.status!==303)throw new Error('Chưa thể chuyển sang đăng nhập. Vui lòng thử lại.');
       location.assign('/api/v1/auth/google/start');
-    }catch(error){form.querySelector('[data-message]')!.textContent=error instanceof Error?error.message:'Không thể đăng nhập.';button.disabled=false;}
+    }catch(error){form.querySelector('[data-message]')!.textContent=userFacingError(error,'Chưa thể đăng nhập. Vui lòng thử lại.');button.disabled=false;}
   };
   if(profile.state==='draft'){
     form.innerHTML='<h2 id="login-title">Đăng ký dùng thử</h2><p class="login-description">Chọn tỉnh và cơ quan công tác.</p><form data-registration><label>Tỉnh/thành phố<select data-province required></select></label><label>Cơ quan, đơn vị<select data-unit required></select></label><p class="login-foot">Phạm vi sử dụng: cơ quan được phê duyệt.</p><p data-message role="status"></p><button type="submit" class="btn primary">Gửi đăng ký</button></form><button type="button" class="text-button" data-logout>Đăng nhập nếu đã là thành viên</button>';
@@ -119,7 +120,7 @@ export async function mountTrialRegistration(root:HTMLElement,local:boolean):Pro
         const data=await reply.json() as Directory;if(version!==loading)return;
         units.addOptions(data.units.map(item=>({value:item.id,text:item.name})));units.enable();
         if(!data.units.length)message.textContent='Tỉnh này chưa có danh sách cơ quan.';
-      }catch(error){if(version===loading)message.textContent=error instanceof Error?error.message:'Không thể tải danh sách.';}
+      }catch(error){if(version===loading)message.textContent=userFacingError(error,'Chưa thể tải danh sách. Vui lòng thử lại.');}
       finally{if(version===loading)submit.disabled=false;}
     };
     const provinces=new TomSelect(province,{placeholder:'Tìm tỉnh/thành phố…',maxItems:1,create:false,onChange:()=>void loadUnits()});
@@ -150,9 +151,9 @@ export async function mountTrialRegistration(root:HTMLElement,local:boolean):Pro
           declarationAccepted:form.querySelector<HTMLInputElement>('[name=declarationAccepted]')!.checked}
           :{provinceId:province.value,unitId:unit.value};
         const reply=await fetch(isPublic?'/api/v1/auth/registration/public':'/api/v1/auth/registration',{method:'POST',headers:{'Content-Type':'application/json','X-QD766-CSRF':profile.csrfToken},body:JSON.stringify(payload)});
-        const body=await reply.json();if(!reply.ok)throw new Error(typeof body.detail==='string'?body.detail:'Không thể gửi đăng ký.');
+        await readServiceJson(reply);
         provinces.destroy();units.destroy();profile.state='pending';waiting();
-      }catch(error){message.textContent=error instanceof Error?error.message:'Không thể gửi đăng ký.';submit.disabled=false;}
+      }catch(error){message.textContent=userFacingError(error,'Chưa thể gửi đăng ký. Vui lòng thử lại.');submit.disabled=false;}
     });
     form.querySelector('[data-logout]')!.addEventListener('click',()=>void logout());
   }else waiting();
@@ -166,8 +167,8 @@ export async function mountTrialRegistration(root:HTMLElement,local:boolean):Pro
     };
     const check=async()=>{
       const button=form.querySelector<HTMLButtonElement>('[data-check]')!;button.disabled=true;
-      try{const reply=await fetch('/api/v1/auth/registration',{cache:'no-store'});if(!reply.ok)throw new Error('Phiên đã hết hạn. Vui lòng đăng nhập lại.');profile=await reply.json() as Status;display();form.querySelector('[data-message]')!.textContent='';}
-      catch(error){form.querySelector('[data-message]')!.textContent=error instanceof Error?error.message:'Chưa kiểm tra được trạng thái.';}
+      try{const reply=await fetch('/api/v1/auth/registration',{cache:'no-store'});profile=await readServiceJson<Status>(reply);display();form.querySelector('[data-message]')!.textContent='';}
+      catch(error){form.querySelector('[data-message]')!.textContent=userFacingError(error,'Chưa thể kiểm tra trạng thái. Vui lòng thử lại.');}
       finally{button.disabled=false;}
     };
     form.querySelector('[data-check]')!.addEventListener('click',()=>void check());

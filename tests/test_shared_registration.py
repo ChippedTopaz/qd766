@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import uuid
+import secrets
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select, func
@@ -22,9 +23,13 @@ class SharedRegistrationTests(unittest.TestCase):
         self.app.state.settings=replace(self.app.state.settings,shared_registration_enabled=True)
 
     def link(self, **options):
-        response=self.client.post('/api/v1/admin/registration-links',json=options,headers=self.headers)
-        self.assertEqual(response.status_code,200,response.text)
-        return response.json()
+        # Legacy link fixture; public registration no longer creates these links.
+        token=secrets.token_urlsafe(32)
+        with self.app.state.session_factory.begin() as db:
+            row=SharedTrialLink(token_hash=digest(token),created_by=self.admin_id,
+                max_registrations=options.get('maxRegistrations',100),registered_count=0,
+                expires_at=datetime.now(timezone.utc)+timedelta(days=options.get('days',7)))
+            db.add(row);db.flush();return {'id':str(row.id),'token':token}
 
     def join(self, token, sub='applicant'):
         client=TestClient(self.app,base_url='https://testserver',follow_redirects=False)

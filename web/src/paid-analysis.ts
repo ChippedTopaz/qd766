@@ -1,3 +1,4 @@
+import {userFacingError} from './service-feedback.js';
 interface Selection {rootDepartmentId:string;unitId:string;periodType:string;year:number;periodValue:number|null;scope:string;capturedAt:string;availableGroups?:string[];organization?:string;periodLabel?:string}
 interface Card {id:string;groupId:string;kind:string;title:string;evidence:string;action:string;recommendation?:string}
 interface Analysis {id:string;requestToken?:string;state:string;context?:{groupIds?:string[]};credits?:number;heldCredits?:number;queuePosition?:number|null;queueWaitMinutes?:number;createdAt:string;capturedAt:string;message:string;availableCredits?:number;reservedCredits?:number;result:{cards:Card[];limitations:string[]}|null}
@@ -42,7 +43,7 @@ export function bindPaidAnalysis(selection:Selection,csrf:string,onChange:()=>vo
       const value=await response.json();
       if(!response.ok){if(response.status<500)local.token=null;throw new Error(typeof value.detail==='string'?value.detail:'Không thực hiện được phân tích.');}
       update(value as Analysis);
-    }catch(error){local.error=error instanceof Error?error.message:'Chưa xác nhận được kết quả. Xem kết quả đã lưu trước khi gửi lại.';}
+    }catch(error){local.error=userFacingError(error,'Chưa xác nhận được kết quả. Xem kết quả đã lưu trước khi gửi lại.');}
     finally{local.busy=false;onChange();}
   };
   document.querySelector('[data-analysis-start]')?.addEventListener('click',()=>{
@@ -57,7 +58,7 @@ export function bindPaidAnalysis(selection:Selection,csrf:string,onChange:()=>vo
         if(local.token){await run();return;}
         local.groupIds=local.groupIds.filter(id=>allowedGroups(selection).includes(id));
         local.confirming=true;
-      }catch(error){local.error=error instanceof Error?error.message:'Không kiểm tra được trạng thái phân tích.';}
+      }catch(error){local.error=userFacingError(error,'Chưa thể kiểm tra trạng thái phân tích. Vui lòng thử lại.');}
       finally{local.busy=false;onChange();document.querySelector<HTMLButtonElement>('[data-analysis-cancel]')?.focus();}
     })();
   });
@@ -90,7 +91,7 @@ export function bindPaidAnalysis(selection:Selection,csrf:string,onChange:()=>vo
       const response=await fetch('/api/v1/me/analysis/latest?'+query,{cache:'no-store'});const body=await response.json();
       if(!response.ok)throw new Error(body.detail??'Không tải được kết quả.');
       if(body.analysis)update(body.analysis);else local.error='Chưa có kết quả phân tích đã lưu cho lựa chọn này.';
-    }catch(error){local.error=error instanceof Error?error.message:'Không tải được kết quả.';}
+    }catch(error){local.error=userFacingError(error,'Chưa thể tải kết quả. Vui lòng thử lại.');}
     finally{local.busy=false;onChange();}
   });
   document.querySelectorAll<HTMLElement>('[data-analysis-group]').forEach(button=>button.addEventListener('click',()=>onGroup(button.dataset.analysisGroup!)));
@@ -102,7 +103,7 @@ export function bindPaidAnalysis(selection:Selection,csrf:string,onChange:()=>vo
       const response=await fetch('/api/v1/me/analysis/cancel',{method:'POST',headers:{'Content-Type':'application/json','X-QD766-CSRF':csrf},body:JSON.stringify({...requestContext(selection),...(groupIds?{groupIds}:{}),token:local.token,expectedCredits:local.analysis.heldCredits??20})});
       const value=await response.json();if(!response.ok)throw new Error(value.detail??'Không hủy được lượt chờ.');
       update(value as Analysis);
-    }catch(error){local.error=error instanceof Error?error.message:'Không hủy được lượt chờ.';}
+    }catch(error){local.error=userFacingError(error,'Chưa thể hủy lượt chờ. Vui lòng kiểm tra lại trạng thái.');}
     finally{local.busy=false;onChange();}
   });
   stopPaidAnalysisPolling();
@@ -116,7 +117,7 @@ export function bindPaidAnalysis(selection:Selection,csrf:string,onChange:()=>vo
         const value=await response.json();if(version!==pollVersion)return;
         if(!response.ok)throw new Error(value.detail??'Chưa đọc được trạng thái phân tích.');
         update(value as Analysis);
-      }catch(error){if(version!==pollVersion)return;local.error=error instanceof Error?error.message:'Chưa đọc được trạng thái.';}
+      }catch(error){if(version!==pollVersion)return;local.error=userFacingError(error,'Chưa thể kiểm tra trạng thái. Vui lòng thử lại.');}
       onChange();
     };
     pollTimer=setTimeout(poll,5000);

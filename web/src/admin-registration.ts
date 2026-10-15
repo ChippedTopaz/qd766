@@ -1,6 +1,5 @@
 type Api=<T>(path:string,body?:unknown)=>Promise<T>;
 type Pending={id:string;name:string;email:string;province:string;unit:string;provinceId:string;unitId:string|null;accessTier?:'province'|'agency';birthDate?:string|null;gender?:string|null;workplace?:string|null};
-type Link={id:string;expiresAt:string;registeredCount:number;maxRegistrations:number;revoked:boolean};
 type Directory={provinces:Array<{id:string;name:string}>;units:Array<{id:string;name:string}>};
 const esc=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 
@@ -13,38 +12,19 @@ export function pendingRegistrationRow(item:Pending):string{
 export async function installRegistrationAdmin(root:HTMLElement,api:Api,onReview:()=>Promise<void>,deferLoad=false):Promise<void>{
   const policy=await api<{sharedRegistrationEnabled?:boolean}>('access-policy');
   if(!policy.sharedRegistrationEnabled)return;
-  const links=document.createElement('section');links.dataset.sharedLinks='true';
-  links.innerHTML='<h2>Link đăng ký dùng chung</h2><p>Người dùng tự chọn tỉnh và cơ quan. Chỉ cấp quyền cơ quan sau khi duyệt.</p><form data-create-link><div class="form-grid"><label>Hạn link (ngày)<input name="days" type="number" min="1" max="30" value="7" required></label><label>Số người đăng ký tối đa<input name="max" type="number" min="1" max="1000" value="100" required></label></div><div class="actions"><button type="submit" class="primary">Tạo link dùng chung</button></div></form><div data-link-result></div><p data-link-message role="status"></p><div class="scroll"><table><thead><tr><th>Hết hạn</th><th>Đã đăng ký</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody data-links></tbody></table></div>';
   const pending=document.createElement('section');pending.dataset.registrationReview='true';
   pending.innerHTML='<h2>Đăng ký chờ duyệt</h2><p>Kiểm tra hồ sơ và loại tài khoản đề nghị trước khi duyệt. Khi duyệt, tự cấp 1 tháng dùng thử và 100 Credit một lần.</p><div class="actions"><button data-refresh> Làm mới</button><button class="primary" data-review="approve">Duyệt đã chọn</button><button data-review="reject">Từ chối đã chọn</button></div><p data-review-message role="status"></p><div class="scroll"><table><thead><tr><th><input type="checkbox" data-all aria-label="Chọn tối đa 100 yêu cầu"></th><th>Người đăng ký</th><th>Tỉnh/thành phố</th><th>Cơ quan, đơn vị</th><th>Quyền đề nghị</th><th>Thao tác</th></tr></thead><tbody data-pending></tbody></table></div><form data-edit hidden><h3>Điều chỉnh quyền và cơ quan</h3><div class="form-grid"><label>Loại tài khoản<select data-edit-tier><option value="agency">Cơ quan</option><option value="province">Cấp tỉnh</option></select></label><label>Tỉnh/thành phố<select data-edit-province required></select></label><label>Cơ quan<select data-edit-unit required></select></label></div><div class="actions"><button type="submit">Lưu lựa chọn</button><button type="button" data-cancel-edit>Hủy</button></div></form>';
-  root.append(links,pending);
+  root.append(pending);
   const reviewTable=pending.querySelector('table')!;reviewTable.classList.add('registration-review-table');
   reviewTable.querySelector('thead tr')!.innerHTML='<th><input type="checkbox" data-all aria-label="Chọn tối đa 100 yêu cầu"></th><th>Người đăng ký</th><th>Ngày sinh</th><th>Giới tính</th><th>Địa chỉ email</th><th>Đơn vị công tác</th><th>Tỉnh/thành phố</th><th>Cơ quan, đơn vị</th><th>Quyền</th><th>Thao tác</th>';
   let rows:Pending[]=[],editing:string|null=null;
   const message=(scope:HTMLElement,selector:string,text:string)=>{scope.querySelector(selector)!.textContent=text;};
-  const loadLinks=async()=>{
-    const items=await api<Link[]>('admin/registration-links');
-    links.querySelector('[data-links]')!.innerHTML=items.map(item=>`<tr><td>${esc(new Date(item.expiresAt).toLocaleString('vi-VN'))}</td><td>${item.registeredCount}/${item.maxRegistrations}</td><td>${item.revoked?'Đã thu hồi':new Date(item.expiresAt).getTime()<Date.now()?'Hết hạn':item.registeredCount>=item.maxRegistrations?'Đủ số người':'Đang mở'}</td><td>${item.revoked?'':`<button data-revoke-link="${esc(item.id)}">Thu hồi</button>`}</td></tr>`).join('');
-  };
   const loadPending=async()=>{
     rows=await api<Pending[]>('admin/registrations');
     pending.querySelector('[data-pending]')!.innerHTML=rows.length?rows.map(pendingRegistrationRow).join(''):'<tr><td colspan="10">Không có đăng ký chờ duyệt.</td></tr>';
     pending.querySelector<HTMLInputElement>('[data-all]')!.checked=false;
   };
   async function action(scope:HTMLElement,selector:string,work:()=>Promise<void>){try{await work();}catch(error){message(scope,selector,error instanceof Error?error.message:'Không thực hiện được yêu cầu.');}}
-  links.querySelector('form')!.addEventListener('submit',event=>{
-    event.preventDefault();const form=event.currentTarget as HTMLFormElement;const button=form.querySelector<HTMLButtonElement>('button')!;button.disabled=true;
-    void action(links,'[data-link-message]',async()=>{try{
-      const values=new FormData(form);const item=await api<{token:string}>('admin/registration-links',{days:Number(values.get('days')),maxRegistrations:Number(values.get('max'))});
-      const url=`${location.origin}/#register=${item.token}`;
-      const result=links.querySelector('[data-link-result]')!;result.replaceChildren();
-      const link=document.createElement('a');link.href=url;link.textContent=url;link.style.overflowWrap='anywhere';
-      const copy=document.createElement('button');copy.type='button';copy.textContent='Sao chép link';
-      copy.addEventListener('click',()=>void action(links,'[data-link-message]',async()=>{await navigator.clipboard.writeText(url);message(links,'[data-link-message]','Đã sao chép link dùng chung.');}));
-      result.append(link,copy);message(links,'[data-link-message]','Link chỉ hiển thị lần này. Có thể gửi cùng link cho nhiều người.');await loadLinks();
-    }finally{button.disabled=false;}});
-  });
-  links.addEventListener('click',event=>{const button=(event.target as HTMLElement).closest<HTMLButtonElement>('[data-revoke-link]');if(button)void action(links,'[data-link-message]',async()=>{await api(`admin/registration-links/${button.dataset.revokeLink}/revoke`,{});await loadLinks();message(links,'[data-link-message]','Đã thu hồi link; không nhận đăng ký mới.');});});
   pending.querySelector('[data-refresh]')!.addEventListener('click',()=>void action(pending,'[data-review-message]',loadPending));
   pending.querySelector<HTMLInputElement>('[data-all]')!.addEventListener('change',event=>{const checked=(event.target as HTMLInputElement).checked;pending.querySelectorAll<HTMLInputElement>('[data-registration-id]').forEach((box,index)=>box.checked=checked&&index<100);});
   for(const button of pending.querySelectorAll<HTMLButtonElement>('[data-review]'))button.addEventListener('click',()=>{
@@ -64,8 +44,7 @@ export async function installRegistrationAdmin(root:HTMLElement,api:Api,onReview
   edit.querySelector('[data-cancel-edit]')!.addEventListener('click',()=>{edit.hidden=true;editing=null;});
   edit.addEventListener('submit',event=>{event.preventDefault();if(editing)void action(pending,'[data-review-message]',async()=>{await api(`admin/registrations/${editing}/assignment`,{provinceId:province.value,unitId:tier.value==='province'?null:unit.value,accessTier:tier.value});edit.hidden=true;editing=null;await loadPending();});});
   if(deferLoad)root.addEventListener('click',event=>{const key=(event.target as HTMLElement).closest<HTMLElement>('[data-admin-section]')?.dataset.adminSection;
-    if(key==='invitations')void action(links,'[data-link-message]',loadLinks);
     if(key==='registrations')void action(pending,'[data-review-message]',loadPending);
   });
-  else await Promise.all([loadLinks(),loadPending()]);
+  else await loadPending();
 }

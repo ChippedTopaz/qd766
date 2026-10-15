@@ -34,8 +34,22 @@ def daily_status():
         if len(reports)>=7:break
     return reports
 
-def collection_status(db, *, kind=None, source=None, state=None, offset=0, limit=30):
+def collection_status(db, *, kind=None, source=None, state=None, offset=0, limit=30,
+                      from_date=None, to_date=None, province_id=None, compact=False,
+                      period_type=None,year=None,period_value=None):
+    from .admin_log_history import date_bounds
+    lower, upper = date_bounds(from_date, to_date)
     query=select(CollectionJob)
+    if lower: query=query.where(CollectionJob.created_at>=lower)
+    if upper: query=query.where(CollectionJob.created_at<upper)
+    if province_id: query=query.where(CollectionJob.request['rootDepartmentId'].as_string()==str(province_id))
+    if period_type: query=query.where(CollectionJob.request['period']['type'].as_string()==period_type)
+    if year: query=query.where(CollectionJob.request['period']['year'].as_integer()==year)
+    if period_value:
+        from fastapi import HTTPException
+        if period_type not in ('month','quarter') or period_type=='quarter' and period_value>4:
+            raise HTTPException(422,'Kỳ báo cáo không hợp lệ.')
+        query=query.where(CollectionJob.request['period'][period_type].as_integer()==period_value)
     linked_request=select(PaidDataRequest.id).where(PaidDataRequest.collection_job_id==CollectionJob.id).exists()
     if source=='user':query=query.where(linked_request)
     elif source=='system':query=query.where(~linked_request)
@@ -46,6 +60,7 @@ def collection_status(db, *, kind=None, source=None, state=None, offset=0, limit
     elif kind=='default':
         query=query.where(CollectionJob.request['scope'].as_string()=='all')
     total=db.scalar(select(func.count()).select_from(query.subquery()))
+    offset=min(offset,max(0,((total-1)//limit)*limit))
     jobs=list(db.scalars(query.order_by(CollectionJob.created_at.desc(),CollectionJob.id.desc()).offset(offset).limit(limit)))
     ids=[]
     import uuid
@@ -65,7 +80,7 @@ def collection_status(db, *, kind=None, source=None, state=None, offset=0, limit
     count_rows=query.subquery()
     counts=dict(db.execute(select(count_rows.c.state,func.count()).group_by(count_rows.c.state)).all())
     control=db.get(CollectionControl,'dvcqg')
-    batches=list(db.scalars(select(ProvinceCollectionBatch).order_by(ProvinceCollectionBatch.created_at.desc()).limit(30)))
+    batches=[] if compact else list(db.scalars(select(ProvinceCollectionBatch).order_by(ProvinceCollectionBatch.created_at.desc()).limit(30)))
     return {'counts':counts,'total':total,'offset':offset,'limit':limit,
         'control':{'state':control.circuit_state if control else 'unknown','reason':control.reason if control else None},
         'jobs':[{'id':str(j.id),'state':j.state,'kind':'formality' if j.request.get('scope')=='formality' else 'default',

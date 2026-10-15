@@ -1,3 +1,4 @@
+import {userFacingError,readServiceJson} from './service-feedback.js';
 type Agency={id:string;name:string;users:{id:string;name:string}[]};
 type Duel={id:string;senderId:string;recipientId:string;sender:string;recipient:string;senderUnit:string;recipientUnit:string;periodType:string;year:number;periodValue:number|null;state:string;senderScore:number|null;recipientScore:number|null;winnerId:string|null;canAnswer:boolean};
 const esc=(v:unknown)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -37,7 +38,7 @@ export function confirmChallenge(title:string,person:string,agency:string,period
 }
 async function api(path:string,csrf='',body?:unknown){
  const response=await fetch('/api/v1/me/challenges'+path,{cache:'no-store',signal:AbortSignal.timeout(15000),...(body?{method:'POST',headers:{'Content-Type':'application/json','X-QD766-CSRF':csrf},body:JSON.stringify(body)}:{})});
- const result=await response.json();if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:'Chưa thực hiện được. Vui lòng thử lại.');return result;
+ return readServiceJson<any>(response);
 }
 export function challengeMarkup():string{
  if(loading)return '<section class="panel"><div class="panel-body">Đang tải Thách đấu…</div></section>';
@@ -56,7 +57,7 @@ export function challengeMarkup():string{
 async function load(rerender:()=>void){
  if(loading)return;loading=true;rerender();
  const key=context;
- try{const [d,r]=await Promise.all([api('/directory'),api('?page='+historyPage)]);if(key!==context)return;directory=d.agencies;eligible=d.eligible;setHistory(r);loaded=true;message=''}catch(e){if(key===context)message=(e as Error).message}
+ try{const [d,r]=await Promise.all([api('/directory'),api('?page='+historyPage)]);if(key!==context)return;directory=d.agencies;eligible=d.eligible;setHistory(r);loaded=true;message=''}catch(e){if(key===context)message=userFacingError(e)}
  finally{if(key===context){loading=false;loaded=true;rerender()}}
 }
 export function bindChallenges(key:string,csrf:string,rerender:()=>void){
@@ -66,7 +67,7 @@ export function bindChallenges(key:string,csrf:string,rerender:()=>void){
  document.querySelectorAll<HTMLButtonElement>('[data-duel-page]').forEach(el=>el.addEventListener('click',async()=>{
   if(busy||loading||el.disabled)return;busy=true;const current=context;
   document.querySelectorAll<HTMLButtonElement>('[data-duel-page]').forEach(b=>b.disabled=true);
-  try{const r=await api('?page='+el.dataset.duelPage);if(current===context){setHistory(r);message=''}}catch(e){if(current===context)message=(e as Error).message}
+  try{const r=await api('?page='+el.dataset.duelPage);if(current===context){setHistory(r);message=''}}catch(e){if(current===context)message=userFacingError(e)}
   finally{if(current===context){busy=false;rerender()}}
  }));
  document.querySelector<HTMLInputElement>('[data-duel-search]')?.addEventListener('focus',e=>{if(agencyId&&!query)(e.target as HTMLInputElement).select()});
@@ -84,13 +85,13 @@ export function bindChallenges(key:string,csrf:string,rerender:()=>void){
   busy=true;
   if(!await confirmChallenge('Xác nhận gửi thách đấu',person.name,agency.name,label,'Gửi thách đấu')){busy=false;return}
   rerender();
-  try{await api('',csrf,{recipientId,periodType:kind,year,periodValue:kind==='year'?null:value});setHistory(await api('?page=1'));message='Đã gửi thách đấu. Đang chờ người nhận chấp nhận.'}catch(e){message=(e as Error).message}finally{busy=false;rerender()}
+  try{await api('',csrf,{recipientId,periodType:kind,year,periodValue:kind==='year'?null:value});setHistory(await api('?page=1'));message='Đã gửi thách đấu. Đang chờ người nhận chấp nhận.'}catch(e){message=userFacingError(e)}finally{busy=false;rerender()}
  });
  document.querySelectorAll<HTMLElement>('[data-duel-answer]').forEach(el=>el.addEventListener('click',async()=>{
   const k=items.find(k=>k.id===el.dataset.duelAnswer);if(busy||!k)return;
   busy=true;
   if(!await confirmChallenge(el.dataset.duelAction==='accept'?'Chấp nhận thách đấu':'Từ chối thách đấu',k.sender,k.senderUnit,period(k),el.dataset.duelAction==='accept'?'Chấp nhận':'Từ chối','Người thách đấu')){busy=false;return}
-  rerender();try{await api('/'+encodeURIComponent(el.dataset.duelAnswer!)+'/answer',csrf,{action:el.dataset.duelAction});setHistory(await api('?page='+historyPage));message='Đã cập nhật lời thách đấu.'}catch(e){message=(e as Error).message}finally{busy=false;rerender()}
+  rerender();try{await api('/'+encodeURIComponent(el.dataset.duelAnswer!)+'/answer',csrf,{action:el.dataset.duelAction});setHistory(await api('?page='+historyPage));message='Đã cập nhật lời thách đấu.'}catch(e){message=userFacingError(e)}finally{busy=false;rerender()}
  }));
 }
 let notificationKey='',notificationCsrf='',notificationItems:Duel[]=[],notificationCount=0,notificationTimer:number|null=null,notificationBusy=false,notificationMessage='';
@@ -120,7 +121,7 @@ function drawIncoming(){
    loaded=false;notificationMessage='';
    const body=await api('/incoming');if(key!==notificationKey)return;
    notificationItems=body.items;notificationCount=body.count;
-  }catch(e){if(key===notificationKey)notificationMessage=(e as Error).message}
+  }catch(e){if(key===notificationKey)notificationMessage=userFacingError(e)}
   finally{if(key===notificationKey){notificationBusy=false;drawIncoming()}}
  }));
 }
@@ -159,7 +160,7 @@ export async function openChallengeBoard(){
    pages[tab]=body.page??1;
    content.innerHTML=tabs+(tab==='top'?`<p>Top 20 · Thắng 3 điểm · Hòa 1 điểm · Thua 0 điểm</p><div class="table-wrap"><table><thead><tr><th>Hạng</th><th>Người chơi</th><th>Điểm</th><th>Thắng</th><th>Hòa</th><th>Thua</th></tr></thead><tbody>${body.players.map((p:any)=>`<tr><td class="num">${esc(p.rank)}</td><td>${esc(p.name)}</td><td class="num">${esc(p.points)}</td><td class="num">${esc(p.wins)}</td><td class="num">${esc(p.draws)}</td><td class="num">${esc(p.losses)}</td></tr>`).join('')||'<tr><td colspan="6">Chưa có kết quả để xếp hạng.</td></tr>'}</tbody></table></div>`:table(body.items)+challengePagination(pages[tab]??1,body.total,'data-board-page'));
    bindTabs();content.querySelectorAll<HTMLButtonElement>('[data-board-page]').forEach(el=>el.addEventListener('click',()=>{if(!el.disabled)void draw(tab,Number(el.dataset.boardPage))}));
-  }catch(e){if(dialog.isConnected&&requestId===sequence){content.innerHTML=tabs+`<p role="status">${esc((e as Error).message)}</p>`;bindTabs()}}
+  }catch(e){if(dialog.isConnected&&requestId===sequence){content.innerHTML=tabs+`<p role="status">${esc(userFacingError(e))}</p>`;bindTabs()}}
  };
  await draw('active');
 }

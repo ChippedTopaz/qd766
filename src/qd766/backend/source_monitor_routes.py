@@ -1,49 +1,116 @@
 """Admin-only source alerts. Review status never publishes drafts or starts a crawl."""
 import uuid
-from datetime import datetime,timezone
+from datetime import date,datetime,timezone
 from typing import Literal
 from fastapi import APIRouter,Request,HTTPException,Query
 from pydantic import BaseModel,ConfigDict,Field
 from sqlalchemy import select,func
 from .admin import administrator,audit
-from .models import SourceMonitorAlert,SourceMonitorRun,Snapshot
+from .models import SourceMonitorAlert,SourceMonitorRun,SourceMonitorBaseline,Snapshot
+from .source_monitor_labels import describe_details,alert_summary
 from .source_monitor import ready
+from .source_monitor_batches import batch_key,batch_list,batch_summary
 from .province_refresh import VIETNAM
 router=APIRouter(prefix='/api/v1/admin/source-monitor',tags=['source monitoring'])
 
 def require_schema(db):
     if not ready(db):raise HTTPException(503,'Chưa nâng schema giám sát nguồn dữ liệu.')
-def item_payload(item,detail=False):
+def profile_keys(item):
+    if item.kind!='structure' or all(c.get('display') for c in item.details.get('changes',[])):
+        return []
+    return list(dict.fromkeys(f"{c['rootId']}:{c['periodType']}:{c['group']}"
+        for c in item.details.get('contexts',[]) if all(c.get(k) for k in ('rootId','periodType','group'))))[:12]
+
+
+def saved_profiles(db,items):
+    # At most 120 profiles for a 10-alert page; one SELECT, no provider requests.
+    keys=set(k for item in items for k in profile_keys(item))
+    return dict(db.execute(select(SourceMonitorBaseline.key,SourceMonitorBaseline.profile).where(SourceMonitorBaseline.key.in_(keys))).all()) if keys else {}
+
+
+def item_payload(item,detail=False,profiles=None):
+    labelled=describe_details(item.details,profiles=[profiles[k] for k in profile_keys(item) if k in profiles] if profiles else [])
     data={'id':str(item.id),'kind':item.kind,'title':item.title,'createdAt':item.created_at.isoformat(),
         'updatedAt':item.updated_at.isoformat(),'read':item.read_at is not None,'resolved':item.resolved_at is not None,
         'occurrences':item.occurrences,'changeCount':item.details.get('changeCount',0),'confirmed':item.details.get('confirmed',False)}
-    if detail:data['details']=item.details
+    data.update(alert_summary(labelled))
+    data['affectedProvinceCount']=len({c.get('rootId') for c in item.details.get('contexts',[]) if c.get('rootId') and c['rootId']!='national'})
+    if detail:data['details']=labelled
     return data
 
 @router.get('')
-def overview(request:Request,page:int=Query(1,ge=1,le=100000),state:Literal['all','unread','open','resolved']='open'):
+def overview(request:Request,page:int=Query(1,ge=1,le=100000),state:Literal['all','unread','open','resolved']='open',
+             kind:Literal['','structure','closed-period','check-failed']='',fromDate:date|None=None,toDate:date|None=None,grouped:bool=False):
     with request.app.state.session_factory() as db:
         administrator(request,db);require_schema(db)
+        if grouped:
+            runs=list(db.scalars(select(SourceMonitorRun).order_by(SourceMonitorRun.day.desc()).limit(7)))
+            local=datetime.now(timezone.utc).astimezone(VIETNAM);today=db.get(SourceMonitorRun,local.date())
+            return {**batch_list(db,page,state,kind,fromDate,toDate),
+                'runs':[{'day':r.day.isoformat(),'state':r.state,'details':r.details,'updatedAt':r.updated_at.isoformat()} for r in runs],
+                'today':{'day':str(local.date()),'state':today.state if today else 'not-started' if local.hour>=6 else 'not-due'}}
         predicates=[]
         if state=='unread':predicates=[SourceMonitorAlert.read_at.is_(None),SourceMonitorAlert.resolved_at.is_(None)]
         if state=='open':predicates=[SourceMonitorAlert.resolved_at.is_(None)]
         if state=='resolved':predicates=[SourceMonitorAlert.resolved_at.is_not(None)]
+        from .admin_log_history import date_bounds,paging
+        lower,upper=date_bounds(fromDate,toDate)
+        if lower:predicates.append(SourceMonitorAlert.updated_at>=lower)
+        if upper:predicates.append(SourceMonitorAlert.updated_at<upper)
+        if kind:predicates.append(SourceMonitorAlert.kind==kind)
         total=db.scalar(select(func.count()).select_from(SourceMonitorAlert).where(*predicates))
         unread=db.scalar(select(func.count()).select_from(SourceMonitorAlert).where(SourceMonitorAlert.read_at.is_(None),SourceMonitorAlert.resolved_at.is_(None)))
-        items=db.scalars(select(SourceMonitorAlert).where(*predicates).order_by(SourceMonitorAlert.updated_at.desc(),SourceMonitorAlert.id).offset((page-1)*20).limit(20))
+        page,offset=paging(page,total)
+        open_count=db.scalar(select(func.count()).select_from(SourceMonitorAlert).where(SourceMonitorAlert.resolved_at.is_(None)))
+        kinds=list(db.scalars(select(SourceMonitorAlert.kind).distinct().order_by(SourceMonitorAlert.kind)))
+        items=list(db.scalars(select(SourceMonitorAlert).where(*predicates).order_by(SourceMonitorAlert.updated_at.desc(),SourceMonitorAlert.id).offset(offset).limit(10)))
+        profiles=saved_profiles(db,items)
         runs=db.scalars(select(SourceMonitorRun).order_by(SourceMonitorRun.day.desc()).limit(7))
         local=datetime.now(timezone.utc).astimezone(VIETNAM);today=db.get(SourceMonitorRun,local.date())
-        return {'items':[item_payload(i) for i in items],'total':total,'unread':unread,'page':page,'pageSize':20,
+        result={'items':[item_payload(i,profiles=profiles) for i in items],'total':total,'unread':unread,'openCount':open_count,'kinds':kinds,'page':page,'pageSize':10,
             'runs':[{'day':r.day.isoformat(),'state':r.state,'details':r.details,'updatedAt':r.updated_at.isoformat()} for r in runs],
             'schedule':'06:00 Asia/Ho_Chi_Minh; after daily collection complete','sampleScope':'closed-month provincial scores only',
             'today':{'day':str(local.date()),'state':today.state if today else 'not-started' if local.hour>=6 else 'not-due'}}
+        return result
+
+
+@router.get('/batches/detail')
+def batch_detail(request:Request,batchId:str=Query(min_length=1,max_length=120),page:int=Query(1,ge=1,le=100000)):
+    with request.app.state.session_factory() as db:
+        administrator(request,db);require_schema(db)
+        summary=batch_summary(db,batchId)
+        if summary is None:raise HTTPException(404,'Không tìm thấy đợt cảnh báo.')
+        from .admin_log_history import paging
+        page,offset=paging(page,summary['contentCount'])
+        items=list(db.scalars(select(SourceMonitorAlert).where(batch_key()==batchId)
+            .order_by(SourceMonitorAlert.kind,SourceMonitorAlert.created_at,SourceMonitorAlert.id).offset(offset).limit(10)))
+        profiles=saved_profiles(db,items)
+        return {**summary,'items':[item_payload(i,profiles=profiles) for i in items],'page':page,'pageSize':10}
+
+
+class BatchRead(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    batchId:str=Field(min_length=1,max_length=120)
+
+
+@router.post('/batches/read')
+def read_batch(payload:BatchRead,request:Request):
+    from sqlalchemy import update
+    with request.app.state.session_factory.begin() as db:
+        actor=administrator(request,db,write=True);require_schema(db)
+        if batch_summary(db,payload.batchId) is None:raise HTTPException(404,'Không tìm thấy đợt cảnh báo.')
+        # One transaction and UPDATE, not one request per content; never resolve all.
+        count=db.execute(update(SourceMonitorAlert).where(batch_key()==payload.batchId,SourceMonitorAlert.read_at.is_(None))
+            .values(read_at=datetime.now(timezone.utc),reviewed_by=actor.id)).rowcount
+        audit(db,actor,'source-monitor.batch-read',batchId=payload.batchId,count=count)
+    return {'updated':count,'published':False}
 
 @router.get('/{alert_id}')
 def detail(alert_id:uuid.UUID,request:Request):
     with request.app.state.session_factory() as db:
         administrator(request,db);require_schema(db);item=db.get(SourceMonitorAlert,alert_id)
         if item is None:raise HTTPException(404,'Không tìm thấy cảnh báo.')
-        result=item_payload(item,True)
+        result=item_payload(item,True,profiles=saved_profiles(db,[item]))
         if item.kind=='structure':
             periods=db.execute(select(Snapshot.period_type,Snapshot.year,Snapshot.period_value).where(Snapshot.scope=='all',Snapshot.state=='complete').distinct().order_by(Snapshot.year.desc(),Snapshot.period_type,Snapshot.period_value)).all()
             result['recrawlPlan']={'execution':'requires-admin-review','scope':'all','periods':[

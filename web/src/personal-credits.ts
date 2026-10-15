@@ -1,4 +1,5 @@
 import {personalCreditMarkup,CREDIT_PAGE_SIZE,type PersonalWallet} from "./personal-credit-view.js";
+import {readServiceJson,userFacingError} from './service-feedback.js';
 const num=(n:number)=>new Intl.NumberFormat("vi-VN").format(n);
 const esc=(v:string)=>v.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!));
 export function requestCreditDisplay(state:string,cost:number|null):string{
@@ -28,15 +29,15 @@ export function openPersonalCredits(onBalance?:(available:number,reserved:number
       const button=event.currentTarget as HTMLButtonElement;button.disabled=true;
       const status=dialog.querySelector<HTMLElement>('[data-renew-status]'),wallet=data;
       try{
-        const me=await fetch('/api/v1/auth/me',{cache:'no-store'});if(!me.ok)throw new Error('Phiên đăng nhập đã hết hạn.');
-        const profile=await me.json() as {csrfToken:string};
+        const me=await fetch('/api/v1/auth/me',{cache:'no-store'});
+        const profile=await readServiceJson<{csrfToken:string}>(me);
         redemptionToken??=crypto.randomUUID();
         const response=await fetch('/api/v1/me/subscription/redemption',{method:'POST',headers:{'Content-Type':'application/json','X-QD766-CSRF':profile.csrfToken},body:JSON.stringify({token:redemptionToken,expectedCost:wallet.redemptionCost})});
         const result=await response.json() as {detail?:string;availableCredits:number};
         if(!response.ok)throw new Error('Chưa thể gia hạn. Vui lòng kiểm tra thời hạn sử dụng và Credit bổ sung.');
         redemptionToken=null;onBalance?.(result.availableCredits,wallet.reservedCredits);await load(0);
         const done=dialog.querySelector<HTMLElement>('[data-renew-status]');if(done)done.textContent='Gia hạn thành công.';
-      }catch(e){if(status?.isConnected)status.textContent=e instanceof Error?e.message:'Không thể gia hạn.';button.disabled=false;}
+      }catch(e){if(status?.isConnected)status.textContent=userFacingError(e,'Chưa thể gia hạn. Vui lòng kiểm tra lại trạng thái trước khi thử lại.');button.disabled=false;}
       finally{renewing=false;}
     });
   }
@@ -47,7 +48,7 @@ export function openPersonalCredits(onBalance?:(available:number,reserved:number
       if(!response.ok)throw new Error('Không thể tải thông tin Credit. Vui lòng thử lại.');
       const result=await response.json() as PersonalWallet;if(!dialog.isConnected)return;
       data=result;offset=nextOffset;
-    }catch(e){error=e instanceof Error?e.message:'Không thể tải thông tin Credit.';}
+    }catch(e){error=userFacingError(e,'Chưa thể tải thông tin Credit. Vui lòng thử lại.');}
     finally{loading=false;draw();}
   }
   void load(0);

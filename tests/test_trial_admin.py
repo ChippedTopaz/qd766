@@ -1,6 +1,7 @@
 import sys
 import unittest
 import uuid
+import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -100,9 +101,14 @@ class TrialAdminTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count()).select_from(CreditWalletEvent)),1)
 
     def invite(self, **extra):
-        result = self.client.post("/api/v1/admin/invitations", json={"provinceId": ROOT_ID, **extra}, headers=self.headers)
-        self.assertEqual(result.status_code, 200, result.text)
-        return result.json()
+        # Existing-link fixture only: new issuance has been retired.
+        token=secrets.token_urlsafe(32)
+        with self.app.state.session_factory.begin() as db:
+            row=TrialInvitation(token_hash=digest(token),created_by=self.admin_id,
+                root_department_id=uuid.UUID(extra.get('provinceId',ROOT_ID)),access_tier=extra.get('accessTier','province'),
+                unit_department_id=uuid.UUID(extra['unitId']) if extra.get('unitId') else None,
+                recipient_email=extra.get('email'),expires_at=datetime.now(timezone.utc)+timedelta(days=extra.get('days',7)))
+            db.add(row);db.flush();return {'id':str(row.id),'token':token,'expiresAt':row.expires_at.isoformat()}
 
     def enable_default_invited_trial(self):
         from dataclasses import replace

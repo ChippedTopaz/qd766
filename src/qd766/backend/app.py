@@ -104,6 +104,8 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
     app.add_middleware(DashboardGZipMiddleware)
     app.include_router(auth_router)
     app.include_router(admin_router)
+    from .admin_log_routes import router as admin_log_router
+    app.include_router(admin_log_router)
     from .source_monitor_routes import router as source_monitor_router
     app.include_router(source_monitor_router)
     from .trivia import router as trivia_router

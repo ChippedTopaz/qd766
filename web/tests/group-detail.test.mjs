@@ -6,10 +6,10 @@ const peers=Array.from({length:34},(_,i)=>({id:String(i),name:`Tỉnh ${i}`,scor
 const html=renderPeerList(peers,'17');
 assert.equal((html.match(/class="peer-row /g)||[]).length,34);
 assert.match(html,/tabindex="0"/);
-assert.match(html,/class="peer-row mine" aria-current="true"><span>Tỉnh 17/);
+assert.match(html,/class="peer-row mine" aria-current="true"><small class="peer-index">18<\/small><span>Tỉnh 17/);
 assert.match(html,/Tỉnh 33/);
 assert.match(renderPeerList([{id:'a',name:'<script>',score:1},{id:'b',name:'B',score:1}],''),/&lt;script&gt;/);
-assert.equal((renderPeerList([{id:'a',name:'A',score:1},{id:'b',name:'B',score:1}], '').match(/Hạng 1/g)||[]).length,2);
+assert.equal((renderPeerList([{id:'a',name:'A',score:1},{id:'b',name:'B',score:1}], '').match(/class="peer-index"/g)||[]).length,2);
 const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
 const body=app.slice(app.indexOf('function progressDetail('),app.indexOf('function metricPoint('));
 const n=(value,digits=2)=>value===null?'—':value.toLocaleString('vi-VN',{minimumFractionDigits:digits,maximumFractionDigits:digits});

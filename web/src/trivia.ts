@@ -1,4 +1,5 @@
 import {openTriviaLeaderboard} from './trivia-leaderboard.js';
+import {userFacingError} from './service-feedback.js';
 type Question={id:string;prompt:string;choices:string[];roundId:string;expiresAt:string};
 type Stats={score:number;streak:number;best:number;answered:number};
 type Result={correct:boolean;timedOut?:boolean;correctIndex:number;explanation:string;stats:Stats};
@@ -60,7 +61,7 @@ export function bindTrivia(csrf:string):void{
       nextDeadline=0;
       deadline=question?performance.now()+Math.max(0,Date.parse(question.expiresAt)-Date.parse(body.serverNow)-(performance.now()-requestedAt)):0;
       retryAt=0;if(body.timedOut)message='Hết 60 giây, mất chuỗi đúng.'+(question?' Đã chuyển câu tiếp theo.':'');
-    }catch(error){failed=true;message=(error as Error).name==='TimeoutError'?'Máy chủ phản hồi chậm. Vui lòng thử lại.':String((error as Error).message);retryAt=performance.now()+10000}
+    }catch(error){failed=true;message=userFacingError(error);retryAt=performance.now()+10000}
     finally{busy=false;render()}
   };
   const tick=()=>{
@@ -81,7 +82,7 @@ export function bindTrivia(csrf:string):void{
       const body=await response.json();if(!response.ok)throw new Error(typeof body.detail==='string'?body.detail:'Chưa gửi được đáp án. Hãy thử lại.');
       result=body;stats=body.stats;nextDeadline=performance.now()+15000;retryAt=0;
       if(body.timedOut){busy=false;await load();message='Hết 60 giây, mất chuỗi đúng.'+(question?' Đã chuyển câu tiếp theo.':'')}
-    }catch(error){failed=true;message=String((error as Error).message)}finally{busy=false;render()}
+    }catch(error){failed=true;message=userFacingError(error)}finally{busy=false;render()}
   });
   if(!started){started=true;document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick()});void load()}
 }
