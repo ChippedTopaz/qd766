@@ -65,6 +65,22 @@ class WalletRuntimeTests(unittest.TestCase):
         finally:
             engine.dispose()
 
+    def test_notice_revision_requires_all_prerequisites_and_actual_notice_tables(self):
+        for revision, missing, succeeds in [('20261016_0029',None,True),('20261016_0029','system_notice_dismissals',False),('20261016_0029','source_monitor_runs',False),('20990101_9999',None,False)]:
+            with self.subTest(revision=revision,missing=missing):
+                factory=MagicMock();db=factory.return_value.__enter__.return_value
+                db.get_bind.return_value.dialect.name='postgresql'
+                db.execute.return_value.scalars.return_value=[revision]
+                inspector=MagicMock()
+                inspector.get_columns.side_effect=lambda name,schema: [] if name==missing else [{'name':c} for c in Base.metadata.tables[name].columns.keys()]
+                with patch('qd766.backend.wallet_runtime.inspect',return_value=inspector):
+                    if succeeds:verify_real_wallet_schema(factory)
+                    else:
+                        with self.assertRaises(ValueError):verify_real_wallet_schema(factory)
+                commands=[str(c.args[0]) for c in db.execute.call_args_list]
+                self.assertFalse(any(c.startswith(('INSERT','UPDATE','DELETE','CREATE')) for c in commands))
+                db.commit.assert_not_called()
+
     def test_schema_gate_is_read_only_and_rejects_old_revision(self):
         factory = MagicMock()
         db = factory.return_value.__enter__.return_value
