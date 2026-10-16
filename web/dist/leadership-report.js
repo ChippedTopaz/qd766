@@ -25,6 +25,25 @@ export function sortRankingReport(report, sort) {
     });
     return { ...report, rows, sort };
 }
+export function previousRankingPeriod(periods, id) {
+    const current = periods.find(p => p.id === id);
+    if (!current || current.type === 'year')
+        return undefined;
+    const scale = current.type === 'month' ? 12 : 4;
+    return periods.find(p => p.type === current.type && p.year * scale + (p.value ?? 0) === current.year * scale + (current.value ?? 0) - 1);
+}
+/** Compare saved adjacent periods, independently of daily observation versions. */
+export function applyRankingPeriod(report, baseline) {
+    const ids = (rows) => rows.filter(r => r.total !== null).map(r => r.id).sort().join('|');
+    const same = ids(report.rows) === ids(baseline.rows);
+    const prior = new Map(baseline.rows.map(r => [r.id, r]));
+    return { ...report, comparisonLabel: `So với ${baseline.period}`, rows: report.rows.map(row => {
+            const old = prior.get(row.id);
+            return { ...row, totalChange: row.total !== null && old?.total != null ? Number((row.total - old.total).toFixed(2)) : null,
+                totalRankChange: same && row.totalRank !== null && old?.totalRank != null ? old.totalRank - row.totalRank : null,
+                scoreChanges: row.scores.map((value, i) => value !== null && old?.scores[i] != null ? Number((value - old.scores[i]).toFixed(2)) : null) };
+        }), notes: [...report.notes, ...(!same ? ['Tập đơn vị có đủ dữ liệu đã thay đổi; không tính biến động thứ hạng tổng điểm.'] : [])] };
+}
 const numeric = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
 const alphabet = new Intl.Collator("vi", { sensitivity: "base", numeric: true });
 function assignRanks(rows, count) {

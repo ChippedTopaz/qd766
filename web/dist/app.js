@@ -1,5 +1,6 @@
 import { allUnitTotals, peerStats, buildSuggestions, buildUnitView, previousAvailablePeriod, snapshotFor, snapshotForUnit, snapshotKey } from "./analytics.js";
 import { groupDisplayOrder } from './group-display-order.js';
+import { previousRankingPeriod, applyRankingPeriod } from './leadership-report.js';
 import { analyzeOnlineScore } from "./online-scoring.js";
 import { analyzeProgressScore } from "./progress-scoring.js";
 import { analysisExcelFilename, buildAnalysisWorkbook } from "./excel-export.js";
@@ -1388,6 +1389,7 @@ const rankingPeriod = () => data.periods.find(p => p.id === rankingPeriodId) ?? 
 const rankingReportDay = () => rankingPeriod().id === state.periodId ? historicalReportDate : '';
 const rankingContextKey = () => [data.province.id, state.unitId, rankingPeriod().id, state.scope, state.scope === 'formality' ? data.formality.id : '', rankingReportDay()].join(':');
 const rankingSelectionCache = new Map();
+const rankingBaselineCache = new Map();
 const leadershipReport = () => {
     const chosen = rankingPeriod(), selection = rankingSelectionCache.get(rankingContextKey());
     const reportData = selection?.snapshot ? { ...data, snapshots: { ...data.snapshots, [snapshotKey(chosen.id, state.scope, data.formality.id)]: selection.snapshot } } : data;
@@ -1398,6 +1400,13 @@ const leadershipReport = () => {
             report = applyRankingHistory(report, entry.history, data.groupOrder);
         else
             report.notes.push(entry?.loading ? 'Đang đọc biến động theo ngày…' : entry?.error || 'Chưa có dữ liệu đối chiếu theo ngày.');
+    }
+    if (chosen.type !== 'year') {
+        const previous = previousRankingPeriod(data.periods, chosen.id), entry = rankingBaselineCache.get(rankingContextKey());
+        if (entry?.report)
+            report = applyRankingPeriod(report, entry.report);
+        else
+            report.notes.push(!previous ? 'Chưa có kỳ liền trước cùng loại để đối chiếu.' : entry?.loading ? 'Đang đọc dữ liệu kỳ liền trước…' : entry?.error || 'Chưa có dữ liệu kỳ liền trước để đối chiếu.');
     }
     report = sortRankingReport(report, rankingSort);
     if (rankingReportDay())
@@ -1420,6 +1429,10 @@ async function openLeadershipReport() {
     rankingSelectionCache.delete(rankingContextKey());
     state.modal = "brief";
     render();
+    if (state.demo === 'normal' && rankingPeriod().type !== 'year') {
+        await loadRankingPeriod();
+        return;
+    }
     if (state.demo === 'normal' && period().type === 'year' && state.scope === 'all')
         void loadRankingHistory();
     if (state.demo === "normal" && (state.unitId === data.province.id || data.units.find(item => item.departmentId === state.unitId)?.departmentLevel === "PROVINCE_TOTAL")) {
@@ -1462,6 +1475,8 @@ async function loadRankingPeriod() {
         return;
     const entry = { snapshot: null, benchmarks: [], loading: true, error: '' };
     rankingSelectionCache.set(key, entry);
+    if (chosen.type !== 'year')
+        void loadRankingBaseline();
     if (rankingSelectionCache.size > 8)
         rankingSelectionCache.delete(rankingSelectionCache.keys().next().value);
     const query = new URLSearchParams({ root_department_id: data.province.id, period_type: chosen.type, year: String(chosen.year), scope: state.scope });
@@ -1490,6 +1505,41 @@ async function loadRankingPeriod() {
     }
     catch (error) {
         entry.error = userFacingError(error, 'Chưa thể tải kỳ báo cáo. Vui lòng chọn lại để thử lại.');
+    }
+    finally {
+        entry.loading = false;
+        if (state.modal === 'brief' && key === rankingContextKey())
+            render();
+    }
+}
+async function loadRankingBaseline() {
+    const key = rankingContextKey(), chosen = rankingPeriod(), previous = previousRankingPeriod(data.periods, chosen.id);
+    if (!previous || rankingBaselineCache.get(key)?.loading)
+        return;
+    const entry = { report: null, loading: true, error: '' };
+    rankingBaselineCache.set(key, entry);
+    if (rankingBaselineCache.size > 8)
+        rankingBaselineCache.delete(rankingBaselineCache.keys().next().value);
+    const contextData = data, unitId = state.unitId, scope = state.scope;
+    const national = unitId === contextData.province.id || contextData.units.find(u => u.departmentId === unitId)?.departmentLevel === 'PROVINCE_TOTAL';
+    const query = new URLSearchParams({ root_department_id: contextData.province.id, period_type: previous.type, year: String(previous.year), scope });
+    if (previous.value != null)
+        query.set('period_value', String(previous.value));
+    if (scope === 'formality')
+        query.set('formality_id', contextData.formality.id);
+    try {
+        const body = await readServiceJson(await fetch('/api/v1/dashboard/selection?' + query, { cache: 'no-store' }));
+        let benchmarks = body.benchmarks ?? [];
+        if (national && !body.benchmarks) {
+            const params = new URLSearchParams(query);
+            params.delete('root_department_id');
+            benchmarks = await readServiceJson(await fetch('/api/v1/dashboard/province-rankings?' + params, { cache: 'no-store' }));
+        }
+        const loaded = { ...contextData, snapshots: { ...contextData.snapshots, [snapshotKey(previous.id, scope, contextData.formality.id)]: { ...body.snapshot, delivery: body.metadata ?? {} } } };
+        entry.report = buildLeadershipReport(loaded, previous.id, scope, unitId, benchmarks);
+    }
+    catch (error) {
+        entry.error = userFacingError(error, 'Chưa có dữ liệu kỳ liền trước để đối chiếu.');
     }
     finally {
         entry.loading = false;
