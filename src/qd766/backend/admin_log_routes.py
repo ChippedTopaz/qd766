@@ -11,6 +11,25 @@ from .models import ProvinceCollectionBatch
 router = APIRouter(prefix='/api/v1/admin/logs', tags=['admin log hub'])
 
 
+@router.get('/recaptures')
+def recaptures(request: Request, page: int = Query(1, ge=1, le=100000),
+               fromDate: date | None = None, toDate: date | None = None,
+               state: Literal['RUNNING','WAITING_FOR_COLLECTOR','AWAITING_ADMIN_REVIEW','PUBLISHED','HALTED','INTERRUPTED','INCOMPLETE','BOUNDED_CHECK_COMPLETE','NEEDS_CHECK','UNREADABLE'] | None = None):
+    with request.app.state.session_factory() as db:
+        administrator(request, db)
+        from .recapture_log import recapture_page
+        return recapture_page(page, fromDate, toDate, state)
+
+
+@router.get('/recaptures/{run_day}')
+def recapture(run_day: date, request: Request, page: int = Query(1, ge=1, le=100000),
+              state: Literal['SUCCESS','RUNNING','FAILED','HALTED','issues'] | None = None):
+    with request.app.state.session_factory() as db:
+        administrator(request, db)
+        from .recapture_log import recapture_detail
+        return recapture_detail(run_day, page, state)
+
+
 @router.get('/today')
 def today(request: Request):
     with request.app.state.session_factory() as db:

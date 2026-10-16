@@ -1,6 +1,7 @@
 import { installTrialCreditManager } from "./trial-credit-admin.js";
 import { accountPageQuery, accountPageSummary, accountPager } from "./admin-account-filters.js";
 import { installAdminLayout } from "./admin-layout.js";
+import { installSystemNoticeAdmin } from './admin-system-notices.js';
 import { installTriviaBank } from './admin-trivia.js';
 import { presenceBadge, startPresence } from './presence.js';
 import { installAnalysisConfiguration } from "./admin-analysis-configuration.js";
@@ -188,6 +189,7 @@ async function start() {
         installFormulaConfiguration(root, api);
         installTriviaBank(root, api);
         installSourceMonitor(root, api);
+        installSystemNoticeAdmin(root, api);
         layout = installAdminLayout(root);
         // Agency choices are loaded only when editing an existing account.
         get("unit").innerHTML = '<option value="">Chọn cơ quan</option>';

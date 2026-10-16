@@ -107,6 +107,9 @@ class UserCollectionTest(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
 
     def setUp(self):
+        from unittest.mock import patch
+        gate=patch('qd766.backend.collection_maintenance.user_collection_paused',return_value=False)
+        gate.start();self.addCleanup(gate.stop)
         self.app=create_app(Settings(database_url='sqlite+pysqlite://',public_read_only=True,require_login=True,
             google_client_id='test',google_client_secret='test-secret',google_redirect_uri='https://example.test/api/v1/auth/google/callback',
             paid_requests_enabled=True,formality_credit_cost=3,trial_credits_enabled=True))
@@ -158,6 +161,23 @@ class UserCollectionTest(unittest.TestCase):
         submit=self.clients[0].post('/api/v1/me/formality-requests',json={
             'quote':quote.json()['quote'],'token':str(uuid.uuid4())},headers=headers)
         self.assertEqual(submit.status_code,503)
+        with self.factory() as db:
+            self.assertEqual(db.get(UserAccount,self.ids[0]).credit_balance,10)
+            self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)
+            self.assertEqual(db.scalar(select(func.count()).select_from(CollectionJob)),0)
+    def test_collection_only_maintenance_blocks_old_quote_without_credit_or_source_pause(self):
+        from unittest.mock import patch
+        headers={'X-QD766-CSRF':'csrf-0'}
+        quote=self.clients[0].post('/api/v1/me/collection-quote',json=self.selection,headers=headers)
+        self.assertEqual(quote.status_code,200)
+        with patch('qd766.backend.collection_maintenance.user_collection_paused',return_value=True):
+            blocked=self.clients[0].post('/api/v1/me/collection-quote',json=self.selection,headers=headers)
+            self.assertEqual(blocked.status_code,503)
+            self.assertIn('cập nhật dữ liệu',blocked.json()['detail'])
+            submit=self.clients[0].post('/api/v1/me/formality-requests',json={
+                'quote':quote.json()['quote'],'token':str(uuid.uuid4())},headers=headers)
+            self.assertEqual(submit.status_code,503)
+            self.assertEqual(self.clients[0].get('/api/v1/me/formality-requests').status_code,200)
         with self.factory() as db:
             self.assertEqual(db.get(UserAccount,self.ids[0]).credit_balance,10)
             self.assertEqual(db.scalar(select(func.count()).select_from(PaidDataRequest)),0)

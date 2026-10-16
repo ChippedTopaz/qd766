@@ -4,6 +4,7 @@ export const logNum=(v:number)=>v.toLocaleString('vi-VN');
 export const logDay=(v:string)=>/^\d{4}-\d{2}-\d{2}$/.test(v)?v.split('-').reverse().join('/'):'—';
 export const logAt=(v:string|null|undefined)=>v?new Date(v).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'}):'—';
 export const logLabels:Record<string,string>={COMPLETE:'Hoàn tất',SUCCESS:'Thành công',RUNNING:'Đang chạy',RETRYING:'Đang thử lại',FAILED:'Lỗi',INCOMPLETE:'Chưa hoàn tất',HALTED:'Tạm dừng',NOT_STARTED:'Chưa chạy',NOT_DUE:'Chưa đến lịch',UNREADABLE:'Chưa đọc được',UNAVAILABLE:'Chưa đọc được',NEEDS_CHECK:'Cần kiểm tra',queued:'Đang chờ',running:'Đang chạy',succeeded:'Thành công',failed:'Lỗi',halted:'Tạm dừng',complete:'Hoàn tất',incomplete:'Chưa hoàn tất',waiting:'Chờ cào 05:00',paused:'Tạm dừng an toàn','not-checked':'Chưa kiểm tra','not-started':'Chưa chạy','not-due':'Chưa đến lịch'};
+Object.assign(logLabels,{PUBLISHED:'Đã thay thế dữ liệu',AWAITING_ADMIN_REVIEW:'Chờ duyệt thay thế',WAITING_FOR_COLLECTOR:'Chờ lượt khai thác',INTERRUPTED:'Bị gián đoạn',BOUNDED_CHECK_COMPLETE:'Đã kiểm tra bước đầu'});
 export const logState=(v:string)=>`<span class="collection-state state-${logEsc(v.toLowerCase())}">${logEsc(logLabels[v]??v)}</span>`;
 export function logPager(page:number,total:number,size=10,attribute='data-log-page'){
  const pages=Math.max(1,Math.ceil(total/size));

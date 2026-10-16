@@ -22,6 +22,7 @@ export function bindAccountMenu(user:AccountProfile):void{
   const toggle=document.querySelector<HTMLButtonElement>("[data-account-toggle]");
   const popover=document.querySelector<HTMLElement>("#account-popover");
   if(!toggle||!popover)return;
+  if(!popover.querySelector('[data-action="system-notices"]'))popover.querySelector('[data-action="logout"]')?.insertAdjacentHTML('beforebegin','<button type="button" data-action="system-notices">Thông báo hệ thống</button>');
   const zone=toggle.closest<HTMLElement>(".account-zone");
   const sidebar=document.querySelector(".sidebar"),workspace=document.querySelector(".workspace");
   const mobile=window.matchMedia("(max-width:760px)");

@@ -51,10 +51,12 @@ $ExpectedWallet = $ModeArguments -contains '--real-wallet'
 $ExpectedPause = $ModeArguments -contains '--pause-paid-requests'
 $ExpectedRegistration = $ModeArguments -contains '--shared-registration'
 $ExpectedAnalysis = $ModeArguments -contains '--gemini-analysis'
+$ExpectedUserCollectionPause = Test-Path -LiteralPath (Join-Path $RepositoryRoot '.tmp-user-collection-maintenance\paused.json')
+$ExpectedCollectionPause = $ExpectedPause -or $ExpectedUserCollectionPause
 if ($Policy.loginRequired -ne $true -or $Policy.inviteRequired -ne $true -or $Policy.publicReadOnly -ne $true -or
     $Policy.paidRequestsEnabled -ne $ExpectedWallet -or [bool]$Policy.sharedRegistrationEnabled -ne $ExpectedRegistration -or [bool]$Policy.geminiAnalysisEnabled -ne $ExpectedAnalysis -or
-    ($ExpectedWallet -and ($Policy.defaultCollectionAccess -ne $true -or $Policy.collectionRequestsPaused -ne $ExpectedPause))) {
+    ($ExpectedWallet -and ($Policy.defaultCollectionAccess -ne $true -or $Policy.collectionRequestsPaused -ne $ExpectedCollectionPause))) {
     throw 'Public backend runtime policy differs from registered Task. Do not deploy frontend; inspect before proceeding.'
 }
-Write-Output ('PUBLIC_RUNTIME_POLICY=PASS REAL_WALLET=' + $ExpectedWallet + ' REQUESTS_PAUSED=' + $ExpectedPause + ' SHARED_REGISTRATION=' + $ExpectedRegistration)
+Write-Output ('PUBLIC_RUNTIME_POLICY=PASS REAL_WALLET=' + $ExpectedWallet + ' REQUESTS_PAUSED=' + $ExpectedCollectionPause + ' USER_COLLECTION_ONLY_PAUSED=' + $ExpectedUserCollectionPause + ' SHARED_REGISTRATION=' + $ExpectedRegistration)
 Get-ScheduledTask -TaskName $TaskName | Select-Object TaskName,State

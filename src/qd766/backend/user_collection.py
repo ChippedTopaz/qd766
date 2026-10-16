@@ -184,6 +184,9 @@ def quote(selection:Selection,request:Request,db:Db):
     selection.rootDepartmentId=root.root_department_id
     claims={"account":str(account.id),"root":str(root.root_department_id),"expires":int(time.time())+600,
         "selection":selection.model_dump(mode="json"),"unitCost":cost,"maximumCost":total}
+    from .collection_maintenance import user_collection_paused, PAUSE_MESSAGE
+    if total and user_collection_paused():
+        raise HTTPException(503, PAUSE_MESSAGE)
     if total and db.info.get("wallet_requests_paused"):
         raise HTTPException(503,"Tra cứu dữ liệu mới đang tạm dừng. Bạn vẫn có thể xem lại dữ liệu đã khai thác.")
     if total and db.info.get("real_wallet_enabled") and not wallet_enabled(db,account.id):
@@ -236,6 +239,9 @@ def create_requests(payload:Confirmation,request:Request,db:Db):
         raise HTTPException(409,"Tài khoản của bạn không đủ Credit để thực hiện lượt tra cứu này.") from error
     except CollectionUnavailable as error:
         db.rollback()
+        from .collection_maintenance import user_collection_paused, PAUSE_MESSAGE
+        if user_collection_paused():
+            raise HTTPException(503, PAUSE_MESSAGE) from error
         if db.info.get("wallet_requests_paused"):
             raise HTTPException(503,"Tra cứu dữ liệu mới đang tạm dừng. Bạn vẫn có thể xem lại dữ liệu đã khai thác.") from error
         raise HTTPException(409,"Chưa thể thực hiện: kiểm tra credit hoặc kết nối nguồn. Không ghi nhận thu credit.") from error

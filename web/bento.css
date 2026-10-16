@@ -1,4 +1,9 @@
 /* Shared chrome and scoped Enterprise surfaces are cosmetic only. */
+.daily-quick-ranges{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 12px}
+.daily-quick-ranges button{appearance:none;min-height:32px;padding:6px 11px;border:1px solid #dfe6f2;border-radius:9px;background:#fff;color:#475569;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.daily-quick-ranges button:hover{background:#eef2ff;border-color:#c7d2fe;color:#4338ca}
+.daily-quick-ranges button[aria-pressed="true"]{background:#4f46e5;border-color:#4f46e5;color:#fff}
+.daily-quick-ranges button:focus-visible{outline:2px solid #4f46e5;outline-offset:3px}
 .sidebar{background:#fff;color:#475569;border-right:1px solid #edf0f8;padding-top:24px}
 .trivia-card .trivia-header{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:8px}.trivia-card .trivia-header h3{margin:0;font-size:10px;letter-spacing:.025em}.trivia-card .trivia-header .trivia-clock{margin:0;font-size:10px;white-space:nowrap;flex-shrink:0}
 .trivia-question{white-space:pre-wrap}.trivia-clock{font-size:11px;color:#4338ca;margin:8px 0 0;font-variant-numeric:tabular-nums}

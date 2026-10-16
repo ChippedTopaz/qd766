@@ -1,6 +1,7 @@
 import {installTrialCreditManager} from "./trial-credit-admin.js";
 import {accountPageQuery,accountPageSummary,accountPager} from "./admin-account-filters.js";
 import {installAdminLayout} from "./admin-layout.js";
+import {installSystemNoticeAdmin} from './admin-system-notices.js';
 import {installTriviaBank} from './admin-trivia.js';
 import {presenceBadge,startPresence} from './presence.js';
 import {installAnalysisConfiguration} from "./admin-analysis-configuration.js";
@@ -110,7 +111,7 @@ root.innerHTML=`<header><div><h1>Quản trị hệ thống</h1><p>${esc(me.name)
     installTrialCreditManager(root,initialApi,refresh,true).then(manager=>{creditManager=manager;}),
     installRegistrationAdmin(root,initialApi,async()=>{await refresh();filterUnits();},true)
   ]);
-  filterUnits();showAccounts();installLogHub(root,api,directory.provinces);installAdminAudit(root,api);installAnalysisConfiguration(root,api);installFormulaConfiguration(root,api);installTriviaBank(root,api);installSourceMonitor(root,api);layout=installAdminLayout(root);
+  filterUnits();showAccounts();installLogHub(root,api,directory.provinces);installAdminAudit(root,api);installAnalysisConfiguration(root,api);installFormulaConfiguration(root,api);installTriviaBank(root,api);installSourceMonitor(root,api);installSystemNoticeAdmin(root,api);layout=installAdminLayout(root);
   // Agency choices are loaded only when editing an existing account.
   get("unit").innerHTML='<option value="">Chọn cơ quan</option>';
   get("tier").addEventListener("change",()=>{if(get<HTMLSelectElement>("tier").value==="agency"&&!get<HTMLSelectElement>("unit").value)void run(()=>loadUnits());});

@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {groupDisplayOrder} from '../dist/group-display-order.js';
+import {buildUnitView} from '../dist/analytics.js';
+import {buildLeadershipReport} from '../dist/leadership-report.js';
+import {customComparisonTable} from '../dist/time-custom-comparison.js';
+
+const expected=['transparency','dvc-progress-tree','provide-online-tree','formality-online-payment-tree','dossier-digitized','handling-satisfaction'];
+const data=JSON.parse(readFileSync(new URL('../data/snapshots.json',import.meta.url)));
+const original=structuredClone(data);
+const input=[...data.groupOrder];
+data.groupOrder=groupDisplayOrder(input);
+assert.deepEqual(data.groupOrder,expected);
+assert.deepEqual(input,original.groupOrder,'does not mutate source order');
+assert.deepEqual(groupDisplayOrder(expected),expected);
+assert.deepEqual(groupDisplayOrder(['handling-satisfaction','transparency']),['transparency','handling-satisfaction']);
+const key=Object.keys(data.snapshots).find(k=>k.endsWith(':all'));
+const period=data.periods.find(p=>key.startsWith(p.id+':'));
+const before=buildUnitView(original,period.id,'all',data.province.id);
+const after=buildUnitView(data,period.id,'all',data.province.id);
+assert.deepEqual(after.groups.map(g=>g.id),expected,'overview tiles and detail strip');
+assert.equal(after.totalScore,before.totalScore);
+for(const group of after.groups)assert.deepEqual(group,before.groups.find(g=>g.id===group.id));
+const benchmark={rootDepartmentId:data.province.id,provinceName:data.province.name,totalScore:75,groups:Object.fromEntries(expected.map((g,i)=>[g,{score:i+1}])),capturedAt:''};
+const report=buildLeadershipReport(data,period.id,'all',data.province.id,[benchmark]);
+assert.deepEqual(report.groupLabels,expected.map(g=>data.groupLabels[g]));
+assert.deepEqual(report.rows[0].scores,[1,2,3,4,5,6],'ranking column values stay aligned');
+const row={label:'A',total:75,rank:'1',groups:Object.fromEntries(expected.map((g,i)=>[g,i+1]))};
+const html=customComparisonTable(row,{...row,label:'B'},data.groupOrder,data.groupLabels);
+let previous=-1;
+for(const id of expected){const position=html.indexOf(data.groupLabels[id]);assert.ok(position>previous);previous=position;}
+assert.deepEqual(data.snapshots,original.snapshots,'no dataset/content changes');
+const app=readFileSync(new URL('../src/app.ts',import.meta.url),'utf8');
+assert.match(app,/function normalizeLoadedData\(loaded: AppData\): AppData \{\s*loaded.groupOrder=groupDisplayOrder\(loaded.groupOrder\);/);
+assert.match(app,/data\.groupOrder\.map\(group=>heading\(group,data\.groupLabels\[group\]\)\)/,'agency headers share presentation order');
+console.log('GROUP_DISPLAY_ORDER_OK: tiles, detail strip, ranking, comparisons; values and source preserved');

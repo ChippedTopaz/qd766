@@ -135,6 +135,9 @@ def create_paid_data_request(
     )
     if entitlement is not None:
         return entitlement, False
+    from .collection_maintenance import user_collection_paused
+    if user_collection_paused():
+        raise CollectionUnavailable("New user collection is paused for data maintenance")
     if session.info.get("wallet_requests_paused"):
         raise CollectionUnavailable("New paid requests are temporarily paused")
     from .wallet_access import enabled as wallet_enabled, credits, active_subscription

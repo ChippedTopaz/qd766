@@ -1009,3 +1009,30 @@ class SourceMonitorRun(Base):
     state: Mapped[str] = mapped_column(String(24))
     details: Mapped[dict] = mapped_column(JsonDocument)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SystemNotice(Base):
+    __tablename__ = 'system_notices'
+    __table_args__ = (CheckConstraint("state IN ('draft','published','archived')", name='ck_notice_state'),
+        CheckConstraint("kind IN ('info','important','maintenance')", name='ck_notice_kind'),
+        Index('ix_notice_published', 'state', 'published_at'))
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    title: Mapped[str] = mapped_column(String(200))
+    summary: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(20))
+    state: Mapped[str] = mapped_column(String(16), default='draft')
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    publication: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey('user_accounts.id', ondelete='RESTRICT'))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SystemNoticeDismissal(Base):
+    __tablename__ = 'system_notice_dismissals'
+    account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('user_accounts.id', ondelete='CASCADE'), primary_key=True)
+    notice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('system_notices.id', ondelete='CASCADE'), primary_key=True)
+    publication: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dismissed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

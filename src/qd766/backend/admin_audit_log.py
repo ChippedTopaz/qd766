@@ -6,6 +6,7 @@ from .models import AdminAudit, UserAccount, Department
 from .admin_log_history import date_bounds, paging
 
 SAFE_KEYS = {'accountId', 'registrationId', 'invitationId', 'linkId', 'alertId', 'questionId',
+    'noticeId', 'publication',
     'active', 'provinceId', 'unitId', 'accessTier', 'version', 'revision', 'group', 'groupId',
     'count', 'duplicates', 'state', 'canCollect', 'amount', 'reason', 'creditSource',
     'startsAt', 'endsAt', 'trialStartsAt', 'trialEndsAt', 'email', 'before', 'after',

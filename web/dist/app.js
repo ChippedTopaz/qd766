@@ -1,4 +1,5 @@
 import { allUnitTotals, peerStats, buildSuggestions, buildUnitView, previousAvailablePeriod, snapshotFor, snapshotForUnit, snapshotKey } from "./analytics.js";
+import { groupDisplayOrder } from './group-display-order.js';
 import { analyzeOnlineScore } from "./online-scoring.js";
 import { analyzeProgressScore } from "./progress-scoring.js";
 import { analysisExcelFilename, buildAnalysisWorkbook } from "./excel-export.js";
@@ -20,6 +21,7 @@ import { cleanLoginSearch } from "./login-url.js";
 import { loginView } from "./login-view.js";
 import { openPersonalCredits, requestCreditDisplay } from "./personal-credits.js";
 import { accountMenu, bindAccountMenu } from "./account-menu.js";
+import { bindSystemNotices } from './system-notices.js';
 import { collectionCopy, insufficientCreditMessage } from "./collection-copy.js";
 import { changeTone, rankImprovement } from "./change-tone.js";
 import { overviewTabs, overviewTabItems } from "./overview-tabs.js";
@@ -505,6 +507,7 @@ function collectionLabel() {
 const catalogProvinceCode = () => data.province.code ?? provinceOptions.find(item => item.id === data.province.id)?.provinceCode ?? "";
 const initialPeriodFor = (loaded) => latestPeriod(loaded.periods.filter(item => item.type === "year" && Boolean(loaded.snapshots[`${item.id}:all`]))) ?? latestPeriod(loaded.periods.filter(item => Boolean(loaded.snapshots[`${item.id}:all`])));
 function normalizeLoadedData(loaded) {
+    loaded.groupOrder = groupDisplayOrder(loaded.groupOrder);
     if (loaded.formality.id) {
         for (const item of loaded.periods) {
             const legacyKey = `${item.id}:formality`;
@@ -655,6 +658,8 @@ function shell(content) {
     bind();
     if (signedInUser)
         bindAccountMenu(signedInUser);
+    if (signedInUser)
+        bindSystemNotices(signedInUser);
     if (signedInUser)
         bindTrivia(signedInUser.csrfToken);
     if (queryCaret) {

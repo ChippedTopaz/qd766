@@ -11,6 +11,8 @@ export function installAdminLayout(root:HTMLElement):{edit:()=>void;closeEdit:()
   if(formulas)items.push(['formulas','Công thức tính']);
   const trivia=sections.find(s=>s.dataset.triviaBank==='true');
   const sourceMonitor=sections.find(s=>s.dataset.sourceMonitor==='true');
+  const systemNotices=sections.find(s=>s.dataset.systemNoticeAdmin==='true');
+  if(systemNotices)items.splice(2,0,['system-notices','Thông báo hệ thống']);
   if(trivia)items.push(['trivia','Hỏi đáp nhanh']);
   if(registration)items.splice(2,0,["registrations","Đăng ký chờ duyệt"]);
   sidebar.innerHTML=`<a class="admin-brand" href="/"><span class="admin-logo"><img class="cchc-logo" src="/assets/logo-cchc.png" alt="Cải cách hành chính" width="44" height="44"></span> <span>Quản trị</span></a><nav aria-label="Quản trị">${items.map(([key,label])=>`<button data-admin-section="${key}">${label}</button>`).join("")}</nav><a class="button admin-back" href="/">Về Tổng quan</a>`;
@@ -39,11 +41,12 @@ export function installAdminLayout(root:HTMLElement):{edit:()=>void;closeEdit:()
   if(aiConfiguration)panels['ai-configuration']!.append(aiConfiguration);
   if(formulas)panels.formulas!.append(formulas);
   if(trivia)panels.trivia!.append(trivia);
+  if(systemNotices)panels['system-notices']!.append(systemNotices);
   if(credits)panels.credits!.append(credits);else panels.credits!.innerHTML="<section><h2>Quản lý credits</h2><p>Chức năng cấp credit chưa được mở ở môi trường này.</p></section>";
   const header=root.querySelector("header"),message=root.querySelector("#message");
   if(header)workspace.prepend(header);if(message)workspace.insertBefore(message,workspace.children[1]??null);
   root.append(sidebar,workspace);root.classList.add("admin-shell");
-  const select=(key:string)=>{Object.entries(panels).forEach(([id,panel])=>panel.hidden=id!==key);sidebar.querySelectorAll<HTMLButtonElement>("button").forEach(button=>{const active=button.dataset.adminSection===key;button.classList.toggle("active",active);button.setAttribute("aria-current",active?"page":"false");});};
+  const select=(key:string)=>{Object.entries(panels).forEach(([id,panel])=>panel.hidden=id!==key);sidebar.querySelectorAll<HTMLButtonElement>("button").forEach(button=>{const active=button.dataset.adminSection===key;button.classList.toggle("active",active);button.setAttribute("aria-current",active?"page":"false");});root.dispatchEvent(new CustomEvent('qd766-admin-section',{detail:key}));};
   sidebar.querySelectorAll<HTMLButtonElement>("button").forEach(button=>button.addEventListener("click",()=>{
     select(button.dataset.adminSection!);if(button.dataset.adminSection==='collection')selectLog(currentLogView);
   }));

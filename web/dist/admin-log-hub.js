@@ -1,5 +1,6 @@
 import { logEsc as esc, logDay as day, logAt as at, logState as state, logPager, logDateFilters, logRange, logDialog, publishLogBadge, compactLogFilters, installLogFilterPopover } from './admin-log-ui.js';
 import { collectionPeriod } from './admin-collection.js';
+export function renderRecaptures(r, pager = true) { return `<table class="log-table"><thead><tr><th>Ngày yêu cầu</th><th>Phạm vi cào lại</th><th>Trạng thái / tiến độ</th><th>Kết quả kiểm tra</th><th>Thao tác</th></tr></thead><tbody>${r.items.map(i => `<tr><td>${day(i.runDate)}<small>${esc(at(i.updatedAt))}</small></td><td>${i.provinceCount} tỉnh/thành · Tất cả TTHC<small>${i.periods.length} kỳ báo cáo · 6 nhóm chỉ tiêu</small></td><td>${state(i.state)}<small>${i.completed}/${i.expected} khối · ${i.failed} lỗi</small></td><td>${i.publicationState === 'published' ? 'Đã thay thế · Bản cũ đã lưu trữ' : 'Chưa thay thế dữ liệu'}<small>${i.scoreChanges} bản ghi điểm thay đổi</small></td><td><button type="button" data-recapture-detail="${esc(i.runDate)}">Chi tiết</button></td></tr>`).join('') || '<tr><td colspan="5">Chưa có đợt cào lại theo yêu cầu phù hợp.</td></tr>'}</tbody></table>${pager ? logPager(r.page, r.total) : ''}`; }
 function phaseName(v) { if (v === 'national')
     return 'Tổng hợp toàn quốc'; const [type, year, value] = v.split('-'); return collectionPeriod({ type: type ?? '', year: Number(year), month: Number(value), quarter: Number(value) }); }
 function phaseTable(phases) { return `<table class="log-table"><thead><tr><th>Kỳ báo cáo</th><th>Khối tỉnh hoàn tất</th><th>Lỗi</th><th>Gói toàn quốc</th></tr></thead><tbody>${phases.length ? phases.map(p => `<tr><th>${esc(phaseName(p.period))}</th><td class="log-number">${p.completed}/${p.expected}</td><td class="log-number">${p.failed}</td><td>${state(p.national)}</td></tr>`).join('') : '<tr><td colspan="4">Chưa có kết quả theo kỳ.</td></tr>'}</tbody></table>`; }
@@ -11,13 +12,14 @@ export function renderLogToday(r) {
  ${r.control === 'open' ? '<p class="log-warning">Nguồn đang tạm dừng an toàn. Nhật ký không tự mở lại nguồn.</p>' : ''}
  ${r.daily.state === 'NEEDS_CHECK' ? '<p class="log-warning">Nhật ký đang chạy nhưng đã lâu chưa cập nhật. Cần kiểm tra tiến trình; chưa kết luận bộ cào vẫn hoạt động.</p>' : ''}
  <div class="log-title-row"><h3>Kết quả theo kỳ báo cáo</h3><button type="button" data-daily-detail="${esc(r.daily.reportDate)}">Xem chi tiết</button></div>${phaseTable(r.daily.phases)}
- <p class="log-updated">Cập nhật nhật ký: ${esc(at(r.daily.updatedAt))} · Kiểm tra: ${esc(at(r.checkedAt))}</p>`;
+ <p class="log-updated">Cập nhật nhật ký: ${esc(at(r.daily.updatedAt))} · Kiểm tra: ${esc(at(r.checkedAt))}</p>
+ ${r.recaptures?.length ? `<div class="log-title-row"><h3>Cào lại theo yêu cầu quản trị</h3></div>${renderRecaptures({ items: r.recaptures, page: 1, pageSize: 10, total: r.recaptures.length }, false)}` : ''}`;
 }
 export function renderDailyHistory(r) {
     return `<table class="log-table"><thead><tr><th>Ngày chạy</th><th>Ngày dữ liệu</th><th>Cào 05:00</th><th>Đối chiếu 06:00</th><th>Lỗi / cảnh báo</th><th>Thao tác</th></tr></thead><tbody>${r.items.map(i => `<tr><td>${day(i.runDate)}</td><td>${day(i.reportDate)}</td><td>${state(i.state)}<small>${i.completed}/${i.expected} khối</small></td><td>${state(i.source?.state ?? 'UNAVAILABLE')}</td><td class="log-number">${i.failed} lỗi<small>${i.alerts ?? 0} cảnh báo</small></td><td><button type="button" data-daily-detail="${esc(i.reportDate)}">Chi tiết</button></td></tr>`).join('') || '<tr><td colspan="6">Không có ngày phù hợp bộ lọc.</td></tr>'}</tbody></table>${logPager(r.page, r.total)}`;
 }
 export function renderDailyDetail(r, filter = '') {
-    return `<p>Ngày chạy ${day(r.runDate)} · Dữ liệu ${day(r.reportDate)} · ${state(r.state)} · ${r.completed}/${r.expected} khối</p>${phaseTable(r.phases)}
+    return `<p>Ngày chạy ${day(r.runDate)}${r.reportDate ? ` · Dữ liệu ${day(r.reportDate)}` : ''} · ${state(r.state)} · ${r.completed}/${r.expected} khối</p>${phaseTable(r.phases)}
  <div class="log-title-row"><h3>Nhật ký khối dữ liệu</h3><label>Trạng thái<select data-block-state>${[['', 'Tất cả'], ['issues', 'Chỉ lỗi / tạm dừng'], ['SUCCESS', 'Thành công'], ['RUNNING', 'Đang chạy'], ['RETRYING', 'Đang thử lại']].map(([v, t]) => `<option value="${v}" ${filter === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label></div>
  <table class="log-table"><thead><tr><th>Tỉnh</th><th>Kỳ</th><th>Trạng thái</th><th>Thông tin</th></tr></thead><tbody>${r.items.map(i => `<tr><td>${esc(i.province)}</td><td>${esc(phaseName(i.period))}</td><td>${state(i.state)}</td><td>${esc(i.error ?? i.reason ?? (i.retryAttempt ? `Thử lại lần ${i.retryAttempt}` : '—'))}</td></tr>`).join('') || '<tr><td colspan="4">Chưa có khối phù hợp. Trạng thái chưa chạy/chưa đọc được không đồng nghĩa không có lỗi.</td></tr>'}</tbody></table>${logPager(r.page, r.total, 10, 'data-block-page')}`;
 }
@@ -41,6 +43,7 @@ export function installLogHub(root, api, provinces = []) {
     const todayMessage = today.querySelector('[data-today-message]'), todayBody = today.querySelector('[data-today-body]');
     const historyMessage = history.querySelector('[data-history-message]'), historyBody = history.querySelector('[data-history-body]');
     const source = history.querySelector('[data-history-source]'), kind = history.querySelector('[data-history-type]'), status = history.querySelector('[data-history-state]');
+    kind.insertAdjacentHTML('beforeend', '<option value="recaptures">Cào lại theo yêu cầu</option>');
     let currentPage = 1, historyRead = 0, todayRead = 0, poll, loadingToday = false, jobs = [], active = 'today';
     const visible = () => active === 'today' && !today.hidden && !today.closest('[data-admin-panel]')?.hidden && document.visibilityState === 'visible';
     function stop() { clearTimeout(poll); }
@@ -74,13 +77,14 @@ export function installLogHub(root, api, provinces = []) {
     }
     function controls() {
         const daily = source.value === 'system' && kind.value === 'daily', archive = source.value === 'system' && ['batches', 'probe'].includes(kind.value);
+        const staged = source.value === 'system' && kind.value === 'recaptures';
         history.querySelector('[data-history-type-label]').hidden = source.value !== 'system';
         history.querySelector('[data-issues-label]').hidden = !daily;
         for (const input of history.querySelectorAll('[data-log-from],[data-log-to]'))
             input.disabled = archive;
         status.disabled = archive;
-        history.querySelectorAll('[data-job-filter]').forEach(label => label.hidden = daily || archive);
-        const entries = daily ? [['COMPLETE', 'Hoàn tất'], ['RUNNING', 'Đang chạy'], ['INCOMPLETE', 'Chưa hoàn tất'], ['HALTED', 'Tạm dừng'], ['NOT_STARTED', 'Chưa chạy'], ['NEEDS_CHECK', 'Cần kiểm tra'], ['UNREADABLE', 'Chưa đọc được']] : [['queued', 'Đang chờ'], ['running', 'Đang chạy'], ['succeeded', 'Thành công'], ['failed', 'Lỗi'], ['halted', 'Tạm dừng']];
+        history.querySelectorAll('[data-job-filter]').forEach(label => label.hidden = daily || archive || staged);
+        const entries = staged ? [['RUNNING', 'Đang chạy'], ['WAITING_FOR_COLLECTOR', 'Chờ lượt khai thác'], ['AWAITING_ADMIN_REVIEW', 'Chờ duyệt thay thế'], ['INCOMPLETE', 'Chưa hoàn tất'], ['HALTED', 'Tạm dừng'], ['INTERRUPTED', 'Bị gián đoạn'], ['NEEDS_CHECK', 'Cần kiểm tra'], ['UNREADABLE', 'Chưa đọc được']] : daily ? [['COMPLETE', 'Hoàn tất'], ['RUNNING', 'Đang chạy'], ['INCOMPLETE', 'Chưa hoàn tất'], ['HALTED', 'Tạm dừng'], ['NOT_STARTED', 'Chưa chạy'], ['NEEDS_CHECK', 'Cần kiểm tra'], ['UNREADABLE', 'Chưa đọc được']] : [['queued', 'Đang chờ'], ['running', 'Đang chạy'], ['succeeded', 'Thành công'], ['failed', 'Lỗi'], ['halted', 'Tạm dừng']];
         status.innerHTML = '<option value="">Tất cả</option>' + entries.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
     }
     controls();
@@ -105,7 +109,14 @@ export function installLogHub(root, api, provinces = []) {
                 logRange(history, params);
                 if (status.value)
                     params.set('state', status.value);
-                if (source.value === 'system' && kind.value === 'daily') {
+                if (source.value === 'system' && kind.value === 'recaptures') {
+                    const r = await api('admin/logs/recaptures?' + params);
+                    if (revision !== historyRead)
+                        return;
+                    currentPage = r.page;
+                    html = renderRecaptures(r);
+                }
+                else if (source.value === 'system' && kind.value === 'daily') {
                     if (history.querySelector('[data-history-issues]').checked)
                         params.set('issuesOnly', 'true');
                     const r = await api('admin/logs/daily?' + params);
@@ -143,18 +154,18 @@ export function installLogHub(root, api, provinces = []) {
             historyMessage.textContent = e instanceof Error ? e.message : 'Chưa đọc được lịch sử.';
         }
     }
-    async function openDaily(reportDate) {
+    async function openDaily(reportDate, staged = false) {
         if (root.querySelector('.admin-log-dialog'))
             return;
-        const { dialog, body } = logDialog(root, 'Chi tiết cào dữ liệu · ' + day(reportDate));
+        const { dialog, body } = logDialog(root, (staged ? 'Chi tiết cào lại theo yêu cầu · ' : 'Chi tiết cào dữ liệu · ') + day(reportDate));
         let revision = 0, filter = '';
         async function load(page = 1) { const seq = ++revision; body.setAttribute('aria-busy', 'true'); try {
             const q = new URLSearchParams({ page: String(page) });
             if (filter)
                 q.set('state', filter);
-            const r = await api(`admin/logs/daily/${reportDate}?${q}`);
+            const r = await api(`admin/logs/${staged ? 'recaptures' : 'daily'}/${reportDate}?${q}`);
             if (dialog.isConnected && seq === revision)
-                body.innerHTML = renderDailyDetail(r, filter);
+                body.innerHTML = renderDailyDetail({ ...r, reportDate: staged ? '' : r.reportDate }, filter) + (staged ? `<p class="log-warning">${r.publicationState === 'published' ? 'Đã thay thế dữ liệu theo phê duyệt. Bản cũ được lưu trữ để dự phòng.' : 'Dữ liệu đang lưu riêng, chưa thay thế dữ liệu hiện tại. Chỉ thay thế sau khi quản trị viên phê duyệt.'}</p>` : '');
         }
         catch (e) {
             if (dialog.isConnected && seq === revision)
@@ -178,6 +189,8 @@ export function installLogHub(root, api, provinces = []) {
             return;
         if (button.dataset.dailyDetail)
             void openDaily(button.dataset.dailyDetail);
+        if (button.dataset.recaptureDetail)
+            void openDaily(button.dataset.recaptureDetail, true);
         if (button.dataset.logGo)
             root.querySelector(`[data-log-tab="${button.dataset.logGo}"]`)?.click();
         if (button.dataset.jobDetail) {

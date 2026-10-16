@@ -20,6 +20,7 @@ class AdminLogHubTests(unittest.TestCase):
         self.f=test_trial_admin.TrialAdminTests();self.f.setUp()
         self.temp=tempfile.TemporaryDirectory(dir=Path.cwd(),prefix='.tmp-log-hub-test-');self.root=Path(self.temp.name)
         self.patch=patch.object(history,'DAILY_ROOT',self.root);self.patch.start()
+        self.recapture_patch=patch('qd766.backend.recapture_log.RECAPTURE_ROOT',self.root/'recaptures');self.recapture_patch.start()
         self.now=datetime(2026,10,15,1,tzinfo=timezone.utc)
         self.target_id=uuid.uuid4()
         with self.f.app.state.session_factory.begin() as db:
@@ -33,6 +34,7 @@ class AdminLogHubTests(unittest.TestCase):
         for i in range(9):self.checkpoint(date(2026,10,6)+timedelta(days=i))
 
     def tearDown(self):
+        self.recapture_patch.stop()
         self.patch.stop();history._checkpoint.cache_clear()
         self.assertEqual(self.root.resolve().parent,Path.cwd().resolve())
         self.temp.cleanup();self.f.tearDown()

@@ -9,6 +9,20 @@ import {userFacingError} from './service-feedback.js';
 
 export interface IndicatorDay {reportDate:string|null;capturedAt:string|null;entity:Entity|null;state:'available'|'missing'|'outside-period'}
 export interface DailyIndicatorBody {scope:'all';group:GroupId;unitId:string;unitName:string;availableDates:string[];current:IndicatorDay;baseline:IndicatorDay;series?:IndicatorDay[];preceding?:IndicatorDay|null}
+/** Inclusive windows; availableDates is scoped to this unit, group and period.
+ * Never substitute an older observation for a missing calendar day. */
+export function dailyQuickRanges(body:DailyIndicatorBody):{days:number;baseline:string}[]{
+ const end=body.current.reportDate,available=new Set(body.availableDates);
+ if(!end||body.current.state!=='available'||!available.has(end))return [];
+ return [7,30,90].flatMap(days=>{
+  const cursor=new Date(end+'T00:00:00Z');
+  for(let i=0;i<days;i++){
+   if(!available.has(cursor.toISOString().slice(0,10)))return [];
+   if(i<days-1)cursor.setUTCDate(cursor.getUTCDate()-1);
+  }
+  return [{days,baseline:cursor.toISOString().slice(0,10)}];
+ });
+}
 export interface IndicatorContext {accountId:string;provinceId:string;unitId:string;unitName:string;group:GroupId;period:PeriodOption}
 export interface IndicatorValue {key:string;name:string;numerator:number|null;denominator:number|null;ratio:number|null;score:number|null;maximum:number|null;source:'source'|'calculated'|'none';lowerBetter:boolean;reference:boolean;note:string}
 export interface IndicatorChange {key:string;name:string;before:IndicatorValue|null;after:IndicatorValue|null;achieved:number|null;total:number|null;ratio:number|null;score:number|null;note:string}
@@ -93,7 +107,9 @@ export function dailyComboModel(body:DailyIndicatorBody,row:IndicatorChange|unde
 function countChart(body:DailyIndicatorBody,row:IndicatorChange|undefined):string{
  const model=dailyComboModel(body,row),delta=difference(row?.before?.numerator,row?.after?.numerator);
  const tone=changeTone(row?.before?.lowerBetter||row?.after?.lowerBetter?delta===null?null:-delta:delta);
- return `<aside class="daily-indicator-chart" id="daily-indicator-chart" aria-label="Biểu đồ phát sinh và tỷ lệ theo ngày"><h3>Biến động theo ngày</h3><p class="daily-chart-indicator">${escape(model.name)}</p>
+ const ranges=dailyQuickRanges(body);
+ const quick=ranges.length?`<div class="daily-quick-ranges" role="group" aria-label="Chọn nhanh khoảng ngày">${ranges.map(range=>`<button type="button" data-daily-indicator-range="${range.days}" aria-pressed="${body.baseline.reportDate===range.baseline}" title="${dayLabel(range.baseline)} – ${dayLabel(body.current.reportDate)}">${range.days} ngày</button>`).join('')}</div>`:'';
+ return `<aside class="daily-indicator-chart" id="daily-indicator-chart" aria-label="Biểu đồ phát sinh và tỷ lệ theo ngày"><h3>Biến động theo ngày</h3>${quick}<p class="daily-chart-indicator">${escape(model.name)}</p>
  ${model.points.length?renderComboChart(model):'<div class="daily-chart-empty">—</div>'}
  ${delta===null?'':`<div class="daily-chart-change"><span>Biến động</span><strong class="${tone}">${deltaText(delta,0,'',true)}</strong></div>`}</aside>`;
 }
@@ -170,6 +186,12 @@ export class DailyIndicatorPanel {
   this.cleanWidgets();this.cleanWidgets=()=>{};
   const key=this.key(c),entry=this.entries.get(key);if(!entry||this.activeKey!==key)return;
   doc.querySelector('[data-daily-indicator-retry]')?.addEventListener('click',()=>{void this.load(c,entry);this.changed();});
+  doc.querySelectorAll<HTMLButtonElement>('[data-daily-indicator-range]').forEach(el=>el.addEventListener('click',()=>{
+   const body=entry.body;if(this.activeKey!==key||entry.loading||!body)return;
+   const range=dailyQuickRanges(body).find(r=>r.days===Number(el.dataset.dailyIndicatorRange));
+   if(!range||range.baseline===body.baseline.reportDate)return;
+   void this.load(c,entry,body.current.reportDate??'',range.baseline);this.changed();
+  }));
   doc.querySelectorAll<HTMLElement>('[data-daily-indicator-row]').forEach(el=>el.addEventListener('click',event=>{if(this.activeKey!==key||!indicatorRowClick(event))return;const selected=el.dataset.dailyIndicatorRow??null;if(entry.selected===selected)return;entry.selected=selected;entry.html=null;this.changed();}));
   doc.querySelectorAll<HTMLInputElement>('[data-daily-indicator-date]').forEach(el=>el.addEventListener('change',()=>{
    const body=entry.body;if(this.activeKey!==key||!body||!body.availableDates.includes(el.value))return;

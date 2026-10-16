@@ -35,6 +35,11 @@ from qd766.collection import SafetyStop
 
 class PaidRequestTest(unittest.TestCase):
     def setUp(self):
+        from unittest.mock import patch
+        # Operator maintenance state must not leak into isolated SQLite tests.
+        gate = patch('qd766.backend.collection_maintenance.user_collection_paused', return_value=False)
+        gate.start()
+        self.addCleanup(gate.stop)
         self.engine = create_engine(
             "sqlite+pysqlite://",
             connect_args={"check_same_thread": False},
@@ -93,6 +98,18 @@ class PaidRequestTest(unittest.TestCase):
             with self.assertRaises(CollectionUnavailable):
                 self._request(session,1,"blocked-new")
             self.assertEqual(session.get(UserAccount,self.account_ids[1]).credit_balance,10)
+    def test_collection_only_maintenance_preserves_entitlement(self):
+        from unittest.mock import patch
+        from qd766.backend.paid_requests import CollectionUnavailable
+        with self.factory.begin() as session:
+            original,_=self._request(session,0,'before-maintenance')
+            with patch('qd766.backend.collection_maintenance.user_collection_paused',return_value=True):
+                repeated,created=self._request(session,0,'reopen-during-maintenance')
+                self.assertEqual(repeated.id,original.id)
+                self.assertFalse(created)
+                with self.assertRaises(CollectionUnavailable):
+                    self._request(session,1,'new-during-maintenance')
+                self.assertEqual(session.get(UserAccount,self.account_ids[1]).credit_balance,10)
 
     def test_real_wallet_never_falls_back_to_legacy_balance(self):
         with self.factory.begin() as session:

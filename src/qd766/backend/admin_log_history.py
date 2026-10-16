@@ -148,10 +148,13 @@ def today_report(db, *, now=None):
         alert_counts = {'open': db.scalar(select(func.count(func.distinct(batch_key()))).select_from(SourceMonitorAlert).where(SourceMonitorAlert.resolved_at.is_(None))),
             'unread': db.scalar(select(func.count(func.distinct(batch_key()))).select_from(SourceMonitorAlert).where(SourceMonitorAlert.resolved_at.is_(None), SourceMonitorAlert.read_at.is_(None)))}
     control = db.get(CollectionControl, 'dvcqg')
+    from .recapture_log import recapture_page
+    recaptures = recapture_page(1, day, day, now=now)['items']
     return {'day': str(day), 'daily': daily, 'source': source, 'alerts': alert_counts,
         'control': control.circuit_state if control else 'unknown',
-        'checkedAt': now.isoformat(),
-        'needsRefresh': daily['state'] == 'RUNNING' or source['state'] in ('running', 'waiting')}
+        'checkedAt': now.isoformat(), 'recaptures': recaptures,
+        'needsRefresh': daily['state'] == 'RUNNING' or source['state'] in ('running', 'waiting')
+            or any(r['state'] in {'RUNNING', 'WAITING_FOR_COLLECTOR'} for r in recaptures)}
 
 
 def daily_page(db, page, start, end, state, issues_only, *, now=None):

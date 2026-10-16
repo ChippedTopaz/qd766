@@ -10,12 +10,13 @@ data.defaultUnitId=own.departmentId;data.periods=[{id:'month-2026-10',label:'ThÃ
 data.snapshots={'month-2026-10:all':template};
 const app={innerHTML:'',setAttribute(){},querySelectorAll(){return []}};
 const control=dataset=>({dataset,handlers:{},addEventListener(k,fn){this.handlers[k]=fn},focus(){}});
-let groups=[],modes=[],dates={},rows=[],scope=control({}),total=control({});
+let groups=[],modes=[],dates={},rows=[],ranges=[],scope=control({}),total=control({});
 globalThis.document={title:'',querySelector(s){return s==='#app'?app:s==='#scope-select'?scope:s==='[data-score-total]'?total:null},querySelectorAll(s){
  if(s==='[data-group-detail]'){groups=[...new Set([...app.innerHTML.matchAll(/data-group-detail="([^"]+)"/g)].map(m=>m[1]))].map(groupDetail=>control({groupDetail}));return groups;}
  if(s==='[data-indicator-detail-tab]'){modes=[...app.innerHTML.matchAll(/data-indicator-detail-tab="([^"]+)"/g)].map(m=>control({indicatorDetailTab:m[1]}));return modes;}
  if(s==='[data-daily-indicator-date]'){dates={};return [...app.innerHTML.matchAll(/data-daily-indicator-date="([^"]+)"/g)].map(m=>{const c=control({dailyIndicatorDate:m[1]});dates[m[1]]=c;return c;});}
  if(s==='[data-daily-indicator-row]'){rows=[...app.innerHTML.matchAll(/data-daily-indicator-row="([^"]+)"/g)].map(m=>control({dailyIndicatorRow:m[1]}));return rows;}
+ if(s==='[data-daily-indicator-range]'){ranges=[...app.innerHTML.matchAll(/data-daily-indicator-range="([^"]+)"/g)].map(m=>control({dailyIndicatorRange:m[1]}));return ranges;}
  return [];
 }};
 globalThis.window={setTimeout:(fn,ms)=>{const t=setTimeout(fn,ms);t.unref();return t;},clearTimeout};
@@ -72,7 +73,10 @@ dates.baseline.value='2026-10-09';dates.baseline.handlers.change();await settle(
 assert(calls.some(c=>c.target.includes('baseline_date=2026-10-09')));assert.match(app.innerHTML,/09\/10\/2026/);
 assert.match(app.innerHTML,/<tr class="daily-selectable-row daily-selected" data-daily-indicator-row="3\.6">/,'Selected chart indicator survives date change');
 const readsBeforeRange=calls.filter(c=>c.target.includes('daily-indicator-comparison')).length;
-dates.baseline.value='2026-10-06';dates.baseline.handlers.change();await settle();
+assert.deepEqual(ranges.map(r=>r.dataset.dailyIndicatorRange),['7'],'Only complete available ranges are offered');
+ranges[0].handlers.click();await settle();
+assert.match(app.innerHTML,/data-daily-indicator-range="7" aria-pressed="true"/);
+assert.match(app.innerHTML,/<tr class="daily-selectable-row daily-selected" data-daily-indicator-row="3\.6">/,'Quick range retains selected chart indicator');
 const rangeChart=app.innerHTML.split('<aside class="daily-indicator-chart"')[1];
 assert.deepEqual([...rangeChart.matchAll(/data-daily-combo-date="([^"]+)"/g)].map(m=>m[1]),Array.from({length:7},(_,i)=>`2026-10-${String(i+6).padStart(2,'0')}`));
 assert.deepEqual([...rangeChart.matchAll(/data-daily-combo-delta="([^"]+)"/g)].map(m=>Number(m[1])),[200,200,200,200,200,200]);

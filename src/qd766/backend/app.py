@@ -57,6 +57,7 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
 
     @app.get("/api/v1/access-policy", tags=["health"])
     def access_policy() -> dict:
+        from .collection_maintenance import user_collection_paused
         return {"publicReadOnly": resolved.public_read_only,
                 "groupExcelExportEnabled": True,
                 "collectionMonitorEnabled": True,
@@ -68,7 +69,7 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
                 **({"sharedRegistrationEnabled": True, "publicRegistrationEnabled": True} if resolved.shared_registration_enabled else {}),
                 "trialCreditManagement": resolved.trial_credit_management,
                 **({"defaultCollectionAccess": True} if resolved.source_wallet_enabled else {}),
-                **({"collectionRequestsPaused": resolved.wallet_requests_paused} if resolved.real_wallet_enabled else {}),
+                **({"collectionRequestsPaused": resolved.wallet_requests_paused or user_collection_paused()} if resolved.real_wallet_enabled else {}),
                 "localSimulation": bool(getattr(app.state, "local_credit_trial", False)),
                 **({"localGoogleTrial": True} if resolved.local_google_trial else {})}
     app.state.engine = engine
@@ -104,6 +105,8 @@ def create_app(settings: Settings | None = None, *, web_root: Path | None = None
     app.add_middleware(DashboardGZipMiddleware)
     app.include_router(auth_router)
     app.include_router(admin_router)
+    from .system_notices import router as system_notices_router
+    app.include_router(system_notices_router)
     from .admin_log_routes import router as admin_log_router
     app.include_router(admin_log_router)
     from .source_monitor_routes import router as source_monitor_router

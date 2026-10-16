@@ -58,6 +58,12 @@ async def enforce_public_read_only(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
+    if path == '/api/v1/me/system-notices' or path.startswith('/api/v1/me/system-notices/'):
+        # These handlers require an admitted account and CSRF for dismissal.
+        response = await call_next(request)
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Referrer-Policy'] = 'no-referrer'
+        return response
     if path=='/api/v1/me/agency-watch':
         if request.method not in {'GET','POST'}:return JSONResponse(status_code=405,content={'detail':'Method not allowed'})
         response=await call_next(request)
